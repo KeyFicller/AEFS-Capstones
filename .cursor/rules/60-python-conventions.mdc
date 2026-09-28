@@ -1,0 +1,40 @@
+---
+description: Python 工程约定——仓库级共享环境、uv 与 requirements.txt、代码风格
+globs: **/*.py
+alwaysApply: false
+---
+
+# 仓库级共享环境（重要）
+
+- **一个共享虚拟环境**：仓库根目录 `.venv`，所有项目通用。
+  **禁止**在子项目里另建 `.venv`。
+- **依赖唯一来源**：仓库根的 `requirements.txt`。新增依赖只改它，不散落到子项目。
+- 本地项目以 editable 方式加入：`-e ./examples/<project>`。
+- 命令（在仓库根执行）：
+
+```bash
+uv venv                              # 建共享虚拟环境（一次）
+uv pip install -r requirements.txt   # 安装
+uv run --no-project pytest <path>    # 运行测试
+```
+
+若装好后 console script 找不到，直接调 `.venv/bin/<script>`。
+
+# 项目布局（每个项目一个顶层目录）
+
+```
+<project>/
+  src/<pkg>/      # 实现
+  tests/          # 单测
+  eval/           # 评测脚本与结果（若适用）
+  PROJECT.md
+  README.md
+  pyproject.toml  # 仅打包/入口点，不声明依赖（依赖在根 requirements.txt）
+```
+
+# 代码风格
+
+- 公开函数 / 类必须有类型注解；禁止用 `Any` 兜底。
+- 用 `logging`，库代码里禁止 `print`（CLI 输出走专用 renderer）。
+- 错误用异常 + 上下文抛出；禁止裸 `except:` 或吞掉异常。
+- 命名与既有代码保持一致；不重构无关代码，不清理非本次改动产生的死代码。

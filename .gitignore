@@ -1,0 +1,9 @@
+# 全局共享虚拟环境（所有项目通用）
+.venv/
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/

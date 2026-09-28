@@ -1,0 +1,7 @@
+# 全局共享依赖 —— 所有项目通用（唯一依赖来源）
+# 安装：uv venv && uv pip install -r requirements.txt
+
+pytest>=8
+
+# 本地项目以 editable 方式安装（新增项目在此追加）
+-e ./examples/hello-agent

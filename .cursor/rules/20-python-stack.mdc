@@ -1,0 +1,22 @@
+---
+description: 全局硬性技术基础——Python / PyTorch / LangChain / LangGraph
+globs: **/*.py
+alwaysApply: false
+---
+
+# 硬性技术基础
+
+所有项目共享此基础，不因项目而变：
+
+- **语言**：Python 为主。
+- **编排**：用 **LangGraph** 表达状态机 / 多 agent / 子图；
+  用 **LangChain** 做 model / tool / retriever 抽象。不要绕过框架手搓调度。
+- **模型访问**：统一走 **OpenRouter**，模型名必须可配置；
+  禁止把某个模型硬编码进业务逻辑。
+- **深度学习**：涉及训练 / 推理 / embedding 用 **PyTorch**，设备与精度可配置，
+  禁止隐式 `.cuda()` 假设。
+- **结构化输出**：计划与工具参数用带 schema 的结构化输出解析，禁止用正则抠 JSON。
+- **可复现**：固定随机种子与依赖版本（`uv.lock` / `pyproject.toml`）。
+
+> 若某项目 spec 指定非 Python 组件（如原生 TUI harness），
+> 该部分单独成 workspace，且不得违反上述基础。

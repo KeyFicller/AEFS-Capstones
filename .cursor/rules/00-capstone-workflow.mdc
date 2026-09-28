@@ -1,0 +1,15 @@
+---
+description: 通用 capstone 工作流——每个项目走同一套生命周期（细节见 skill）
+alwaysApply: true
+---
+
+# Capstone 工作流
+
+本仓库用于完成 AEFS 中选定的 capstone 项目。**每个项目走同一套六步生命周期**：
+接谱 → 设计 → 实现 → 加固 → 评测 → 交付；每步都有验证门槛，未过门槛不进入下一步。
+
+- 项目特有信息一律来自该项目的 `PROJECT.md`；冲突时以 PROJECT.md 为准。
+- 一次聚焦一个项目，每个项目一个顶层目录，依赖与评测互相隔离。
+- 未验证不得宣称完成。
+
+完整的 DoD、反模式与每步验证项见 skill `capstone-workflow`。
