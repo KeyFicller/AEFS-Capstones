@@ -9,7 +9,7 @@ alwaysApply: false
 - **一个共享虚拟环境**：仓库根目录 `.venv`，所有项目通用。
   **禁止**在子项目里另建 `.venv`。
 - **依赖唯一来源**：仓库根的 `requirements.txt`。新增依赖只改它，不散落到子项目。
-- 本地项目以 editable 方式加入：`-e ./examples/<project>`。
+- 本地项目以 editable 方式加入：`-e ./projects/<project>`。
 - 命令（在仓库根执行）：
 
 ```bash

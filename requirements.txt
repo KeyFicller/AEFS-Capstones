@@ -3,5 +3,18 @@
 
 pytest>=8
 
+# Agent 栈：LangGraph 编排 + LangChain 抽象 + DeepSeek provider
+# （provider 与模型名须可配置，见 .cursor/rules/20-python-stack.mdc）
+langchain>=1.4.2
+langgraph>=1.2.12
+langchain-deepseek>=1.1.0
+
+# CLI 渲染（TUI / 专用 renderer；库代码禁止 print，见 .cursor/rules/60-python-conventions.mdc）
+rich>=14
+
+# Notebook 图可视化（IPython.display 渲染 graph 图片）
+ipython>=9.17.1
+
 # 本地项目以 editable 方式安装（新增项目在此追加）
 -e ./examples/hello-agent
+-e ./projects/terminal-coding-agent

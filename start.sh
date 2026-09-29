@@ -17,8 +17,8 @@ usage() {
 用法: ./start.sh <命令> [参数]
 
   setup              创建共享 .venv 并安装 requirements.txt
-  new <name>         从模板创建 examples/<name> 并注册到 requirements.txt
-  test [path]        运行 pytest（默认 examples/）
+  new <name>         从模板创建 projects/<name> 并注册到 requirements.txt
+  test [path]        运行 pytest（默认 examples/ 与 projects/）
   run <cmd...>       在共享环境里执行任意命令
   clean              清理缓存（__pycache__ / .pytest_cache / .ruff_cache）
   help               显示本帮助
@@ -40,16 +40,18 @@ cmd_setup() {
 cmd_new() {
   local name="${1:-}"
   [ -n "$name" ] || { echo "用法: ./start.sh new <name>" >&2; exit 1; }
-  local dest="examples/$name"
+  local dest="projects/$name"
   [ -e "$dest" ] && { echo "$dest 已存在" >&2; exit 1; }
+  mkdir -p projects
   local mod="${name//-/_}"
 
-  log "从模板创建 $dest（模块名 $mod）"
+  # 注意: bash 3.2 在 UTF-8 locale 下, $var 紧跟非 ASCII 字符会把首字节吞进变量名, set -u 即报 unbound; 一律写 ${var}
+  log "从模板创建 ${dest}（模块名 ${mod}）"
   cp -R "$TEMPLATE" "$dest"
   rm -rf "$dest/.pytest_cache" "$dest/.venv"
   mv "$dest/src/hello_agent" "$dest/src/$mod"
   find "$dest" -type f \( -name '*.py' -o -name '*.toml' -o -name '*.md' \) -print0 \
-    | xargs -0 sed -i.bak -e "s/hello_agent/$mod/g" -e "s/hello-agent/$name/g"
+    | xargs -0 sed -i.bak -e "s/hello_agent/$mod/g" -e "s/hello-agent/$name/g" -e "s#examples/$name#projects/$name#g"
   find "$dest" -name '*.bak' -delete
 
   grep -qF -- "-e ./$dest" "$REQ" || printf -- "-e ./%s\n" "$dest" >> "$REQ"
@@ -59,9 +61,18 @@ cmd_new() {
 
 cmd_test() {
   ensure_uv
-  local target="${1:-examples/}"
-  log "pytest $target"
-  uv run --no-project pytest "$target"
+  local targets=()
+  if [ "$#" -ge 1 ]; then
+    targets=("$1")
+  else
+    local d
+    for d in examples projects; do
+      [ -d "$d" ] && targets+=("$d")
+    done
+  fi
+  log "pytest ${targets[*]}"
+  # --import-mode=importlib: 多个项目下同名 test_*.py 不会互相冲突
+  uv run --no-project pytest --import-mode=importlib "${targets[@]}"
 }
 
 cmd_run() {
