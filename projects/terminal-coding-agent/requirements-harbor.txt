@@ -3,3 +3,5 @@ langchain>=1.4.2
 langgraph>=1.2.12
 langchain-deepseek>=1.1.0
 rich>=14
+opentelemetry-api>=1.27.0
+opentelemetry-sdk>=1.27.0

@@ -14,14 +14,18 @@ from terminal_coding_agent.state import (
     ToDoStatus,
     usage_tokens,
 )
+from terminal_coding_agent.telemetry.chat import chat_span, record_chat_usage, resolve_model_name
 
 
 def build_planner(models: AgentModels) -> Callable[[CodingAgentState], dict[str, Any]]:
     """Return a plain node function (not a nested graph) to avoid double replace_todos."""
     planner_model = models.planner.with_structured_output(Plan, include_raw=True)
+    model_name = resolve_model_name(models.planner)
 
     def make_plan(state: CodingAgentState) -> dict[str, Any]:
-        response = planner_model.invoke(state["messages"])
+        with chat_span(model_name) as span:
+            response = planner_model.invoke(state["messages"])
+            record_chat_usage(span, response["raw"], model=model_name)
         parsed: Plan = response["parsed"]
 
         def format_steps(plan: Plan) -> str:

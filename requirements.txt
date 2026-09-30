@@ -12,6 +12,10 @@ langchain-deepseek>=1.1.0
 # CLI 渲染（TUI / 专用 renderer；库代码禁止 print，见 .cursor/rules/60-python-conventions.mdc）
 rich>=14
 
+# OpenTelemetry（gen_ai spans；本地 TracerProvider / InMemory 测试）
+opentelemetry-api>=1.27.0
+opentelemetry-sdk>=1.27.0
+
 # Notebook 图可视化（IPython.display 渲染 graph 图片）
 ipython>=9.17.1
 

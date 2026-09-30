@@ -19,9 +19,11 @@ from terminal_coding_agent.budget import (
 )
 from terminal_coding_agent.config import PRECOMPACT_TOKENS
 from terminal_coding_agent.middleware.budget import BudgetMiddleware
+from terminal_coding_agent.middleware.observability import ObservabilityMiddleware
 from terminal_coding_agent.middleware.safety import SafetyMiddleware
 from terminal_coding_agent.models import SYSTEM_PROMPTS, AgentModels
 from terminal_coding_agent.state import CodingAgentState, ToDoStatus
+from terminal_coding_agent.telemetry.chat import resolve_model_name
 
 
 def _trace_path(worktree: Path) -> Path:
@@ -93,6 +95,7 @@ def build_execute_nodes(
                 SummarizationMiddleware(
                     models.executor, trigger=("tokens", PRECOMPACT_TOKENS)
                 ),
+                ObservabilityMiddleware(resolve_model_name(models.executor)),
                 SafetyMiddleware(),
             ],
         )

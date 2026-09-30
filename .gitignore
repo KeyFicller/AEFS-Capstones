@@ -16,3 +16,6 @@ docs/
 
 # Docker build jobs
 jobs/
+
+# Local OTel demo export
+projects/*/otel.jsonl

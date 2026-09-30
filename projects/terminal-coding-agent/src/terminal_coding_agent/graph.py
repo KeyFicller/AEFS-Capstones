@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
+from opentelemetry import trace
 
 from terminal_coding_agent.config import ENV_PATH, load_local_env
 from terminal_coding_agent.demo import DEMO_TASK, seed_demo_worktree
@@ -17,7 +19,12 @@ from terminal_coding_agent.models import build_models
 from terminal_coding_agent.planner import build_planner
 from terminal_coding_agent.state import CodingAgentState, ToDoStatus, usage_tokens
 from terminal_coding_agent.tools import make_tools
+from terminal_coding_agent.telemetry import chat_span, setup_tracing
+from terminal_coding_agent.telemetry.chat import record_chat_usage, resolve_model_name
+from terminal_coding_agent.telemetry.setup import otel_jsonl_path
 
+# projects/terminal-coding-agent (not the monorepo root)
+_AGENT_PROJECT_DIR = Path(__file__).resolve().parents[2]
 
 def make_graph(config: RunnableConfig) -> CompiledStateGraph:
     """Assemble the top-level graph with IN_PROGRESS committed before the agent runs."""
@@ -25,6 +32,8 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
 
     raw = (config.get("configurable") or {}).get("worktree")
     worktree = Path(raw).resolve() if raw else Path.cwd().resolve()
+
+    setup_tracing(worktree=worktree)
 
     # Plain function node (not a nested StateGraph) so replace_todos does not fire twice.
     make_plan = build_planner(models)
@@ -51,7 +60,10 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
     def summary(state: CodingAgentState) -> dict:
         summary_message = HumanMessage(content="Summarize the task.")
         summary_input = state["messages"] + [summary_message]
-        summary_response = models.planner.invoke(summary_input)
+        model_name = resolve_model_name(models.planner)
+        with chat_span(model_name) as span:
+            summary_response = models.planner.invoke(summary_input)
+            record_chat_usage(span, summary_response, model=model_name)
         return {
             "messages": [summary_message, summary_response],
             "turns": state.get("turns", 0) + 1,
@@ -104,3 +116,17 @@ if __name__ == "__main__":
         print(f"cost_usd:          {response.get('cost_usd', 0.0):.6f}")
         print(f"stop_reason:       {response.get('stop_reason')}")
         print("----------------------")
+
+        provider = trace.get_tracer_provider()
+        if hasattr(provider, "force_flush"):
+            provider.force_flush()
+        if hasattr(provider, "shutdown"):
+            provider.shutdown()
+
+        src = otel_jsonl_path(worktree)
+        dst = Path(str(_AGENT_PROJECT_DIR).rstrip("/") + "/otel.jsonl")
+        if src.is_file():
+            shutil.copy2(src, dst)
+            print(f"otel spans copied to {dst}")
+        else:
+            print(f"otel span file missing: {src}")
