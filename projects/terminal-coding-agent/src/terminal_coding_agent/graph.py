@@ -8,17 +8,25 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from terminal_coding_agent.config import ENV_PATH, load_local_env
+from terminal_coding_agent.demo import DEMO_TASK, seed_demo_worktree
 from terminal_coding_agent.executor import build_executor
 from terminal_coding_agent.models import build_models
 from terminal_coding_agent.planner import build_planner
 from terminal_coding_agent.state import CodingAgentState, ToDoStatus, usage_tokens
+from terminal_coding_agent.tools import make_tools
+from pathlib import Path
+import tempfile
 
 
 def make_graph(config: RunnableConfig) -> CompiledStateGraph:
     """Assemble the top-level graph: make_plan -> execute_task (looped) -> summary."""
     models = build_models(config)
+    
+    raw = (config.get("configurable") or {}).get("worktree")
+    worktree = Path(raw).resolve() if raw else Path.cwd().resolve()
+
     planner = build_planner(models)
-    executor = build_executor(models)
+    executor = build_executor(models, make_tools(worktree))
 
     coding_agent = StateGraph(CodingAgentState)
 
@@ -72,19 +80,10 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
 
 if __name__ == "__main__":
     load_local_env(ENV_PATH)
-    agent = make_graph({})
-    response = agent.invoke(
-        {
-            "messages": [
-                HumanMessage(
-                    content=(
-                        "Create a Python script that prints 'Hello LangChain'. "
-                        "Then run the script to veirfy the result."
-                    )
-                )
-            ]
-        }
-    )
-
-    for message in response["messages"]:
-        message.pretty_print()
+    with tempfile.TemporaryDirectory() as temp_dir:
+        worktree = Path(temp_dir)
+        seed_demo_worktree(worktree)
+        agent = make_graph({"configurable": {"worktree": str(worktree)}})
+        response = agent.invoke({"messages": [HumanMessage(content=DEMO_TASK)]})
+        for message in response["messages"]:
+            message.pretty_print()

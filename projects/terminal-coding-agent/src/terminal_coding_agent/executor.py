@@ -8,18 +8,12 @@ from langgraph.graph.state import CompiledStateGraph
 
 from terminal_coding_agent.models import SYSTEM_PROMPTS, AgentModels
 from terminal_coding_agent.state import CodingAgentState, ToDoStatus, usage_tokens
-from terminal_coding_agent.tools import create_file, run_script, verify_script
-
-TOOLS_BY_NAME = {
-    "create_file": create_file,
-    "run_script": run_script,
-    "verify_script": verify_script,
-}
 
 
-def build_executor(models: AgentModels) -> CompiledStateGraph:
+def build_executor(models: AgentModels, tools: list) -> CompiledStateGraph:
     """Build the execution subgraph: start_task -> (ask_llm <-> use_tool)* -> end_task."""
-    executor_model = models.executor.bind_tools(list(TOOLS_BY_NAME.values()))
+    tools_map = {t.name: t for t in tools}
+    executor_model = models.executor.bind_tools(tools)
 
     def start_task(state: CodingAgentState) -> dict:
         task_index = next(
@@ -51,27 +45,24 @@ def build_executor(models: AgentModels) -> CompiledStateGraph:
         }
 
     def use_tool(state: CodingAgentState) -> dict:
-        tool_request = state["current_task_messages"][-1].tool_calls[0]
+        last = state["current_task_messages"][-1]
+        tool_messages: list[ToolMessage] = []
+        for tool_request in last.tool_calls:
+            tool_name = tool_request["name"]
+            tool_args = tool_request["args"]
+            tool = tools_map.get(tool_name)
+            if tool is None:
+                result = f"Error: unknown tool: {tool_name}"
+            else:
+                result = tool.invoke(tool_args)
+            tool_messages.append(
+                ToolMessage(content=str(result), tool_call_id=tool_request["id"])
+            )
 
-        tool_name = tool_request["name"]
-        tool_args = tool_request["args"]
-
-        tool = TOOLS_BY_NAME[tool_name]
-        result = tool.invoke(tool_args)
-        response = ToolMessage(content=result, tool_call_id=tool_request["id"])
-
-        update = {
-            "current_task_messages": state["current_task_messages"] + [response],
-            "messages": [response],
+        return {
+            "current_task_messages": state["current_task_messages"] + tool_messages,
+            "messages": tool_messages,
         }
-
-        if tool_name == "verify_script":
-            todo_list = list(state["todo_list"])
-            current_task = todo_list[state["current_task_index"]]
-            current_task.status = ToDoStatus.FAILED if result == "Failed" else ToDoStatus.DONE
-            update["todo_list"] = todo_list
-
-        return update
 
     def end_task(state: CodingAgentState) -> dict:
         todo_list = list(state["todo_list"])

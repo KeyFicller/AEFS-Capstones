@@ -23,7 +23,7 @@ uv run --no-project python projects/terminal-coding-agent/eval/run_eval.py  # �
 | `requirements.txt`（仓库根） | `60-python-conventions`：全局依赖唯一来源 |
 | `PROJECT.md` | `10-project-profile`：项目特有信息 |
 | `src/terminal_coding_agent/loop.py` | `30-agent-architecture`：plan/act/observe/recover |
-| `src/terminal_coding_agent/tools.py` | `20-python-stack`：工具是唯一副作用边界 |
+| `src/terminal_coding_agent/tools/` | `20-python-stack`：工具是唯一副作用边界 |
 | `tests/` | `60-python-conventions`、`70-eval-and-verification` |
 | `eval/` | `70-eval-and-verification`：指标落盘 |
 

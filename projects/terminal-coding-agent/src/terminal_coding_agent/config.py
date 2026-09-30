@@ -6,7 +6,9 @@ import os
 from pathlib import Path
 
 MODEL = "deepseek:deepseek-v4-flash"
-SCRIPT_TIMEOUT_SECONDS = 60
+SHELL_TIMEOUT_SECONDS = 60
+TOOL_OUTPUT_TOKEN_LIMIT = 4000
+CHARS_PER_TOKEN_APPROX = 4
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 ENV_PATH = PROJECT_ROOT / "local.env"

@@ -1,0 +1,9 @@
+{
+  "graphs": {
+    "coding_agent": "./src/terminal_coding_agent/graph.py:make_graph"
+  },
+  "dependencies": [
+    "requirements-harbor.txt",
+    "."
+  ]
+}

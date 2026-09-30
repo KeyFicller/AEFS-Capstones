@@ -42,12 +42,13 @@
 
 | 环节 | 契约 |
 | --- | --- |
-| 注册 | 根目录 `langgraph.json` → `{"graphs": {"<name>": "./file.py:<attr>"}}`；`<attr>` 可为已编译 graph，或工厂 `make_graph(config)` |
+| 注册 | 项目根 `langgraph.json` → `{"graphs": {"<name>": "./file.py:<attr>"}}`；`<attr>` 可为已编译 graph，或工厂 `make_graph(config)`；Harbor `project_path` 默认为 cwd，须显式指向本项目目录 |
 | 调用 | `graph.ainvoke({"messages": [...]}, config={"configurable": {...}})`；state **必须含 `messages`** |
 | 返回 | 最终答案取 `result["messages"][-1].content` |
 | 模型注入 | `model` / `model_kwargs` / `thread_id` 都在 `configurable` → 从 config 读，**禁止在 import 期固化** |
+| worktree | Harbor **不**默认注入 `configurable.worktree`；切片约定缺失时回退 `Path.cwd()`（任务工作目录，不是 `/installed-agent/langgraph-project`） |
 | token 记账 | runner 自动累加 `result["messages"]` 的 `usage_metadata` |
-| 运行位置 | 项目 copytree 进容器；容器内 venv 为 `/opt/harbor-langgraph-venv`，**Python 3.12** |
+| 运行位置 | 项目 copytree 进容器 `/installed-agent/langgraph-project`；容器内 venv 为 `/opt/harbor-langgraph-venv`，**Python 3.12**；**不会**带上仓库根 `requirements.txt`，项目须可自安装 |
 
 ## 技术栈
 
@@ -84,19 +85,40 @@
 
 ## 交付物
 
-**MVP**
+**Harbor 垂直切片（已验证 2026-09-30）**
+
+- 手写任务 `harbor_tasks/greeter-fix` + 项目根 `langgraph.json` + `requirements-harbor.txt`；`harbor run -a langgraph` 在 Docker trial 内调起本项目 `make_graph`，verifier `reward=1`（**不是** SWE-bench Pro 进度）。
+- 仓库根复现命令（cwd = 仓库根；job 落在仓库根 `jobs/`，该目录 gitignore）：
+  ```bash
+  export PATH="$HOME/.local/bin:$PATH"
+  set -a; source local.env; set +a
+  harbor run \
+    -p projects/terminal-coding-agent/harbor_tasks/greeter-fix \
+    -a langgraph \
+    -m deepseek:deepseek-v4-flash \
+    --ae DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
+    --allow-agent-host api.deepseek.com \
+    -k 1 \
+    --ak project_path="$(pwd)/projects/terminal-coding-agent"
+  ```
+  - **凭据必须用长选项 `--ae`**：短写 `-ae` 会被 Click 拆成 `-a/-e`，把 `KEY=value` 当多余参数并可能把 key 打进错误信息。
+  - `langgraph` 未声明 `MODEL_CONNECTION`，Harbor **不会**自动转发 `DEEPSEEK_API_KEY`；`--env-file` 只喂宿主机 harness，不进容器。
+  - 必须显式 `--ak project_path=...`（默认是 cwd，不是本项目目录）。
+  - `--allow-agent-host api.deepseek.com` 固定带上；任务 `network_mode=public` 时只 warning 并被忽略，`allowlist` 时则必需。
+  - worktree：Harbor 不默认注入 `configurable.worktree`；缺失时 `make_graph` 回退 `Path.cwd()`（任务工作目录）。
+
+**MVP（尚未完成）**
 
 - `langgraph.json` + graph（四段 + ≥4 hook + 6 工具）+ 含 `messages` 的 state schema
-- 命令：
+- 目标命令形态（真实 SWE-bench Pro 任务；flags 与切片相同，路径/`-i` 换成实例）：
   ```bash
+  export PATH="$HOME/.local/bin:$PATH"
   set -a; source local.env; set +a
   harbor run -p <v2/tasks> -a langgraph -m deepseek:deepseek-v4-flash \
-    -ae DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
-    --allow-agent-host api.deepseek.com -k 1 -i <instance_id>
+    --ae DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
+    --allow-agent-host api.deepseek.com -k 1 -i <instance_id> \
+    --ak project_path="$(pwd)/projects/terminal-coding-agent"
   ```
-  - **凭据只能走 `-ae`**：`langgraph` 未声明 `MODEL_CONNECTION`（`agents/base.py:279` 因此返回空连接），Harbor **不会**自动转发 `DEEPSEEK_API_KEY`；`--env-file` 只喂宿主机 harness 进程（`cli/jobs.py:1443` `load_dotenv(..., override=True)`），不进容器。
-  - `--allow-agent-host api.deepseek.com` 固定带上。任务 `network_mode=public` 时它只触发一条 `UserWarning` 并被忽略（`trial/network_policy.py` `merge_extra_allowlists`），**不报错**；`allowlist` 时则是必需项。host 取自 `langchain_deepseek` 的 `DEFAULT_API_BASE`，`/v1` 与 `/beta` 同 host。
-  - `-m` 用带前缀形式：`init_chat_model` 从该字符串显式解析 provider，不依赖容器内 langchain 版本的推断表。
 - 验证证据：1 个真实 SWE-bench Pro 任务的完整 job 目录（`result.json` + agent 轨迹 + verifier 输出），且 `pass@1 = 1` 或给出失败模式分析
 
 **完整交付（MVP 后补齐）**

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum, auto
+from typing import Annotated
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import MessagesState
@@ -31,11 +32,28 @@ class Plan(BaseModel):
     task: str = Field(description="The task to complete")
     steps: list[str] = Field(description="The steps to complete the task")
 
+def replace_todos(old: list[ToDoItem], new: list[ToDoItem]) -> list[ToDoItem]:
+
+    MARKERS: dict[ToDoStatus, str] = {
+        ToDoStatus.PENDING: "[-]",
+        ToDoStatus.IN_PROGRESS: "[+]",
+        ToDoStatus.DONE: "[✓]",
+        ToDoStatus.FAILED: "[✗]",
+    }
+
+    if old != new:
+        print("------ Execute State Update --------")
+        for todo in new:
+            print(f"{MARKERS[todo.status]}  {todo.description}")
+        print("------------------------------------")
+
+
+    return new
 
 class CodingAgentState(MessagesState):
     """State shared by the top-level graph and its subgraphs."""
 
-    todo_list: list[ToDoItem]
+    todo_list: Annotated[list[ToDoItem], replace_todos]
     turns: int
     tokens: int
     current_task_index: int | None = None

@@ -1,0 +1,1 @@
+fix `Helo` → `Hello`, verify with `python greeter.py`
