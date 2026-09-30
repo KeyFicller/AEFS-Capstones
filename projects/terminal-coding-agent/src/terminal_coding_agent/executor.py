@@ -9,6 +9,7 @@ from typing import Any, Callable
 from langchain.agents import create_agent
 from langchain.agents.middleware import SummarizationMiddleware
 from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.runnables import RunnableConfig
 
 from terminal_coding_agent.budget import (
     budget_updates,
@@ -74,7 +75,7 @@ def build_execute_nodes(
             "current_task_index": task_index,
         }
 
-    def run_agent(state: CodingAgentState) -> dict[str, Any]:
+    def run_agent(state: CodingAgentState, config: RunnableConfig) -> dict[str, Any]:
         if state.get("stop_reason"):
             return {}
 
@@ -99,7 +100,8 @@ def build_execute_nodes(
             ],
         )
         result = agent.invoke(
-            {"messages": [HumanMessage(content=todo_list[task_index].description)]}
+            {"messages": [HumanMessage(content=todo_list[task_index].description)]},
+            config=config,
         )
         agent_messages = result.get("messages") if isinstance(result, dict) else []
         final = _final_agent_message(list(agent_messages))

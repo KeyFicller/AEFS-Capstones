@@ -12,20 +12,25 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from opentelemetry import trace
 
+from terminal_coding_agent.budget import BudgetSession
 from terminal_coding_agent.config import ENV_PATH, load_local_env
 from terminal_coding_agent.demo import DEMO_TASK, seed_demo_worktree
 from terminal_coding_agent.executor import build_execute_nodes
-from terminal_coding_agent.budget import BudgetSession
 from terminal_coding_agent.models import build_models
 from terminal_coding_agent.planner import build_planner
 from terminal_coding_agent.state import CodingAgentState, ToDoStatus
-from terminal_coding_agent.tools import make_tools
 from terminal_coding_agent.telemetry import chat_span, setup_tracing
 from terminal_coding_agent.telemetry.chat import record_chat_usage, resolve_model_name
+from terminal_coding_agent.telemetry.langfuse_callback import (
+    flush_langfuse,
+    langfuse_callback_handler,
+)
 from terminal_coding_agent.telemetry.setup import otel_jsonl_path
+from terminal_coding_agent.tools import make_tools
 
 # projects/terminal-coding-agent (not the monorepo root)
 _AGENT_PROJECT_DIR = Path(__file__).resolve().parents[2]
+
 
 def make_graph(config: RunnableConfig) -> CompiledStateGraph:
     """Assemble the top-level graph with IN_PROGRESS committed before the agent runs."""
@@ -58,13 +63,13 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
             return "summary"
         return "run_agent"
 
-    def summary(state: CodingAgentState) -> dict:
+    def summary(state: CodingAgentState, config: RunnableConfig) -> dict:
         summary_message = HumanMessage(content="Summarize the task.")
         summary_input = state["messages"] + [summary_message]
         model_name = resolve_model_name(models.planner)
         with BudgetSession(state) as budget:
             with chat_span(model_name) as span:
-                summary_response = models.planner.invoke(summary_input)
+                summary_response = models.planner.invoke(summary_input, config=config)
                 record_chat_usage(span, summary_response, model=model_name)
             budget.observe(summary_response)
             domain = {"messages": [summary_message, summary_response]}
@@ -95,16 +100,36 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
     )
     coding_agent.add_edge("summary", END)
 
-    return coding_agent.compile()
+    compiled = coding_agent.compile()
+    handler = langfuse_callback_handler()
+    if handler is None:
+        return compiled
+    # Framework integration: callbacks propagate into nested create_agent / model invokes.
+    return compiled.with_config(
+        {
+            "callbacks": [handler],
+            "run_name": "terminal-coding-agent",
+        }
+    )
 
 
 if __name__ == "__main__":
+    # Env must load before Langfuse client init (skill: import order).
     load_local_env(ENV_PATH)
     with tempfile.TemporaryDirectory() as temp_dir:
         worktree = Path(temp_dir)
         seed_demo_worktree(worktree)
         agent = make_graph({"configurable": {"worktree": str(worktree)}})
-        response = agent.invoke({"messages": [HumanMessage(content=DEMO_TASK)]})
+
+        from langfuse import propagate_attributes
+
+        with propagate_attributes(
+            trace_name="terminal-coding-agent-demo",
+            tags=["terminal-coding-agent", "demo", "langgraph"],
+            metadata={"framework": "langgraph", "role": "demo"},
+        ):
+            response = agent.invoke({"messages": [HumanMessage(content=DEMO_TASK)]})
+
         for message in response["messages"]:
             message.pretty_print()
         print("------ Budget --------")
@@ -122,6 +147,7 @@ if __name__ == "__main__":
             provider.force_flush()
         if hasattr(provider, "shutdown"):
             provider.shutdown()
+        flush_langfuse()
 
         src = otel_jsonl_path(worktree)
         dst = Path(str(_AGENT_PROJECT_DIR).rstrip("/") + "/otel.jsonl")

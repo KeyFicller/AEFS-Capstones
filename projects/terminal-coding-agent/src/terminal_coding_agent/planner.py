@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from langchain_core.messages import AIMessage
+from langchain_core.runnables import RunnableConfig
 
 from terminal_coding_agent.budget import BudgetSession
 from terminal_coding_agent.models import AgentModels
@@ -17,15 +18,15 @@ from terminal_coding_agent.state import (
 from terminal_coding_agent.telemetry.chat import chat_span, record_chat_usage, resolve_model_name
 
 
-def build_planner(models: AgentModels) -> Callable[[CodingAgentState], dict[str, Any]]:
+def build_planner(models: AgentModels) -> Callable[..., dict[str, Any]]:
     """Return a plain node function (not a nested graph) to avoid double replace_todos."""
     planner_model = models.planner.with_structured_output(Plan, include_raw=True)
     model_name = resolve_model_name(models.planner)
 
-    def make_plan(state: CodingAgentState) -> dict[str, Any]:
+    def make_plan(state: CodingAgentState, config: RunnableConfig) -> dict[str, Any]:
         with BudgetSession(state) as budget:
             with chat_span(model_name) as span:
-                response = planner_model.invoke(state["messages"])
+                response = planner_model.invoke(state["messages"], config=config)
                 record_chat_usage(span, response["raw"], model=model_name)
             budget.observe(response["raw"])
             parsed: Plan = response["parsed"]

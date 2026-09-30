@@ -58,7 +58,7 @@
 - **搜索**：ripgrep 子进程 + tree-sitter（预编译）
 - **沙箱 / 评测**：**Harbor 0.23.0**（`uv tool install harbor`，落在 `~/.local/bin`，**默认不在 PATH**）；`--env docker` 为本地默认，`daytona` / `e2b` / `modal` / `runloop` 为云端备选
 - **基线**：Harbor 内置 `-a mini-swe-agent`
-- **可观测性**：OTel `gen_ai.*` 语义约定 → 自托管 Langfuse
+- **可观测性**：OTel `gen_ai.*` → 本地 `{worktree}/.agent/otel.jsonl`；Langfuse 主路径为 LangChain `CallbackHandler`（`LANGFUSE_PUBLIC_KEY`/`SECRET_KEY`/`BASE_URL`）。可选 `LANGFUSE_OTLP=1` 再挂原始 OTLP（默认关，避免与 Callback 双写）。
 - **PR 发布**：细粒度 token 的 GitHub App，作用域限目标仓库（MVP 后补）
 
 ## 指标与基线
