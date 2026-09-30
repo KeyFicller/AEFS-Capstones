@@ -19,3 +19,6 @@ jobs/
 
 # Local OTel demo export
 projects/*/otel.jsonl
+
+# VsCode 
+.vscode/
