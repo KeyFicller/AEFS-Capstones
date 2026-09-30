@@ -22,7 +22,7 @@ def test_budget_session_applies_usage_on_exit() -> None:
     assert updates["input_tokens"] == 10
     assert updates["output_tokens"] == 3
     assert updates["cache_read_tokens"] == 2
-    assert updates["cost_usd"] > 0
+    assert updates["cost_rmb"] > 0
     assert updates["stop_reason"] is None
 
 

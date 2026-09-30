@@ -23,6 +23,10 @@ SYSTEM_PROMPTS = {
     "executor": """
     You are a helpful assistant that helps the user to execute the task.
     The user will provide you with a task step and you will need to execute.
+
+    If the step cannot be completed after a genuine attempt, call the
+    `report_blocked` tool with the failing command and its error instead of
+    retrying the same command or guessing.
     """,
 }
 

@@ -16,19 +16,21 @@ from terminal_coding_agent.budget import (
     check,
     ledger_from_state,
     summarize_todos,
+    trace_path,
     write_trace,
 )
 from terminal_coding_agent.config import PRECOMPACT_TOKENS
-from terminal_coding_agent.middleware.budget import BudgetMiddleware
-from terminal_coding_agent.middleware.observability import ObservabilityMiddleware
-from terminal_coding_agent.middleware.safety import SafetyMiddleware
+from terminal_coding_agent.middleware import (
+    BlockedReportMiddleware,
+    BudgetMiddleware,
+    ObservabilityMiddleware,
+    SafetyMiddleware,
+    SequenceMiddleware,
+)
 from terminal_coding_agent.models import SYSTEM_PROMPTS, AgentModels
-from terminal_coding_agent.state import CodingAgentState, ToDoStatus
-from terminal_coding_agent.telemetry.chat import resolve_model_name
-
-
-def _trace_path(worktree: Path) -> Path:
-    return worktree / ".agent" / "trace.json"
+from terminal_coding_agent.recover import project_evidence
+from terminal_coding_agent.state import CodingAgentState, ToDoStatus, tag_replan_version
+from terminal_coding_agent.telemetry import resolve_model_name
 
 
 def _final_agent_message(agent_messages: list) -> AIMessage | None:
@@ -40,20 +42,27 @@ def _final_agent_message(agent_messages: list) -> AIMessage | None:
 
 
 def build_execute_nodes(
-    models: AgentModels, tools: list, *, worktree: Path
+    models: AgentModels,
+    tools: list,
+    *,
+    worktree: Path,
+    sequence_events: list | None = None,
 ) -> dict[str, Callable[[CodingAgentState], dict[str, Any]]]:
     """Three parent-graph nodes so IN_PROGRESS is committed (and printed) before the agent runs."""
 
-    trace = _trace_path(worktree)
+    trace = trace_path(worktree)
 
     def start_task(state: CodingAgentState) -> dict[str, Any]:
         ledger = ledger_from_state(state)
         todos = summarize_todos(state.get("todo_list") or [])
 
+        # A new task starts unblocked: the block report belongs to the task that just ended.
+        clear_block = {"blocked_reason": None, "blocked_evidence": []}
+
         if reason := check(ledger):
             ledger.stop_reason = reason
             write_trace(trace, ledger, todo_list=todos, stop_reason=reason)
-            return {**budget_updates(ledger), "stop_reason": reason}
+            return {**budget_updates(ledger), **clear_block, "stop_reason": reason}
 
         task_index = next(
             (
@@ -71,8 +80,9 @@ def build_execute_nodes(
             todo_list[task_index], status=ToDoStatus.IN_PROGRESS
         )
         return {
-            "todo_list": todo_list,
+            "todo_list": tag_replan_version(todo_list, state.get("replan_count", 0)),
             "current_task_index": task_index,
+            **clear_block,
         }
 
     def run_agent(state: CodingAgentState, config: RunnableConfig) -> dict[str, Any]:
@@ -97,15 +107,27 @@ def build_execute_nodes(
                 ),
                 ObservabilityMiddleware(resolve_model_name(models.executor)),
                 SafetyMiddleware(),
+                BlockedReportMiddleware(),
+                SequenceMiddleware(
+                    sequence_events,
+                    description=todo_list[task_index].description,
+                ),
             ],
         )
         result = agent.invoke(
             {"messages": [HumanMessage(content=todo_list[task_index].description)]},
             config=config,
         )
-        agent_messages = result.get("messages") if isinstance(result, dict) else []
-        final = _final_agent_message(list(agent_messages))
+        agent_messages = list(result.get("messages") or [])
         updates: dict[str, Any] = {**budget_updates(ledger)}
+
+        blocked_reason = result.get("blocked_reason")
+        if blocked_reason:
+            updates["blocked_reason"] = blocked_reason
+            updates["blocked_evidence"] = project_evidence(agent_messages)
+            return updates
+
+        final = _final_agent_message(list(agent_messages))
         if final is not None:
             updates["messages"] = [final]
         return updates
@@ -116,7 +138,8 @@ def build_execute_nodes(
         todo_list = list(state.get("todo_list") or [])
 
         if task_index is not None and todo_list:
-            final_status = ToDoStatus.FAILED if ledger.stop_reason else ToDoStatus.DONE
+            blocked = bool(state.get("blocked_reason"))
+            final_status = ToDoStatus.FAILED if (ledger.stop_reason or blocked) else ToDoStatus.DONE
             todo_list[task_index] = replace(todo_list[task_index], status=final_status)
             current = todo_list[task_index]
             outcome = (
@@ -128,11 +151,11 @@ def build_execute_nodes(
                 trace,
                 ledger,
                 todo_list=summarize_todos(todo_list),
-                stop_reason=ledger.stop_reason or "completed",
+                stop_reason=ledger.stop_reason or ("blocked" if blocked else "completed"),
             )
             return {
                 **budget_updates(ledger),
-                "todo_list": todo_list,
+                "todo_list": tag_replan_version(todo_list, state.get("replan_count", 0)),
                 "messages": [
                     AIMessage(content=f"Task {current.description} {outcome}.")
                 ],

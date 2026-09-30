@@ -69,7 +69,7 @@ def test_wrap_model_call_applies_usage_from_model_response() -> None:
     assert ledger.input_tokens == 100
     assert ledger.output_tokens == 20
     assert ledger.cache_read_tokens == 40
-    assert ledger.cost_usd > 0
+    assert ledger.cost_rmb > 0
 
 
 def test_after_agent_does_not_write_trace(tmp_path: Path) -> None:

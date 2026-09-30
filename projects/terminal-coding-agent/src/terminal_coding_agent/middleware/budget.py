@@ -39,7 +39,7 @@ class BudgetMiddleware(AgentMiddleware):
             "input_tokens": self.ledger.input_tokens,
             "output_tokens": self.ledger.output_tokens,
             "cache_read_tokens": self.ledger.cache_read_tokens,
-            "cost_usd": self.ledger.cost_usd,
+            "cost_rmb": self.ledger.cost_rmb,
         }
         for key, value in defaults.items():
             if key not in state:

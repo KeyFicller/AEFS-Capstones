@@ -18,7 +18,7 @@ class BudgetLedger:
     input_tokens: int = 0
     output_tokens: int = 0
     cache_read_tokens: int = 0
-    cost_usd: float = 0.0
+    cost_rmb: float = 0.0
     stop_reason: str | None = None
 
 
@@ -28,6 +28,11 @@ def summarize_todos(todo_list: Sequence[ToDoItem]) -> list[dict[str, str]]:
         {"description": item.description, "status": item.status.name}
         for item in todo_list
     ]
+
+
+def trace_path(worktree: Path) -> Path:
+    """Where the Stop trace is written: {worktree}/.agent/trace.json."""
+    return worktree / ".agent" / "trace.json"
 
 
 def price_usage(*, input_tokens: int, output_tokens: int, cache_read_tokens: int) -> float:
@@ -45,7 +50,7 @@ def check(ledger: BudgetLedger) -> str | None:
         return "max_turns"
     if ledger.tokens >= config.MAX_CONTEXT_TOKENS:
         return "max_tokens"
-    if ledger.cost_usd >= config.MAX_COST_USD:
+    if ledger.cost_rmb >= config.MAX_COST_RMB:
         return "max_cost"
     return None
 
@@ -62,7 +67,7 @@ def apply_usage(
     ledger.output_tokens += output_tokens
     ledger.cache_read_tokens += cache_read_tokens
     ledger.tokens += input_tokens + output_tokens
-    ledger.cost_usd += price_usage(
+    ledger.cost_rmb += price_usage(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         cache_read_tokens=cache_read_tokens,
@@ -93,7 +98,7 @@ def ledger_from_state(state: dict[str, Any]) -> BudgetLedger:
         input_tokens=state.get("input_tokens", 0),
         output_tokens=state.get("output_tokens", 0),
         cache_read_tokens=state.get("cache_read_tokens", 0),
-        cost_usd=state.get("cost_usd", 0.0),
+        cost_rmb=state.get("cost_rmb", 0.0),
         stop_reason=state.get("stop_reason"),
     )
 
@@ -105,7 +110,7 @@ def budget_updates(ledger: BudgetLedger) -> dict[str, Any]:
         "input_tokens": ledger.input_tokens,
         "output_tokens": ledger.output_tokens,
         "cache_read_tokens": ledger.cache_read_tokens,
-        "cost_usd": ledger.cost_usd,
+        "cost_rmb": ledger.cost_rmb,
         "stop_reason": ledger.stop_reason,
     }
 

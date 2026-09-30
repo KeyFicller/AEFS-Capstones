@@ -21,7 +21,7 @@ def test_price_usage_includes_cache_read():
 def test_check_trips_each_fuse():
     assert check(BudgetLedger(turns=50)) == "max_turns"
     assert check(BudgetLedger(tokens=200_000)) == "max_tokens"
-    assert check(BudgetLedger(cost_usd=5.0)) == "max_cost"
+    assert check(BudgetLedger(cost_rmb=config.MAX_COST_RMB)) == "max_cost"
     assert check(BudgetLedger()) is None
 
 
@@ -30,12 +30,12 @@ def test_apply_usage_increments_turn_and_cost():
     apply_usage(led, input_tokens=1000, output_tokens=0, cache_read_tokens=0)
     assert led.turns == 1
     assert led.input_tokens == 1000
-    assert led.cost_usd > 0
+    assert led.cost_rmb > 0
 
 
 def test_write_trace(tmp_path: Path):
     path = tmp_path / ".agent" / "trace.json"
-    led = BudgetLedger(turns=3, cost_usd=0.01, stop_reason="completed")
+    led = BudgetLedger(turns=3, cost_rmb=0.01, stop_reason="completed")
     write_trace(
         path,
         led,
@@ -71,7 +71,7 @@ def test_ledger_state_roundtrip():
         "input_tokens": 8,
         "output_tokens": 2,
         "cache_read_tokens": 3,
-        "cost_usd": 0.001,
+        "cost_rmb": 0.001,
         "stop_reason": None,
     }
     led = ledger_from_state(state)

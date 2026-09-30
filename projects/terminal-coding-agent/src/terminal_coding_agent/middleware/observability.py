@@ -6,13 +6,13 @@ from typing import Any
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import AIMessage, ToolMessage
 
+from terminal_coding_agent.telemetry import get_tracer
 from terminal_coding_agent.telemetry.attrs import (
     ATTR_ERROR_TYPE,
     ATTR_OPERATION,
     set_chat_attributes,
     set_tool_attributes,
 )
-from terminal_coding_agent.telemetry.setup import get_tracer
 
 
 def _ai_message_from_result(result: Any) -> AIMessage | None:

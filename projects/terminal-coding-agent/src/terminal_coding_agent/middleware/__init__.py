@@ -2,6 +2,14 @@
 
 from terminal_coding_agent.middleware.budget import BudgetMiddleware
 from terminal_coding_agent.middleware.observability import ObservabilityMiddleware
+from terminal_coding_agent.middleware.recover import BlockedReportMiddleware
 from terminal_coding_agent.middleware.safety import SafetyMiddleware
+from terminal_coding_agent.middleware.sequence import SequenceMiddleware
 
-__all__ = ["BudgetMiddleware", "ObservabilityMiddleware", "SafetyMiddleware"]
+__all__ = [
+    "BlockedReportMiddleware",
+    "BudgetMiddleware",
+    "ObservabilityMiddleware",
+    "SafetyMiddleware",
+    "SequenceMiddleware",
+]

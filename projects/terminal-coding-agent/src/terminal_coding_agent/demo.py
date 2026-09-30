@@ -8,16 +8,22 @@ from pathlib import Path
 DEMO_TASK = """\
 You are working in an existing git worktree (already `git init`'d).
 
-There is a bug in the greeting printed by `greeter.py`: it should print exactly
-`Hello, agent` (with that capitalization and comma), but currently it does not.
+`python3 greeter.py` should print exactly `Hello, agent` and exit 0. It currently
+raises SystemExit before printing. Keep the steps below separate. Do not merge them.
 
-Do the following using your tools (stay inside the worktree; no network):
-1. Use `tree_sitter_symbols` and/or `ripgrep` to find where the greeting string is built.
-2. `read_file` the relevant file(s), then `edit_file` to fix the bug (unique old_str → new_str).
-3. `run_shell` to run `python greeter.py` and confirm the output is exactly `Hello, agent`.
-4. Use `git` (`status` / `diff` / `add` / `commit`) to record the fix with a short message.
+1. Verification only. Run `python3 greeter.py` with `run_shell`. Do not read or
+   edit any file in this step. The command will exit non-zero. Call `report_blocked`
+   with that command and its error. Do not retry and do not try to fix it here.
+2. Edit `greeter.py` so `greet` returns `Hello, {name}`, and replace the
+   SystemExit with `print(greet("agent"))`. The edit is finished when the file
+   would print `Hello, agent`. Do not call `report_blocked` if the edit succeeds.
+3. Run `python3 greeter.py`. This step is done when stdout is exactly `Hello, agent`
+   and the exit code is 0.
+4. Commit `greeter.py` only (`git add greeter.py`, then `git commit`). Untracked
+   `.agent/` or `__pycache__/` are expected and are not a failure.
 
-Prefer the dedicated tools over reinventing them in the shell.
+`report_blocked` is only for step 1. Steps 2-4 may read, edit, run, and commit.
+Prefer the dedicated tools over reinventing them in the shell. No network.
 """
 
 _GREETER_PY = '''\
@@ -25,17 +31,16 @@ _GREETER_PY = '''\
 
 
 def greet(name: str) -> str:
-    # Intentional typo for the demo agent to find and fix.
     return f"Helo, {name}"
 
 
 if __name__ == "__main__":
-    print(greet("agent"))
+    raise SystemExit("greeting is wrong")
 '''
 
 _README = """# demo worktree
 
-Broken on purpose: `python greeter.py` should print `Hello, agent`.
+`python3 greeter.py` exits with SystemExit. It should print `Hello, agent`.
 """
 
 

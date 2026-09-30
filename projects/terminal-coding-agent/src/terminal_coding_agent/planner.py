@@ -14,8 +14,13 @@ from terminal_coding_agent.state import (
     Plan,
     ToDoItem,
     ToDoStatus,
+    tag_replan_version,
 )
-from terminal_coding_agent.telemetry.chat import chat_span, record_chat_usage, resolve_model_name
+from terminal_coding_agent.telemetry import (
+    chat_span,
+    record_chat_usage,
+    resolve_model_name,
+)
 
 
 def build_planner(models: AgentModels) -> Callable[..., dict[str, Any]]:
@@ -38,10 +43,13 @@ def build_planner(models: AgentModels) -> Callable[..., dict[str, Any]]:
 
             domain = {
                 "messages": [AIMessage(content=format_steps(parsed))],
-                "todo_list": [
-                    ToDoItem(status=ToDoStatus.PENDING, description=step)
-                    for step in parsed.steps
-                ],
+                "todo_list": tag_replan_version(
+                    [
+                        ToDoItem(status=ToDoStatus.PENDING, description=step)
+                        for step in parsed.steps
+                    ],
+                    state.get("replan_count", 0),
+                ),
             }
         return {**domain, **budget.updates()}
 

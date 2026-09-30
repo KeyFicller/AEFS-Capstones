@@ -74,14 +74,14 @@
 | --- | --- | --- |
 | 轮数 | 50 turns | `Stop` hook → 写 trace |
 | 上下文 | 200k tokens | `Stop` hook → 写 trace |
-| 成本 | $5.00 / task | `Stop` hook → 写 trace |
+| 成本 | 100/3 元 / task（原 $5，按官网价目折算） | `Stop` hook → 写 trace |
 
 - **turns 口径 = 模型调用次数（LLM invocations）**，不是图循环轮数。planner 调用计 1，executor 每次调用各计 1。选此口径的唯一理由：`mini-swe-agent` 的 step 计数同义，基线对比的 `turns/task` 才可比。
 
 - `PreCompact` @150k tokens：把旧轮次摘要成 prior-state block，腾出空间但不丢计划。
-- 记账来源：`usage_metadata` × 模型单价；**`cache_read_tokens` 必须计入**——DeepSeek 有前缀缓存，漏算会让 `$/task` 偏高，且重写历史会令缓存失效。
+- 记账来源：`usage_metadata` × 模型单价（人民币，空闲时段）；**`cache_read_tokens` 必须计入**——DeepSeek 有前缀缓存，漏算会让元/task 偏高，且重写历史会令缓存失效。
 - **禁止无预算上限运行**：开放式运行会污染评测对比。
-- 30 题 × $5 = **$150 上限**（仅模型成本）。沙箱容器分钟数与镜像拉取（每题数 GB）**另计**，用完即删；本地 docker 近零成本，但 16GB 内存把并发压到约 1。
+- 30 题 × 100/3 元 = **1000 元上限**（仅模型成本）。沙箱容器分钟数与镜像拉取（每题数 GB）**另计**，用完即删；本地 docker 近零成本，但 16GB 内存把并发压到约 1。
 
 ## 交付物
 
