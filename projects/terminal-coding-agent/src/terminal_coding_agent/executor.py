@@ -1,99 +1,147 @@
-"""Execute stage: act / observe / recover subgraph that runs todos one by one."""
+"""Execute stage: start_task -> run_agent -> end_task (parent-graph nodes)."""
 
 from __future__ import annotations
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
-from langgraph.graph import END, START, StateGraph
-from langgraph.graph.state import CompiledStateGraph
+from dataclasses import replace
+from pathlib import Path
+from typing import Any, Callable
 
+from langchain.agents import create_agent
+from langchain.agents.middleware import SummarizationMiddleware
+from langchain_core.messages import AIMessage, HumanMessage
+
+from terminal_coding_agent.budget import (
+    budget_updates,
+    check,
+    ledger_from_state,
+    summarize_todos,
+    write_trace,
+)
+from terminal_coding_agent.config import PRECOMPACT_TOKENS
+from terminal_coding_agent.middleware.budget import BudgetMiddleware
+from terminal_coding_agent.middleware.safety import SafetyMiddleware
 from terminal_coding_agent.models import SYSTEM_PROMPTS, AgentModels
-from terminal_coding_agent.state import CodingAgentState, ToDoStatus, usage_tokens
+from terminal_coding_agent.state import CodingAgentState, ToDoStatus
 
 
-def build_executor(models: AgentModels, tools: list) -> CompiledStateGraph:
-    """Build the execution subgraph: start_task -> (ask_llm <-> use_tool)* -> end_task."""
-    tools_map = {t.name: t for t in tools}
-    executor_model = models.executor.bind_tools(tools)
+def _trace_path(worktree: Path) -> Path:
+    return worktree / ".agent" / "trace.json"
 
-    def start_task(state: CodingAgentState) -> dict:
+
+def _final_agent_message(agent_messages: list) -> AIMessage | None:
+    """Keep only the last AI reply (no tool_calls) for the parent message trail."""
+    for message in reversed(agent_messages):
+        if isinstance(message, AIMessage) and not getattr(message, "tool_calls", None):
+            return message
+    return None
+
+
+def build_execute_nodes(
+    models: AgentModels, tools: list, *, worktree: Path
+) -> dict[str, Callable[[CodingAgentState], dict[str, Any]]]:
+    """Three parent-graph nodes so IN_PROGRESS is committed (and printed) before the agent runs."""
+
+    trace = _trace_path(worktree)
+
+    def start_task(state: CodingAgentState) -> dict[str, Any]:
+        ledger = ledger_from_state(state)
+        todos = summarize_todos(state.get("todo_list") or [])
+
+        if reason := check(ledger):
+            ledger.stop_reason = reason
+            write_trace(trace, ledger, todo_list=todos, stop_reason=reason)
+            return {**budget_updates(ledger), "stop_reason": reason}
+
         task_index = next(
-            (i for i, item in enumerate(state["todo_list"]) if item.status == ToDoStatus.PENDING),
+            (
+                i
+                for i, item in enumerate(state["todo_list"])
+                if item.status == ToDoStatus.PENDING
+            ),
             None,
         )
         if task_index is None:
             raise AssertionError("No pending task found")
 
         todo_list = list(state["todo_list"])
-        todo_list[task_index].status = ToDoStatus.IN_PROGRESS
-        messages = [
-            SystemMessage(content=SYSTEM_PROMPTS["executor"]),
-            HumanMessage(content=todo_list[task_index].description),
-        ]
+        todo_list[task_index] = replace(
+            todo_list[task_index], status=ToDoStatus.IN_PROGRESS
+        )
         return {
             "todo_list": todo_list,
             "current_task_index": task_index,
-            "current_task_messages": messages,
         }
 
-    def ask_llm(state: CodingAgentState) -> dict:
-        response = executor_model.invoke(state["current_task_messages"])
-        return {
-            "current_task_messages": state["current_task_messages"] + [response],
-            "messages": [response],
-            "turns": state.get("turns", 0) + 1,
-            "tokens": state.get("tokens", 0) + usage_tokens(response),
-        }
+    def run_agent(state: CodingAgentState) -> dict[str, Any]:
+        if state.get("stop_reason"):
+            return {}
 
-    def use_tool(state: CodingAgentState) -> dict:
-        last = state["current_task_messages"][-1]
-        tool_messages: list[ToolMessage] = []
-        for tool_request in last.tool_calls:
-            tool_name = tool_request["name"]
-            tool_args = tool_request["args"]
-            tool = tools_map.get(tool_name)
-            if tool is None:
-                result = f"Error: unknown tool: {tool_name}"
-            else:
-                result = tool.invoke(tool_args)
-            tool_messages.append(
-                ToolMessage(content=str(result), tool_call_id=tool_request["id"])
-            )
+        task_index = state.get("current_task_index")
+        if task_index is None:
+            raise AssertionError("current_task_index missing; start_task must run first")
 
-        return {
-            "current_task_messages": state["current_task_messages"] + tool_messages,
-            "messages": tool_messages,
-        }
-
-    def end_task(state: CodingAgentState) -> dict:
+        ledger = ledger_from_state(state)
         todo_list = list(state["todo_list"])
-        current_task = todo_list[state["current_task_index"]]
-        if current_task.status == ToDoStatus.IN_PROGRESS:
-            current_task.status = ToDoStatus.DONE
-        outcome = "successfully completed" if current_task.status == ToDoStatus.DONE else "failed"
+        todos = summarize_todos(todo_list)
+
+        agent = create_agent(
+            model=models.executor,
+            tools=tools,
+            system_prompt=SYSTEM_PROMPTS["executor"],
+            middleware=[
+                BudgetMiddleware(ledger, trace_path=trace, todo_list=todos),
+                SummarizationMiddleware(
+                    models.executor, trigger=("tokens", PRECOMPACT_TOKENS)
+                ),
+                SafetyMiddleware(),
+            ],
+        )
+        result = agent.invoke(
+            {"messages": [HumanMessage(content=todo_list[task_index].description)]}
+        )
+        agent_messages = result.get("messages") if isinstance(result, dict) else []
+        final = _final_agent_message(list(agent_messages))
+        updates: dict[str, Any] = {**budget_updates(ledger)}
+        if final is not None:
+            updates["messages"] = [final]
+        return updates
+
+    def end_task(state: CodingAgentState) -> dict[str, Any]:
+        ledger = ledger_from_state(state)
+        task_index = state.get("current_task_index")
+        todo_list = list(state.get("todo_list") or [])
+
+        if task_index is not None and todo_list:
+            final_status = ToDoStatus.FAILED if ledger.stop_reason else ToDoStatus.DONE
+            todo_list[task_index] = replace(todo_list[task_index], status=final_status)
+            current = todo_list[task_index]
+            outcome = (
+                "successfully completed"
+                if current.status == ToDoStatus.DONE
+                else "failed"
+            )
+            write_trace(
+                trace,
+                ledger,
+                todo_list=summarize_todos(todo_list),
+                stop_reason=ledger.stop_reason or "completed",
+            )
+            return {
+                **budget_updates(ledger),
+                "todo_list": todo_list,
+                "messages": [
+                    AIMessage(content=f"Task {current.description} {outcome}.")
+                ],
+                "current_task_index": None,
+            }
+
         return {
-            "messages": [AIMessage(content=f"Task {current_task.description} {outcome}.")],
-            "todo_list": todo_list,
-            "current_task_messages": [],
+            **budget_updates(ledger),
             "current_task_index": None,
         }
 
-    def should_use_tool(state: CodingAgentState) -> str:
-        return "use_tool" if state["current_task_messages"][-1].tool_calls else "end_task"
-
-    executor = StateGraph(CodingAgentState)
-    executor.add_node("start_task", start_task)
-    executor.add_node("end_task", end_task)
-    executor.add_node("ask_llm", ask_llm)
-    executor.add_node("use_tool", use_tool)
-
-    executor.add_edge(START, "start_task")
-    executor.add_edge("start_task", "ask_llm")
-    executor.add_conditional_edges(
-        "ask_llm",
-        should_use_tool,
-        {"use_tool": "use_tool", "end_task": "end_task"},
-    )
-    executor.add_edge("use_tool", "ask_llm")
-    executor.add_edge("end_task", END)
-
-    return executor.compile()
+    return {
+        "start_task": start_task,
+        "run_agent": run_agent,
+        "end_task": end_task,
+    }

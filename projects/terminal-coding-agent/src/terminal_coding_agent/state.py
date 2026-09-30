@@ -32,23 +32,30 @@ class Plan(BaseModel):
     task: str = Field(description="The task to complete")
     steps: list[str] = Field(description="The steps to complete the task")
 
-def replace_todos(old: list[ToDoItem], new: list[ToDoItem]) -> list[ToDoItem]:
 
-    MARKERS: dict[ToDoStatus, str] = {
+def _todo_snapshot(todos: list[ToDoItem]) -> list[tuple[str, str]]:
+    """Value snapshot so in-place mutations cannot hide updates from equality checks."""
+    return [(todo.description, todo.status.name) for todo in todos]
+
+
+def print_todos(todos: list[ToDoItem]) -> None:
+    markers: dict[ToDoStatus, str] = {
         ToDoStatus.PENDING: "[-]",
         ToDoStatus.IN_PROGRESS: "[+]",
         ToDoStatus.DONE: "[✓]",
         ToDoStatus.FAILED: "[✗]",
     }
-
-    if old != new:
-        print("------ Execute State Update --------")
-        for todo in new:
-            print(f"{MARKERS[todo.status]}  {todo.description}")
-        print("------------------------------------")
+    print("------ Execute State Update --------")
+    for todo in todos:
+        print(f"{markers[todo.status]}  {todo.description}")
+    print("------------------------------------")
 
 
+def replace_todos(old: list[ToDoItem], new: list[ToDoItem]) -> list[ToDoItem]:
+    if _todo_snapshot(old) != _todo_snapshot(new):
+        print_todos(new)
     return new
+
 
 class CodingAgentState(MessagesState):
     """State shared by the top-level graph and its subgraphs."""
@@ -57,7 +64,12 @@ class CodingAgentState(MessagesState):
     turns: int
     tokens: int
     current_task_index: int | None = None
-    current_task_messages: list[BaseMessage] = []
+
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cost_usd: float
+    stop_reason: str | None = None
 
 
 def usage_tokens(message: BaseMessage) -> int:
