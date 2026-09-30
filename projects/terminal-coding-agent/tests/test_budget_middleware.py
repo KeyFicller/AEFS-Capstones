@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from langchain.agents.middleware.types import ModelResponse
@@ -73,33 +72,8 @@ def test_wrap_model_call_applies_usage_from_model_response() -> None:
     assert ledger.cost_usd > 0
 
 
-def test_after_agent_writes_trace(tmp_path: Path) -> None:
+def test_after_agent_does_not_write_trace(tmp_path: Path) -> None:
     trace_path = tmp_path / ".agent" / "trace.json"
-    ledger = BudgetLedger(
-        turns=1,
-        tokens=120,
-        input_tokens=100,
-        output_tokens=20,
-        cache_read_tokens=40,
-        cost_usd=0.0123,
-    )
-    middleware = BudgetMiddleware(
-        ledger,
-        trace_path=trace_path,
-        todo_list=[{"description": "demo", "status": "DONE"}],
-    )
-
+    middleware = BudgetMiddleware(BudgetLedger(turns=1))
     assert middleware.after_agent(state={}, runtime=None) is None
-
-    assert trace_path.is_file()
-    payload = json.loads(trace_path.read_text(encoding="utf-8"))
-    assert payload["turns"] == 1
-    assert payload["tokens"] == 120
-    assert payload["input_tokens"] == 100
-    assert payload["output_tokens"] == 20
-    assert payload["cache_read_tokens"] == 40
-    assert payload["cost_usd"] == 0.0123
-    assert payload["stop_reason"] == "completed"
-    assert payload["todo_list"] == [{"description": "demo", "status": "DONE"}]
-    assert "finished_at" in payload
-    assert "T" in payload["finished_at"]
+    assert not trace_path.exists()

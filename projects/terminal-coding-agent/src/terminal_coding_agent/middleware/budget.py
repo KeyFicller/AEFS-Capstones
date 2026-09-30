@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 from langchain.agents.middleware import AgentMiddleware
@@ -12,7 +11,6 @@ from terminal_coding_agent.budget import (
     apply_usage,
     check,
     usage_from_message,
-    write_trace,
 )
 
 
@@ -29,17 +27,9 @@ def _ai_message_from_result(result: Any) -> AIMessage | None:
 
 
 class BudgetMiddleware(AgentMiddleware):
-    def __init__(
-        self,
-        ledger: BudgetLedger,
-        *,
-        trace_path: Path | None = None,
-        todo_list: list[dict[str, str]] | None = None,
-    ) -> None:
+    def __init__(self, ledger: BudgetLedger) -> None:
         super().__init__()
         self.ledger = ledger
-        self.trace_path = trace_path
-        self.todo_list = todo_list or []
 
     def before_agent(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         updates: dict[str, Any] = {}
@@ -101,11 +91,5 @@ class BudgetMiddleware(AgentMiddleware):
         return result
 
     def after_agent(self, state: Any, runtime: Any) -> dict[str, Any] | None:
-        if self.trace_path is not None:
-            write_trace(
-                self.trace_path,
-                self.ledger,
-                todo_list=self.todo_list,
-                stop_reason=self.ledger.stop_reason or "completed",
-            )
+        # Stop trace is owned by graph nodes (start_task / end_task), not middleware.
         return None

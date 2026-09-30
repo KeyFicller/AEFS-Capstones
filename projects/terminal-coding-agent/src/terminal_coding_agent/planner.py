@@ -6,13 +6,13 @@ from typing import Any, Callable
 
 from langchain_core.messages import AIMessage
 
+from terminal_coding_agent.budget import BudgetSession
 from terminal_coding_agent.models import AgentModels
 from terminal_coding_agent.state import (
     CodingAgentState,
     Plan,
     ToDoItem,
     ToDoStatus,
-    usage_tokens,
 )
 from terminal_coding_agent.telemetry.chat import chat_span, record_chat_usage, resolve_model_name
 
@@ -23,22 +23,25 @@ def build_planner(models: AgentModels) -> Callable[[CodingAgentState], dict[str,
     model_name = resolve_model_name(models.planner)
 
     def make_plan(state: CodingAgentState) -> dict[str, Any]:
-        with chat_span(model_name) as span:
-            response = planner_model.invoke(state["messages"])
-            record_chat_usage(span, response["raw"], model=model_name)
-        parsed: Plan = response["parsed"]
+        with BudgetSession(state) as budget:
+            with chat_span(model_name) as span:
+                response = planner_model.invoke(state["messages"])
+                record_chat_usage(span, response["raw"], model=model_name)
+            budget.observe(response["raw"])
+            parsed: Plan = response["parsed"]
 
-        def format_steps(plan: Plan) -> str:
-            return f"Task: {plan.task}\n" + "\n".join(f"- {step}" for step in plan.steps)
+            def format_steps(plan: Plan) -> str:
+                return f"Task: {plan.task}\n" + "\n".join(
+                    f"- {step}" for step in plan.steps
+                )
 
-        return {
-            "messages": [AIMessage(content=format_steps(parsed))],
-            "todo_list": [
-                ToDoItem(status=ToDoStatus.PENDING, description=step)
-                for step in parsed.steps
-            ],
-            "turns": state.get("turns", 0) + 1,
-            "tokens": state.get("tokens", 0) + usage_tokens(response["raw"]),
-        }
+            domain = {
+                "messages": [AIMessage(content=format_steps(parsed))],
+                "todo_list": [
+                    ToDoItem(status=ToDoStatus.PENDING, description=step)
+                    for step in parsed.steps
+                ],
+            }
+        return {**domain, **budget.updates()}
 
     return make_plan

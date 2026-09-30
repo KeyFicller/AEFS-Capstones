@@ -84,14 +84,13 @@ def build_execute_nodes(
 
         ledger = ledger_from_state(state)
         todo_list = list(state["todo_list"])
-        todos = summarize_todos(todo_list)
 
         agent = create_agent(
             model=models.executor,
             tools=tools,
             system_prompt=SYSTEM_PROMPTS["executor"],
             middleware=[
-                BudgetMiddleware(ledger, trace_path=trace, todo_list=todos),
+                BudgetMiddleware(ledger),
                 SummarizationMiddleware(
                     models.executor, trigger=("tokens", PRECOMPACT_TOKENS)
                 ),

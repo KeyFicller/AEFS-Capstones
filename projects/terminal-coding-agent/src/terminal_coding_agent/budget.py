@@ -117,3 +117,32 @@ def usage_from_message(message: Any) -> tuple[int, int, int]:
     details = meta.get("input_token_details") or {}
     cache_read = int(details.get("cache_read") or meta.get("cache_read_tokens") or 0)
     return input_tokens, output_tokens, cache_read
+
+
+class BudgetSession:
+    """with-block helper: enter loads ledger; exit applies queued message usage (no fuse)."""
+
+    def __init__(self, state: dict[str, Any]) -> None:
+        self.ledger = ledger_from_state(state)
+        self._message: Any | None = None
+
+    def __enter__(self) -> BudgetSession:
+        return self
+
+    def observe(self, message: Any) -> None:
+        """Queue a model message so exit can call apply_usage."""
+        self._message = message
+
+    def updates(self) -> dict[str, Any]:
+        return budget_updates(self.ledger)
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+        if exc_type is None and self._message is not None:
+            input_tokens, output_tokens, cache_read = usage_from_message(self._message)
+            apply_usage(
+                self.ledger,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_read_tokens=cache_read,
+            )
+        return False

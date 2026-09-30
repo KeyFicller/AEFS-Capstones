@@ -15,9 +15,10 @@ from opentelemetry import trace
 from terminal_coding_agent.config import ENV_PATH, load_local_env
 from terminal_coding_agent.demo import DEMO_TASK, seed_demo_worktree
 from terminal_coding_agent.executor import build_execute_nodes
+from terminal_coding_agent.budget import BudgetSession
 from terminal_coding_agent.models import build_models
 from terminal_coding_agent.planner import build_planner
-from terminal_coding_agent.state import CodingAgentState, ToDoStatus, usage_tokens
+from terminal_coding_agent.state import CodingAgentState, ToDoStatus
 from terminal_coding_agent.tools import make_tools
 from terminal_coding_agent.telemetry import chat_span, setup_tracing
 from terminal_coding_agent.telemetry.chat import record_chat_usage, resolve_model_name
@@ -61,14 +62,13 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
         summary_message = HumanMessage(content="Summarize the task.")
         summary_input = state["messages"] + [summary_message]
         model_name = resolve_model_name(models.planner)
-        with chat_span(model_name) as span:
-            summary_response = models.planner.invoke(summary_input)
-            record_chat_usage(span, summary_response, model=model_name)
-        return {
-            "messages": [summary_message, summary_response],
-            "turns": state.get("turns", 0) + 1,
-            "tokens": state.get("tokens", 0) + usage_tokens(summary_response),
-        }
+        with BudgetSession(state) as budget:
+            with chat_span(model_name) as span:
+                summary_response = models.planner.invoke(summary_input)
+                record_chat_usage(span, summary_response, model=model_name)
+            budget.observe(summary_response)
+            domain = {"messages": [summary_message, summary_response]}
+        return {**domain, **budget.updates()}
 
     coding_agent.add_node("make_plan", make_plan)
     coding_agent.add_node("start_task", execute["start_task"])
