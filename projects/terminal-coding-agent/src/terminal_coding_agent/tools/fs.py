@@ -8,6 +8,12 @@ from langchain_core.tools import tool
 from terminal_coding_agent.tools.path import resolve_in_worktree
 from terminal_coding_agent.tools.truncate import truncate
 
+from rich.console import Console
+from rich.syntax import Syntax
+
+# Debug-only: flip to True to pretty-print edit diffs to the console.
+DEBUG_RENDER_DIFF = False
+
 
 def build_read_file(worktree: Path):
     @tool
@@ -76,6 +82,8 @@ def build_edit_file(worktree: Path):
                 lineterm="",
             )
         )
+        if DEBUG_RENDER_DIFF:
+            Console().print(Syntax(diff, "diff"))
         return truncate(diff)
 
     return edit_file
