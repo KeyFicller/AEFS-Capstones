@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable
@@ -27,6 +28,7 @@ from terminal_coding_agent.middleware import (
     ObservabilityMiddleware,
     SafetyMiddleware,
     SequenceMiddleware,
+    ToolLogMiddleware,
 )
 from terminal_coding_agent.models import SYSTEM_PROMPTS, AgentModels
 from terminal_coding_agent.recover import project_evidence
@@ -50,6 +52,7 @@ def build_execute_nodes(
     *,
     worktree: Path,
     sequence_events: list | None = None,
+    tool_renderer: Callable[[str, Mapping[str, Any], str], None] | None = None,
 ) -> dict[str, Callable[[CodingAgentState], dict[str, Any]]]:
     """Three parent-graph nodes so IN_PROGRESS is committed (and printed) before the agent runs."""
 
@@ -99,23 +102,31 @@ def build_execute_nodes(
         ledger = ledger_from_state(state)
         todo_list = list(state["todo_list"])
 
+        middleware = [
+            BudgetMiddleware(ledger),
+            SummarizationMiddleware(
+                models.executor, trigger=("tokens", PRECOMPACT_TOKENS)
+            ),
+            ObservabilityMiddleware(resolve_model_name(models.executor)),
+            SafetyMiddleware(),
+            BlockedReportMiddleware(),
+        ]
+        if sequence_events is not None:
+            # Recording is on only when the caller asked for a diagram (sequence_path).
+            middleware.append(
+                SequenceMiddleware(
+                    sequence_events, description=todo_list[task_index].description
+                )
+            )
+        if tool_renderer is not None:
+            # Last = innermost, so a guard that short-circuits the call is not logged as output.
+            middleware.append(ToolLogMiddleware(tool_renderer))
+
         agent = create_agent(
             model=models.executor,
             tools=tools,
             system_prompt=SYSTEM_PROMPTS["executor"],
-            middleware=[
-                BudgetMiddleware(ledger),
-                SummarizationMiddleware(
-                    models.executor, trigger=("tokens", PRECOMPACT_TOKENS)
-                ),
-                ObservabilityMiddleware(resolve_model_name(models.executor)),
-                SafetyMiddleware(),
-                BlockedReportMiddleware(),
-                SequenceMiddleware(
-                    sequence_events,
-                    description=todo_list[task_index].description,
-                ),
-            ],
+            middleware=middleware,
         )
         try:
             result = agent.invoke(

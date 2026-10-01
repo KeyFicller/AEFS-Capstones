@@ -37,6 +37,28 @@ def test_announce_todos_prints_nothing_without_a_rewrite(capsys) -> None:
     assert capsys.readouterr().out == ""
 
 
+def test_announce_todos_uses_the_injected_renderer(capsys) -> None:
+    seen: list[tuple[str, int]] = []
+    config = {"configurable": {"todo_renderer": lambda text, version: seen.append((text, version))}}
+
+    _announce_todos(lambda state: {"todo_list": _TODOS})(_state(), config)
+
+    assert any("[✓]  read" in text for text, _ in seen)
+    assert capsys.readouterr().out == ""
+
+
+def test_announce_todos_hands_the_replan_count_to_the_renderer() -> None:
+    """The CLI puts this in the panel subtitle, so it must arrive separately from the text."""
+    seen: list[int] = []
+    config = {"configurable": {"todo_renderer": lambda text, version: seen.append(version)}}
+
+    _announce_todos(lambda state: {"todo_list": _TODOS, "replan_count": 2})(
+        _state(replan_count=0), config
+    )
+
+    assert seen == [2]
+
+
 def test_announce_todos_prefers_the_replan_count_from_the_update(capsys) -> None:
     node = _announce_todos(lambda state: {"todo_list": _TODOS, "replan_count": 2})
 
@@ -47,7 +69,7 @@ def test_announce_todos_prefers_the_replan_count_from_the_update(capsys) -> None
 
 def test_announce_todos_forwards_config_to_a_two_argument_node() -> None:
     seen: list[object] = []
-    marker = object()
+    marker = {"configurable": {"todo_renderer": lambda _text, _version: None}}
 
     def node(state, config):
         seen.append(config)

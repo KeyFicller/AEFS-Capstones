@@ -7,14 +7,20 @@ def test_replace_todos_returns_the_new_list() -> None:
     assert replace_todos(old, new) is new
 
 
-def test_format_todos_shows_status_and_version() -> None:
+def test_format_todos_shows_each_status() -> None:
     text = format_todos(
         [
             ToDoItem(status=ToDoStatus.DONE, description="read"),
             ToDoItem(status=ToDoStatus.FAILED, description="edit"),
-        ],
-        version=2,
+        ]
     )
-    assert "replan v2" in text
     assert "[✓]  read" in text
     assert "[✗]  edit" in text
+
+
+def test_format_todos_leaves_the_box_and_replan_to_the_renderer() -> None:
+    """ASCII chrome here would be drawn a second time once a real panel wraps it."""
+    text = format_todos([ToDoItem(status=ToDoStatus.PENDING, description="read")])
+
+    assert "#" not in text
+    assert "replan" not in text

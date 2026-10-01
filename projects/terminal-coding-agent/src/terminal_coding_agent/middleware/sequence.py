@@ -103,17 +103,19 @@ def write_sequence_png(events: Sequence[SequenceEvent] | None, path: Path | None
 
 
 class SequenceMiddleware(AgentMiddleware):
-    """Append to a shared event list. The graph writes the PNG once, at the end."""
+    """Append to a shared event list. The graph writes the PNG once, at the end.
 
-    def __init__(self, events: list[SequenceEvent] | None, *, description: str = "") -> None:
+    Only installed when a sequence log was requested (`sequence_path` in config),
+    so `events` is always a real list — there is no "disabled" mode inside.
+    """
+
+    def __init__(self, events: list[SequenceEvent], *, description: str = "") -> None:
         super().__init__()
         self.events = events
-        if events is not None and description:
+        if description:
             events.append(("task", description))
 
     def _note_model_turn(self, state: Any) -> None:
-        if self.events is None:
-            return
         messages = state.get("messages") or []
         last_ai = next(
             (message for message in reversed(messages) if isinstance(message, AIMessage)),
@@ -137,8 +139,6 @@ class SequenceMiddleware(AgentMiddleware):
         return self.after_model(state, runtime)
 
     def wrap_tool_call(self, request: Any, handler: Callable[..., Any]) -> Any:
-        if self.events is None:
-            return handler(request)
         name = (request.tool_call or {}).get("name") or "tool"
         try:
             result = handler(request)
@@ -150,8 +150,6 @@ class SequenceMiddleware(AgentMiddleware):
         return result
 
     async def awrap_tool_call(self, request: Any, handler: Callable[..., Any]) -> Any:
-        if self.events is None:
-            return await handler(request)
         name = (request.tool_call or {}).get("name") or "tool"
         try:
             result = await handler(request)

@@ -63,6 +63,19 @@ def _after_recover(state: CodingAgentState) -> str:
     return "summary" if state.get("stop_reason") else "start_task"
 
 
+def _print_todos(text: str, version: int = 0) -> None:
+    """Harbor's fallback renderer: plain text, no chrome, straight into the log."""
+    print(f"replan v{version}")
+    print(text)
+
+
+def todos_renderer(config: RunnableConfig | None) -> Callable[[str, int], None]:
+    """Console sink for the todo panel: config-injected, else plain print (Harbor default)."""
+    configurable = (config or {}).get("configurable") or {}
+    render = configurable.get("todo_renderer")
+    return render if callable(render) else _print_todos
+
+
 def _announce_todos(node: Callable) -> Callable:
     """Print the todo list a node just rewrote — the graph's only console output.
 
@@ -77,7 +90,7 @@ def _announce_todos(node: Callable) -> Callable:
         updates = node(state, config) if takes_config else node(state)
         if todo_list := updates.get("todo_list"):
             version = updates.get("replan_count", state.get("replan_count", 0))
-            print(format_todos(todo_list, version))
+            todos_renderer(config)(format_todos(todo_list), version)
         return updates
 
     return announced
@@ -111,11 +124,13 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
 
     # Plain function node (not a nested StateGraph) so replace_todos does not fire twice.
     make_plan = build_planner(models)
+    tool_renderer = configurable.get("tool_renderer")
     execute = build_execute_nodes(
         models,
         make_tools(worktree),
         worktree=worktree,
         sequence_events=sequence_events,
+        tool_renderer=tool_renderer if callable(tool_renderer) else None,
     )
     recover = build_recover(make_plan, worktree=worktree)
 
@@ -214,7 +229,7 @@ if __name__ == "__main__":
         print(f"stop_reason:       {response.get('stop_reason')}")
         print(f"replan_count:      {response.get('replan_count', 0)}")
         print("----------------------")
-        print(format_todos(response.get("todo_list") or [], response.get("replan_count", 0)))
+        print(format_todos(response.get("todo_list") or []))
 
         provider = trace.get_tracer_provider()
         if hasattr(provider, "force_flush"):

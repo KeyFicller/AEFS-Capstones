@@ -43,13 +43,13 @@ _MARKERS: dict[ToDoStatus, str] = {
 }
 
 
-def format_todos(todos: list[ToDoItem], version: int = 0) -> str:
-    """Render the todo list as text. Pure; the caller decides where to print it."""
-    title = f" Execute State Update | replan v{version} "
-    side = "#" * 4
-    header = f"{side}{title}{side}"
-    body = [f"{_MARKERS[item.status]}  {item.description}" for item in todos]
-    return "\n".join([header, *body, "#" * len(header)])
+def format_todos(todos: list[ToDoItem]) -> str:
+    """Render the todo list as plain text. Pure; the caller decides where to print it.
+
+    No ASCII chrome: the CLI draws a real panel around this text, so a fake box
+    here would be drawn twice. The replan count is the panel's subtitle.
+    """
+    return "\n".join(f"{_MARKERS[item.status]}  {item.description}" for item in todos)
 
 
 def replace_todos(old: list[ToDoItem], new: list[ToDoItem]) -> list[ToDoItem]:

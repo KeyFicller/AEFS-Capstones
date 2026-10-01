@@ -11,8 +11,7 @@ uv venv                              # 建共享虚拟环境（只需一次）
 uv pip install -r requirements.txt  # 安装全部依赖
 
 uv run --no-project pytest projects/terminal-coding-agent/tests -q   # 测试
-uv run --no-project terminal-coding-agent run "say hello"            # 正常完成
-uv run --no-project terminal-coding-agent run "x" --loop-forever     # 演示 turn 熔断
+uv run --no-project terminal-coding-agent                            # 多轮 REPL
 uv run --no-project python projects/terminal-coding-agent/eval/run_eval.py  # 评测
 ```
 
@@ -22,7 +21,10 @@ uv run --no-project python projects/terminal-coding-agent/eval/run_eval.py  # �
 |---|---|
 | `requirements.txt`（仓库根） | `60-python-conventions`：全局依赖唯一来源 |
 | `PROJECT.md` | `10-project-profile`：项目特有信息 |
-| `src/terminal_coding_agent/loop.py` | `30-agent-architecture`：plan/act/observe/recover |
+| `src/terminal_coding_agent/graph.py` | `30-agent-architecture`：plan/act/observe/recover 装配 |
+| `src/terminal_coding_agent/cli.py` | 交互入口：REPL（`--worktree` / `--session`；默认 worktree 为临时目录，退出即删） |
+| `src/terminal_coding_agent/session.py` | 会话语义：每轮重置、轮执行 |
+| `src/terminal_coding_agent/ui.py` | 控制台渲染（库代码里唯一的 console 出口） |
 | `src/terminal_coding_agent/tools/` | `20-python-stack`：工具是唯一副作用边界 |
 | `tests/` | `60-python-conventions`、`70-eval-and-verification` |
 | `eval/` | `70-eval-and-verification`：指标落盘 |

@@ -19,7 +19,7 @@
 
 **不做（延后到加固 / 交付阶段）**
 
-- TUI（三栏：plan / 工具流 / 实时预算）—— 评测路径不经过它，只关系 rubric 的开发者体验 15 分
+- 多轮 CLI（`chat` REPL）与 rich 内联 UI —— 已实现，见「交付物」；textual 三栏 TUI 仍不做
 - PR 发布（`git push` + GitHub API 开 PR）
 - 30 题完整跑批 + mini-swe-agent 基线
 - Terminal-Bench 2.0、自建 holdout、多模型扫描
@@ -137,7 +137,23 @@
 
 **完整交付（MVP 后补齐）**
 
-- CLI `agent run <repo> "<task>"` + TUI 三栏
+- CLI：`terminal-coding-agent`（无子命令，直接进多轮 REPL；`--worktree` / `--session`）
+  - 会话语义：单 `thread_id`，`messages` 跨轮累积；`turns/tokens/cost_rmb/todo_list/stop_reason` 等
+    12 个 per-turn 字段每轮经 `update_state` 重置（PROJECT.md 的预算是 per task）
+  - `todo_renderer` 经 `configurable` 注入；Harbor 不注入 → 走 `_print_todos` 进 `langgraph-run.log`。
+    交互式终端下一个 turn 内：todo 面板**原地覆盖**刷新（标题 `Tasks`，subtitle 始终为 `replan vN`），
+    且共用一块 `Live` 显示自转的 `working…` 指示器（非交互式 / 区域外仍逐态打印）
+  - `tool_renderer` 同类注入（`configurable` → `make_graph` → executor），由 `ToolLogMiddleware` 在
+    **工具真正执行后**回调（`SafetyMiddleware` 拦截的调用不产生输出）；Harbor 不注入则不装该中间件。
+    每次调用一行摘要（工具名 + 关键参数 + 结果摘要），`edit_file` 额外打印着色 unified diff
+    （`background_color="default"` 避免默认主题把行补齐到 80 列、在窄终端折行）。渲染与 `TodoPanel`
+    共用同一 `Console`，故工具输出**追加在上、Tasks 面板钉在最底**且仍单块原地刷新
+  - 每轮页脚只显示 `turns` 与 `stop`。**token / cost 明知不准故不展示**（provider `usage_metadata`
+    常缺字段，展示即误导）；记账本身保留 —— `MAX_TOKENS` / `MAX_COST_RMB` 硬闸门仍依赖它
+  - `--worktree` 缺省为**临时目录**，会话结束即删；`.agent/`（checkpoint / trace / otel / patch）
+    因此不会落进你的项目。要真让 agent 改某个仓库，必须显式 `--worktree <repo>`；
+    续跑同 `--session` 也需连同 `--worktree` 一起传
+  - 每轮输入一律作为一个 task 进图（不做 chat/task 路由）
 - `eval/tasks.json`、`eval/run_eval.py`、`eval/results.jsonl` + 匹配的 mini-swe-agent 基线运行
 - ≥5 次完整运行的 OTel trace 归档；100% 工具调用带 span
 - 报告：哪些题 harness 能解而基线不能（反之亦然）；结尾写前三大失败模式与对应 hook 改动

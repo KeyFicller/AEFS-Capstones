@@ -6,10 +6,12 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from terminal_coding_agent import config
 from terminal_coding_agent.executor import _final_agent_message, build_execute_nodes
+from terminal_coding_agent.middleware import SequenceMiddleware
 from terminal_coding_agent.state import ToDoItem, ToDoStatus
 
 
@@ -197,4 +199,39 @@ def test_run_agent_converts_model_crash_into_stop_reason(tmp_path, monkeypatch) 
     out = nodes["run_agent"](state, {})
 
     assert out["stop_reason"] == "executor_error:RuntimeError"
+
+
+@pytest.mark.parametrize("with_log", [True, False])
+def test_run_agent_installs_the_sequence_logger_only_when_recording(
+    tmp_path: Path, monkeypatch, with_log: bool
+) -> None:
+    """No `sequence_events` means no diagram was asked for, so nothing must be recorded."""
+    from terminal_coding_agent import executor as executor_module
+
+    captured: dict = {}
+
+    class FakeAgent:
+        def invoke(self, payload, config):
+            return {"messages": []}
+
+    def fake_create_agent(**kwargs):
+        captured["middleware"] = kwargs["middleware"]
+        return FakeAgent()
+
+    monkeypatch.setattr(executor_module, "create_agent", fake_create_agent)
+    events: list = []
+    kwargs = {"sequence_events": events} if with_log else {}
+    nodes = build_execute_nodes(MagicMock(), tools=[], worktree=tmp_path, **kwargs)
+    state = _base_state(
+        [ToDoItem(status=ToDoStatus.IN_PROGRESS, description="fix typo")],
+        current_task_index=0,
+    )
+
+    nodes["run_agent"](state, {})
+
+    installed = [m for m in captured["middleware"] if isinstance(m, SequenceMiddleware)]
+    assert bool(installed) is with_log
+    if with_log:
+        assert installed[0].events is events
+        assert events[0] == ("task", "fix typo")
 

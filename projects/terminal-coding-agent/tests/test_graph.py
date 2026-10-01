@@ -194,3 +194,61 @@ def test_compiled_make_plan_announces_the_plan(
     out = capsys.readouterr().out
     assert "[-]  locate the typo" in out
     assert "[-]  edit it" in out
+
+
+def _spy_on_execute_nodes(monkeypatch) -> dict:
+    captured: dict = {}
+    real_build = graph_module.build_execute_nodes
+
+    def spy(models, tools, **kwargs):
+        captured.update(kwargs)
+        return real_build(models, tools, **kwargs)
+
+    monkeypatch.setattr(graph_module, "build_execute_nodes", spy)
+    return captured
+
+
+def test_make_graph_forwards_the_injected_tool_renderer(tmp_path: Path, monkeypatch) -> None:
+    """The renderer travels config -> graph -> execute nodes, like todo_renderer."""
+    os.environ["DEEPSEEK_API_KEY"] = "test"
+    captured = _spy_on_execute_nodes(monkeypatch)
+    renderer = lambda *_: None
+
+    make_graph({"configurable": {"worktree": tmp_path, "tool_renderer": renderer}})
+    os.environ.pop("DEEPSEEK_API_KEY")
+
+    assert captured["tool_renderer"] is renderer
+
+
+def test_make_graph_ignores_a_non_callable_tool_renderer(tmp_path: Path, monkeypatch) -> None:
+    """A bad renderer in config must degrade to 'no tool log', not crash the graph."""
+    os.environ["DEEPSEEK_API_KEY"] = "test"
+    captured = _spy_on_execute_nodes(monkeypatch)
+
+    make_graph({"configurable": {"worktree": tmp_path, "tool_renderer": "not callable"}})
+    os.environ.pop("DEEPSEEK_API_KEY")
+
+    assert captured["tool_renderer"] is None
+
+
+def test_make_graph_records_a_sequence_only_when_a_path_is_configured(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """`sequence_path` is the only switch; without it the recorder must stay off."""
+    os.environ["DEEPSEEK_API_KEY"] = "test"
+    captured = _spy_on_execute_nodes(monkeypatch)
+
+    make_graph({"configurable": {"worktree": tmp_path}})
+    assert captured["sequence_events"] is None
+
+    make_graph(
+        {
+            "configurable": {
+                "worktree": tmp_path,
+                "sequence_path": str(tmp_path / "sequence.png"),
+            }
+        }
+    )
+    os.environ.pop("DEEPSEEK_API_KEY")
+
+    assert captured["sequence_events"] == []

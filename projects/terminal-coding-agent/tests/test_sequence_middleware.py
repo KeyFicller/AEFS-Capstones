@@ -33,17 +33,6 @@ def test_sequence_diagram_shows_calls_returns_and_a_final_reply() -> None:
     assert "participant report_blocked" in diagram
 
 
-def test_sequence_middleware_skips_work_without_a_shared_log() -> None:
-    middleware = SequenceMiddleware(None)
-    message = AIMessage(
-        content="",
-        tool_calls=[{"name": "run_shell", "args": {}, "id": "1"}],
-    )
-
-    assert middleware.after_model({"messages": [message]}, None) is None
-    assert middleware.events is None
-
-
 def test_sequence_diagram_boxes_each_task() -> None:
     long = "Edit greeter.py so greet returns Hello and replace SystemExit with print"
     diagram = sequence_diagram(
