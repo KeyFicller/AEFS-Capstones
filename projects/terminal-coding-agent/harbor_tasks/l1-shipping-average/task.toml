@@ -1,0 +1,31 @@
+schema_version = "1.4"
+artifacts = ["/app/.agent/trace.json", "/app/.agent/patch.diff"]
+
+[task]
+name = "local/l1-shipping-average"
+version = "1.0.0"
+description = "L1: the failing visible test names the defective function."
+authors = []
+keywords = []
+
+[metadata]
+
+[verifier]
+timeout_sec = 600.0
+collect = []
+
+[verifier.env]
+
+[agent]
+timeout_sec = 900.0
+
+[environment]
+network_mode = "public"
+build_timeout_sec = 900.0
+os = "linux"
+workdir = "/app"
+mcp_servers = []
+
+[environment.env]
+
+[solution.env]

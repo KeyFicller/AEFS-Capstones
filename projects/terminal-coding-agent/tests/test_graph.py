@@ -14,6 +14,7 @@ from terminal_coding_agent.graph import (
     make_graph,
 )
 from terminal_coding_agent.models import AgentModels
+from terminal_coding_agent.recover import build_recover
 from terminal_coding_agent.state import Plan, ToDoItem, ToDoStatus
 
 
@@ -127,8 +128,43 @@ def test_end_task_continues_with_pending_work() -> None:
 
 
 def test_recover_resumes_or_ends() -> None:
-    assert _after_recover(_state([])) == "start_task"
+    assert _after_recover(_state([ToDoItem(status=ToDoStatus.PENDING, description="a")])) == (
+        "start_task"
+    )
     assert _after_recover(_state([], stop_reason="recover_exhausted")) == "summary"
+
+
+def test_recover_routes_to_summary_when_the_replan_leaves_nothing_pending(
+    tmp_path: Path,
+) -> None:
+    """An empty replan retires the failed step, so the run must end, not re-enter start_task."""
+
+    def empty_replan(state, config):  # noqa: ARG001 - mirrors make_plan
+        return {"todo_list": [], "messages": []}
+
+    recover = build_recover(empty_replan, worktree=tmp_path)
+    state = _state([ToDoItem(status=ToDoStatus.FAILED, description="b")])
+
+    planned = recover(state, {})
+
+    # start_task asserts on a missing PENDING item, so this route must never be taken.
+    assert _after_recover({**state, **planned}) == "summary"
+
+
+def test_settled_only_plans_end_the_run_from_either_router() -> None:
+    """Both routers share one rule: no pending work left means summary."""
+    settled_only = (
+        [ToDoItem(status=ToDoStatus.DONE, description="a")],
+        [ToDoItem(status=ToDoStatus.DEPRECATED, description="a")],
+        [
+            ToDoItem(status=ToDoStatus.DONE, description="a"),
+            ToDoItem(status=ToDoStatus.DEPRECATED, description="b"),
+        ],
+    )
+
+    for todos in settled_only:
+        assert _after_end_task(_state(todos)) == "summary"
+        assert _after_recover(_state(todos)) == "summary"
 
 
 def test_make_plan_ends_when_plan_is_empty() -> None:

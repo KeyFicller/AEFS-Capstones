@@ -1,7 +1,7 @@
 [project]
 name = "terminal-coding-agent"
 version = "0.1.0"
-description = "Hello-world 级模板：示意符合 rules 的完成态项目长什么样"
+description = "终端原生 coding agent：自然语言输入，隔离 worktree 内执行，产出 patch"
 requires-python = ">=3.11"
 
 [project.scripts]

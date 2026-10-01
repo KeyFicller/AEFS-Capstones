@@ -47,20 +47,31 @@ def _after_start(state: CodingAgentState) -> str:
     return "run_agent"
 
 
+_SETTLED_STATUSES = frozenset({ToDoStatus.DONE, ToDoStatus.DEPRECATED})
+
+
+def _has_unsettled_work(state: CodingAgentState) -> bool:
+    """True while some todo still needs the agent: neither finished nor retired."""
+    return any(
+        item.status not in _SETTLED_STATUSES for item in state.get("todo_list") or []
+    )
+
+
 def _after_end_task(state: CodingAgentState) -> str:
     if state.get("stop_reason"):
         return "summary"
     if state.get("blocked_reason"):
         return "recover"
-    todo_list = state.get("todo_list") or []
-    settled = {ToDoStatus.DONE, ToDoStatus.DEPRECATED}
-    if not todo_list or all(item.status in settled for item in todo_list):
+    if not _has_unsettled_work(state):
         return "summary"
     return "start_task"
 
 
 def _after_recover(state: CodingAgentState) -> str:
-    return "summary" if state.get("stop_reason") else "start_task"
+    # `start_task` asserts on a missing PENDING item, so the same guard applies here.
+    if state.get("stop_reason") or not _has_unsettled_work(state):
+        return "summary"
+    return "start_task"
 
 
 def _print_todos(text: str, version: int = 0) -> None:

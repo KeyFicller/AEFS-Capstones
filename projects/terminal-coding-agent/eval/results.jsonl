@@ -1,3 +1,6 @@
-{"task": "hello a", "done": true, "turns": 3}
-{"task": "hello b", "done": true, "turns": 3}
-{"task": "hello c", "done": true, "turns": 3}
+{"job": "2026-10-01__19-28-06", "trial": "l1-shipping-average__vR8Nugv", "task_id": "l1-shipping-average", "level": "L1", "reward": 1, "artifacts_status": "ok", "stop_reason": "completed", "turns": 20, "input_tokens": 92434, "output_tokens": 2699, "cache_read_tokens": 70656, "cost_rmb": 0.03398712}
+{"job": "2026-10-01__19-28-06", "trial": "l2-unit-resolution__QWu44jb", "task_id": "l2-unit-resolution", "level": "L2", "reward": 1, "artifacts_status": "ok", "stop_reason": "completed", "turns": 21, "input_tokens": 39518, "output_tokens": 2922, "cache_read_tokens": 32256, "cost_rmb": 0.01959512}
+{"job": "2026-10-01__19-28-06", "trial": "l3-metrics-labels__axW83NX", "task_id": "l3-metrics-labels", "level": "L3", "reward": 1, "artifacts_status": "ok", "stop_reason": "completed", "turns": 17, "input_tokens": 35168, "output_tokens": 2914, "cache_read_tokens": 29952, "cost_rmb": 0.01747104}
+{"job": "2026-10-01__19-28-06", "trial": "l4-cancelled-orders__iMFTTV3", "task_id": "l4-cancelled-orders", "level": "L4", "reward": 1, "artifacts_status": "ok", "stop_reason": "completed", "turns": 35, "input_tokens": 98899, "output_tokens": 5149, "cache_read_tokens": 72448, "cost_rmb": 0.048495960000000005}
+{"job": "2026-10-01__19-28-06", "trial": "l5-settings-cache__b8V9YeC", "task_id": "l5-settings-cache", "level": "L5", "reward": 1, "artifacts_status": "ok", "stop_reason": "completed", "turns": 33, "input_tokens": 131332, "output_tokens": 6070, "cache_read_tokens": 102656, "cost_rmb": 0.05500912000000001}
+{"job": "2026-10-01__19-28-06", "trial": "greeter-fix__YYMLrkL", "task_id": "greeter-fix", "level": "smoke", "reward": 1, "artifacts_status": "ok", "stop_reason": null, "turns": null, "input_tokens": null, "output_tokens": null, "cache_read_tokens": null, "cost_rmb": null}
