@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable
@@ -29,8 +30,10 @@ from terminal_coding_agent.middleware import (
 )
 from terminal_coding_agent.models import SYSTEM_PROMPTS, AgentModels
 from terminal_coding_agent.recover import project_evidence
-from terminal_coding_agent.state import CodingAgentState, ToDoStatus, tag_replan_version
+from terminal_coding_agent.state import CodingAgentState, ToDoStatus
 from terminal_coding_agent.telemetry import resolve_model_name
+
+logger = logging.getLogger(__name__)
 
 
 def _final_agent_message(agent_messages: list) -> AIMessage | None:
@@ -80,7 +83,7 @@ def build_execute_nodes(
             todo_list[task_index], status=ToDoStatus.IN_PROGRESS
         )
         return {
-            "todo_list": tag_replan_version(todo_list, state.get("replan_count", 0)),
+            "todo_list": todo_list,
             "current_task_index": task_index,
             **clear_block,
         }
@@ -114,10 +117,17 @@ def build_execute_nodes(
                 ),
             ],
         )
-        result = agent.invoke(
-            {"messages": [HumanMessage(content=todo_list[task_index].description)]},
-            config=config,
-        )
+        try:
+            result = agent.invoke(
+                {"messages": [HumanMessage(content=todo_list[task_index].description)]},
+                config=config,
+            )
+        except Exception as exc:  # noqa: BLE001 - an error is an observation, not a crash
+            logger.exception("executor failed")
+            return {
+                **budget_updates(ledger),
+                "stop_reason": f"executor_error:{type(exc).__name__}",
+            }
         agent_messages = list(result.get("messages") or [])
         updates: dict[str, Any] = {**budget_updates(ledger)}
 
@@ -155,7 +165,7 @@ def build_execute_nodes(
             )
             return {
                 **budget_updates(ledger),
-                "todo_list": tag_replan_version(todo_list, state.get("replan_count", 0)),
+                "todo_list": todo_list,
                 "messages": [
                     AIMessage(content=f"Task {current.description} {outcome}.")
                 ],

@@ -45,10 +45,9 @@ def price_usage(*, input_tokens: int, output_tokens: int, cache_read_tokens: int
 
 
 def check(ledger: BudgetLedger) -> str | None:
-    # tokens fuse uses cumulative ledger.tokens as the 200k proxy
     if ledger.turns >= config.MAX_TURNS:
         return "max_turns"
-    if ledger.tokens >= config.MAX_CONTEXT_TOKENS:
+    if ledger.tokens >= config.MAX_TOKENS:
         return "max_tokens"
     if ledger.cost_rmb >= config.MAX_COST_RMB:
         return "max_cost"

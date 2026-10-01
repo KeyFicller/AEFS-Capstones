@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import inspect
 import shutil
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
@@ -12,22 +15,16 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from opentelemetry import trace
 
-from terminal_coding_agent.budget import BudgetSession
+from terminal_coding_agent.checkpoint import build_checkpointer
 from terminal_coding_agent.config import ENV_PATH, load_local_env
 from terminal_coding_agent.demo import DEMO_TASK, seed_demo_worktree
 from terminal_coding_agent.executor import build_execute_nodes
-from terminal_coding_agent.middleware.sequence import write_sequence_png
 from terminal_coding_agent.models import build_models
 from terminal_coding_agent.planner import build_planner
 from terminal_coding_agent.recover import build_recover
-from terminal_coding_agent.state import CodingAgentState, ToDoStatus
-from terminal_coding_agent.telemetry import (
-    chat_span,
-    otel_jsonl_path,
-    record_chat_usage,
-    resolve_model_name,
-    setup_tracing,
-)
+from terminal_coding_agent.state import CodingAgentState, ToDoStatus, format_todos
+from terminal_coding_agent.summary import build_summary
+from terminal_coding_agent.telemetry import otel_jsonl_path, setup_tracing
 from terminal_coding_agent.telemetry.langfuse_callback import (
     flush_langfuse,
     langfuse_callback_handler,
@@ -64,6 +61,26 @@ def _after_end_task(state: CodingAgentState) -> str:
 
 def _after_recover(state: CodingAgentState) -> str:
     return "summary" if state.get("stop_reason") else "start_task"
+
+
+def _announce_todos(node: Callable) -> Callable:
+    """Print the todo list a node just rewrote — the graph's only console output.
+
+    The print lives here rather than in the nodes because `replace_todos` runs
+    twice per write (once for the conditional-edge read, once for apply_writes),
+    so a print inside the reducer repeated itself; the assembly layer sees each
+    update exactly once. Nodes that do not rewrite `todo_list` stay silent.
+    """
+    takes_config = len(inspect.signature(node).parameters) > 1
+
+    def announced(state: CodingAgentState, config: RunnableConfig) -> dict[str, Any]:
+        updates = node(state, config) if takes_config else node(state)
+        if todo_list := updates.get("todo_list"):
+            version = updates.get("replan_count", state.get("replan_count", 0))
+            print(format_todos(todo_list, version))
+        return updates
+
+    return announced
 
 
 def _write_mermaid_png(compiled: CompiledStateGraph, config: RunnableConfig) -> None:
@@ -104,26 +121,18 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
 
     coding_agent = StateGraph(CodingAgentState)
 
-    def summary(state: CodingAgentState, config: RunnableConfig) -> dict:
-        summary_message = HumanMessage(content="Summarize the task.")
-        summary_input = state["messages"] + [summary_message]
-        model_name = resolve_model_name(models.planner)
-        try:
-            with BudgetSession(state) as budget:
-                with chat_span(model_name) as span:
-                    summary_response = models.planner.invoke(summary_input, config=config)
-                    record_chat_usage(span, summary_response, model=model_name)
-                budget.observe(summary_response)
-                domain = {"messages": [summary_message, summary_response]}
-            return {**domain, **budget.updates()}
-        finally:
-            write_sequence_png(sequence_events, sequence_path)
+    summary = build_summary(
+        models,
+        worktree=worktree,
+        sequence_events=sequence_events,
+        sequence_path=sequence_path,
+    )
 
-    coding_agent.add_node("make_plan", make_plan)
-    coding_agent.add_node("start_task", execute["start_task"])
+    coding_agent.add_node("make_plan", _announce_todos(make_plan))
+    coding_agent.add_node("start_task", _announce_todos(execute["start_task"]))
     coding_agent.add_node("run_agent", execute["run_agent"])
-    coding_agent.add_node("end_task", execute["end_task"])
-    coding_agent.add_node("recover", recover)
+    coding_agent.add_node("end_task", _announce_todos(execute["end_task"]))
+    coding_agent.add_node("recover", _announce_todos(recover))
     coding_agent.add_node("summary", summary)
 
     coding_agent.add_edge(START, "make_plan")
@@ -150,18 +159,19 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
     )
     coding_agent.add_edge("summary", END)
 
-    compiled = coding_agent.compile()
+    compiled = coding_agent.compile(checkpointer=build_checkpointer(worktree))
     _write_mermaid_png(compiled, config)
+
+    thread_id = str(configurable.get("thread_id") or "default")
+    bound_config: dict = {
+        "configurable": {"thread_id": thread_id},
+        "run_name": "terminal-coding-agent",
+    }
     handler = langfuse_callback_handler()
-    if handler is None:
-        return compiled
-    # Framework integration: callbacks propagate into nested create_agent / model invokes.
-    return compiled.with_config(
-        {
-            "callbacks": [handler],
-            "run_name": "terminal-coding-agent",
-        }
-    )
+    if handler is not None:
+        # Framework integration: callbacks propagate into nested create_agent / model invokes.
+        bound_config["callbacks"] = [handler]
+    return compiled.with_config(bound_config)
 
 
 if __name__ == "__main__":
@@ -187,7 +197,10 @@ if __name__ == "__main__":
             tags=["terminal-coding-agent", "demo", "langgraph"],
             metadata={"framework": "langgraph", "role": "demo"},
         ):
-            response = agent.invoke({"messages": [HumanMessage(content=DEMO_TASK)]})
+            response = agent.invoke(
+                {"messages": [HumanMessage(content=DEMO_TASK)]},
+                config={"configurable": {"thread_id": "demo"}},
+            )
 
         for message in response["messages"]:
             message.pretty_print()
@@ -201,6 +214,7 @@ if __name__ == "__main__":
         print(f"stop_reason:       {response.get('stop_reason')}")
         print(f"replan_count:      {response.get('replan_count', 0)}")
         print("----------------------")
+        print(format_todos(response.get("todo_list") or [], response.get("replan_count", 0)))
 
         provider = trace.get_tracer_provider()
         if hasattr(provider, "force_flush"):

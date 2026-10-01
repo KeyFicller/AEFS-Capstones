@@ -7,6 +7,7 @@ pytest>=8
 # （provider 与模型名须可配置，见 .cursor/rules/20-python-stack.mdc）
 langchain>=1.4.2
 langgraph>=1.2.12
+langgraph-checkpoint-sqlite>=3.1.1
 langchain-deepseek>=1.1.0
 
 # CLI 渲染（TUI / 专用 renderer；库代码禁止 print，见 .cursor/rules/60-python-conventions.mdc）

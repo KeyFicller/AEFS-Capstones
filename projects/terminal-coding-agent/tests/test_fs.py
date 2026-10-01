@@ -12,6 +12,12 @@ def test_read_missing(tmp_path: Path) -> None:
     out = tool.invoke({"path": "nope.txt"})
     assert out.startswith("Error:")
 
+def test_read_file_survives_non_utf8(tmp_path: Path) -> None:
+    """A binary file (e.g. MARC .mrc) must decode lossily instead of raising UnicodeDecodeError."""
+    (tmp_path / "blob.bin").write_bytes(b"\x00\x95\xfe\xff")
+    tool = build_read_file(tmp_path)
+    assert tool.invoke({"path": "blob.bin"}) != ""
+
 def test_edit_unique(tmp_path: Path) -> None:
     (tmp_path / "f.txt").write_text("a x a\n", encoding="utf-8")
     tool = build_edit_file(tmp_path)

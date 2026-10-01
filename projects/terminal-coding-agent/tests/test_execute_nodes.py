@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from terminal_coding_agent import config
 from terminal_coding_agent.executor import _final_agent_message, build_execute_nodes
 from terminal_coding_agent.state import ToDoItem, ToDoStatus
 
@@ -47,7 +48,7 @@ def test_start_task_hard_stops_when_turns_exhausted(tmp_path: Path) -> None:
     nodes = build_execute_nodes(MagicMock(), tools=[], worktree=tmp_path)
     state = _base_state(
         [ToDoItem(status=ToDoStatus.PENDING, description="never runs")],
-        turns=50,
+        turns=config.MAX_TURNS,
     )
 
     out = nodes["start_task"](state)
@@ -177,4 +178,23 @@ def test_end_task_marks_done_when_not_blocked(tmp_path, monkeypatch) -> None:
     ended = nodes["end_task"]({**state, **out})
 
     assert ended["todo_list"][0].status == ToDoStatus.DONE
+
+
+def test_run_agent_converts_model_crash_into_stop_reason(tmp_path, monkeypatch) -> None:
+    from terminal_coding_agent import executor as executor_module
+
+    class ExplodingAgent:
+        def invoke(self, payload, config):
+            raise RuntimeError("deepseek 400")
+
+    monkeypatch.setattr(executor_module, "create_agent", lambda **kwargs: ExplodingAgent())
+    nodes = executor_module.build_execute_nodes(MagicMock(), tools=[], worktree=tmp_path)
+    state = _base_state(
+        [ToDoItem(status=ToDoStatus.IN_PROGRESS, description="fix typo")],
+        current_task_index=0,
+    )
+
+    out = nodes["run_agent"](state, {})
+
+    assert out["stop_reason"] == "executor_error:RuntimeError"
 

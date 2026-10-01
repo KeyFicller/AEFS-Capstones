@@ -34,58 +34,26 @@ class Plan(BaseModel):
     steps: list[str] = Field(description="The steps to complete the task")
 
 
-def _todo_snapshot(todos: list[ToDoItem]) -> list[tuple[str, str]]:
-    """Value snapshot so in-place mutations cannot hide updates from equality checks."""
-    return [(todo.description, todo.status.name) for todo in todos]
+_MARKERS: dict[ToDoStatus, str] = {
+    ToDoStatus.PENDING: "[-]",
+    ToDoStatus.IN_PROGRESS: "[+]",
+    ToDoStatus.DONE: "[✓]",
+    ToDoStatus.FAILED: "[✗]",
+    ToDoStatus.DEPRECATED: "[~]",
+}
 
 
-class _VersionedTodos(list):
-    """Todo list plus the plan version, so the reducer can print it.
-
-    LangGraph runs the node inside copy_context(), so a ContextVar set in the
-    node is invisible when replace_todos later prints.
-    """
-
-    replan_version: int
-
-
-def tag_replan_version(todos: list[ToDoItem], version: int) -> list[ToDoItem]:
-    tagged = _VersionedTodos(todos)
-    tagged.replan_version = version
-    return tagged
-
-
-def print_todos(todos: list[ToDoItem]) -> None:
-    markers: dict[ToDoStatus, str] = {
-        ToDoStatus.PENDING: "[-]",
-        ToDoStatus.IN_PROGRESS: "[+]",
-        ToDoStatus.DONE: "[✓]",
-        ToDoStatus.FAILED: "[✗]",
-        ToDoStatus.DEPRECATED: "[~]",
-    }
-    version = getattr(todos, "replan_version", 0)
+def format_todos(todos: list[ToDoItem], version: int = 0) -> str:
+    """Render the todo list as text. Pure; the caller decides where to print it."""
     title = f" Execute State Update | replan v{version} "
     side = "#" * 4
     header = f"{side}{title}{side}"
-    print(header)
-    for todo in todos:
-        print(f"{markers[todo.status]}  {todo.description}")
-    print("#" * len(header))
-
-
-# Conditional edges read state with fresh=True, which runs this reducer on a
-# channel copy. apply_writes then runs it again. Remember the last print so
-# that second call does not repeat the same list.
-_last_printed: tuple[tuple[str, str], ...] | None = None
+    body = [f"{_MARKERS[item.status]}  {item.description}" for item in todos]
+    return "\n".join([header, *body, "#" * len(header)])
 
 
 def replace_todos(old: list[ToDoItem], new: list[ToDoItem]) -> list[ToDoItem]:
-    global _last_printed
-    old_snap = tuple(_todo_snapshot(old))
-    new_snap = tuple(_todo_snapshot(new))
-    if new_snap != old_snap and new_snap != _last_printed:
-        _last_printed = new_snap
-        print_todos(new)
+    """Reducer: newest snapshot wins. Pure, so checkpoint replay is deterministic."""
     return new
 
 

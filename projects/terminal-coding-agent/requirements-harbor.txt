@@ -1,6 +1,7 @@
 # Harbor trial only — installed via langgraph.json "dependencies"
 langchain>=1.4.2
 langgraph>=1.2.12
+langgraph-checkpoint-sqlite>=3.1.1
 langchain-deepseek>=1.1.0
 rich>=14
 opentelemetry-api>=1.27.0

@@ -43,6 +43,7 @@ def build_ripgrep(worktree: Path):
                 cwd=worktree,
                 capture_output=True,
                 text=True,
+                errors="replace",
                 timeout=SHELL_TIMEOUT_SECONDS,
             )
         except FileNotFoundError:

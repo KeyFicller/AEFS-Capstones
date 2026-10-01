@@ -19,8 +19,8 @@ def test_price_usage_includes_cache_read():
 
 
 def test_check_trips_each_fuse():
-    assert check(BudgetLedger(turns=50)) == "max_turns"
-    assert check(BudgetLedger(tokens=200_000)) == "max_tokens"
+    assert check(BudgetLedger(turns=config.MAX_TURNS)) == "max_turns"
+    assert check(BudgetLedger(tokens=config.MAX_TOKENS)) == "max_tokens"
     assert check(BudgetLedger(cost_rmb=config.MAX_COST_RMB)) == "max_cost"
     assert check(BudgetLedger()) is None
 

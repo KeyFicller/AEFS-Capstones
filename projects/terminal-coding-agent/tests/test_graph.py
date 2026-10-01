@@ -4,13 +4,17 @@ import os
 from pathlib import Path
 from unittest.mock import patch
 
+from langchain_core.messages import AIMessage
+
+from terminal_coding_agent import graph as graph_module
 from terminal_coding_agent.graph import (
     _after_end_task,
     _after_make_plan,
     _after_recover,
     make_graph,
 )
-from terminal_coding_agent.state import ToDoItem, ToDoStatus
+from terminal_coding_agent.models import AgentModels
+from terminal_coding_agent.state import Plan, ToDoItem, ToDoStatus
 
 
 def test_mermaid_png_is_skipped_without_a_path(tmp_path: Path) -> None:
@@ -146,3 +150,47 @@ def test_compiled_graph_uses_the_module_routers(tmp_path: Path) -> None:
     assert wired["start_task"] == ["_after_start"]
     assert wired["end_task"] == ["_after_end_task"]
     assert wired["recover"] == ["_after_recover"]
+
+
+def test_make_graph_persists_checkpoints(tmp_path: Path) -> None:
+    os.environ["DEEPSEEK_API_KEY"] = "test"
+    agent = make_graph({"configurable": {"worktree": tmp_path}})
+    os.environ.pop("DEEPSEEK_API_KEY")
+
+    cfg = {"configurable": {"worktree": tmp_path, "thread_id": "t1"}}
+    assert agent.get_state(cfg) is not None
+    assert (tmp_path / ".agent" / "checkpoints.sqlite").is_file()
+
+
+def test_invoke_without_thread_id_uses_injected_default(tmp_path: Path) -> None:
+    os.environ["DEEPSEEK_API_KEY"] = "test"
+    agent = make_graph({"configurable": {"worktree": tmp_path}})
+    os.environ.pop("DEEPSEEK_API_KEY")
+
+    # A checked graph raises without thread_id; with_config must supply a default.
+    assert agent.config["configurable"]["thread_id"]
+
+
+def test_compiled_make_plan_announces_the_plan(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """The plan must reach the console during a real run, not only in the demo."""
+    plan = Plan(task="fix the typo", steps=["locate the typo", "edit it"])
+
+    class _Structured:
+        def invoke(self, messages, config=None):  # noqa: A002 - mirrors Runnable
+            return {"raw": AIMessage(content=""), "parsed": plan}
+
+    class _Planner:
+        def with_structured_output(self, schema, include_raw=False):
+            return _Structured()
+
+    stub = AgentModels(planner=_Planner(), executor=_Planner())
+    monkeypatch.setattr(graph_module, "build_models", lambda config: stub)
+    agent = make_graph({"configurable": {"worktree": tmp_path}})
+
+    agent.builder.nodes["make_plan"].runnable.invoke(_state([]), None)
+
+    out = capsys.readouterr().out
+    assert "[-]  locate the typo" in out
+    assert "[-]  edit it" in out

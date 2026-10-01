@@ -24,7 +24,7 @@ def build_read_file(worktree: Path):
         if isinstance(resolved, str):
             return truncate(resolved)
         try:
-            return truncate(resolved.read_text(encoding="utf-8"))
+            return truncate(resolved.read_text(encoding="utf-8", errors="replace"))
         except OSError as exc:
             return truncate(f"Error: {exc}")
 
@@ -52,7 +52,7 @@ def build_edit_file(worktree: Path):
 
         try:
             content = resolved.read_text(encoding="utf-8")
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             return truncate(f"Error: {exc}")
 
         count = content.count(old_str)

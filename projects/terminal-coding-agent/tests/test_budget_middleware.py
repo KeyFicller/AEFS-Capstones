@@ -5,6 +5,7 @@ from pathlib import Path
 from langchain.agents.middleware.types import ModelResponse
 from langchain_core.messages import AIMessage, HumanMessage
 
+from terminal_coding_agent import config
 from terminal_coding_agent.budget import BudgetLedger
 from terminal_coding_agent.middleware.budget import BudgetMiddleware
 
@@ -39,7 +40,7 @@ def _model_response_with_usage(
 
 
 def test_wrap_model_call_hard_stops_without_handler() -> None:
-    ledger = BudgetLedger(turns=50)
+    ledger = BudgetLedger(turns=config.MAX_TURNS)
     middleware = BudgetMiddleware(ledger)
     called = {"n": 0}
 

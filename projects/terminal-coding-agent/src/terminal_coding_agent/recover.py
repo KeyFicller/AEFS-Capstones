@@ -28,7 +28,6 @@ from terminal_coding_agent.state import (
     CodingAgentState,
     ToDoItem,
     ToDoStatus,
-    tag_replan_version,
 )
 
 
@@ -141,6 +140,8 @@ def build_recover(
 
         instruction = HumanMessage(content=_replan_instruction(state))
         planned = make_plan({**state, "messages": [*state["messages"], instruction]}, config)
+        if planned.get("stop_reason"):
+            return planned
         new_steps = list(planned.get("todo_list") or [])
         new_descriptions = [item.description for item in new_steps]
         if new_descriptions == _remaining_descriptions(todo_list):
@@ -150,7 +151,7 @@ def build_recover(
 
         return {
             **planned,
-            "todo_list": tag_replan_version(merged, replan_count + 1),
+            "todo_list": merged,
             "messages": [instruction, *planned.get("messages", [])],
             "replan_count": replan_count + 1,
             "blocked_reason": None,

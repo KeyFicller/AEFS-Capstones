@@ -34,7 +34,15 @@
 - **Observe**：捕获 stdout / stderr / 退出码，截断后把摘要喂回
 - **Recover**：处理工具错误，既不撑爆上下文，也不无限循环
 
+- **Recover 落地**：executor 可用 `report_blocked(reason)` 自报失败（`BlockedReportMiddleware.after_model` 拦截并 `jump_to="end"`，工具不执行）；父图 `recover` 节点复用 `make_plan` 重写剩余 todo，已 `DONE` 项保留在列表头部，触发本次恢复的失败项就地转为 `DEPRECATED`（不再算失败、不重跑）；上界 `MAX_REPLANS = 3` + 无进展检测（planner 新剩余列表与旧相同 → `recover_no_progress`），超限 → `recover_exhausted`。回退由 planner 决策、executor 用现有 `git`/`edit_file` 执行，不引入快照机制。
+
+- **Checkpoint 落地**：父图用 `SqliteSaver` 编译，落 `{worktree}/.agent/checkpoints.sqlite`；`thread_id` 从 `configurable` 读、缺省 `"default"`（调用时传入可覆盖）。自定义类型 `ToDoItem` / `ToDoStatus` 经 `JsonPlusSerializer(allowed_msgpack_modules=...)` 显式放行。**恢复语义 = node 级、at-least-once**：已完成的节点不重跑，崩溃时正在执行的节点整段重跑，工具副作用（`edit_file` / `git commit` / 模型调用）**不去重**，故**不提供 exactly-once**。`replan_count` 在 state 内被持久化，resume 不会绕过 `MAX_REPLANS`。**每题必须唯一 `thread_id`**，否则重试会变成续跑（等同硬拒绝项「重试间刷分」）。
+
 **Hooks**：`PreToolUse`、`PostToolUse`、`SessionStart`、`SessionEnd`、`UserPromptSubmit`、`Notification`、`Stop`、`PreCompact`——可配置扩展点，运营方在此注入策略、遥测、护栏。
+
+- **Stop 落点**：`summary` 节点的 `finally`（`summary.py`）。任何终止路径——正常完成 / 预算熔断 / `recover_exhausted` / `recover_no_progress` / 空计划 / 模型异常——都必然写 `{worktree}/.agent/trace.json`，不存在漏写分支。
+
+- **控制台输出落点**：`graph.py` 的 `_announce_todos` 包装 `make_plan` / `start_task` / `end_task` / `recover` 四个会重写 `todo_list` 的节点。**打印必须在装配层，不能在 reducer 里**：`replace_todos` 每次写入会跑两遍（条件边读一次、`apply_writes` 一次），旧实现为此不得不加模块级 `_last_printed` 去重；装配层每个更新只看到一次，结构性免疫。计划版本直接从 `state["replan_count"]` 取，故不需要 `_VersionedTodos` 那个 list 子类（风险 8）。容器内 stdout 由 Harbor `tee` 到 `<trial>/agent/langgraph-run.log`，是唯一能看到 agent 实时进度的通道。
 
 **沙箱由 Harbor 提供**：graph 与工具都在容器内执行，宿主文件系统不可达 → spec 的 hard reject「不许在宿主机执行 git」自动满足。
 
@@ -63,20 +71,26 @@
 
 ## 指标与基线
 
-- **主指标**：`pass@1`（30 题中首次运行即通过的比例）。**禁止在重试之间 `git reset --hard` 刷分**。同批记录 `turns/task`、`tokens/task`（in/out 分开）、`$/task`。
+- **主指标**：`pass@1`（30 题中首次运行即通过的比例）。**禁止在重试之间 `git reset --hard` 刷分**。同批记录 `turns/task`、`tokens/task`（in/out 分开）、`元/task`。
 - **基线**：`mini-swe-agent`，**必须同模型、同 30 题**；模型不同则测的是模型差距而非 harness 差距，对比作废。Live-SWE-agent 仅作上下文参照，不参与打分。
-- **数据集**：SWE-bench Pro V2 的 python 子集 **30 题**；抽样规则固定（instance_id 列表 + seed）落 `eval/tasks.json`，否则 matched subset 不成立。每题镜像 `ghcr.io/scaleapi/swe-bench_pro-v2:<instance_id>`（公开可拉，**linux/amd64**）。
+- **数据集**：SWE-bench Pro V2 的 python 子集 **30 题**（`repo_language == "python"`，取自每题 `tests/config.json`）；抽样规则固定（instance_id 列表 + seed）落 `eval/tasks.json`，否则 matched subset 不成立。数据集用 Harbor 注册表 `scale-ai/swe-bench-pro`（731 题），每题镜像由任务自带 `environment/Dockerfile` 的 `FROM` 决定，形如 `jefzda/sweap-images:<tag>`（Docker Hub，**linux/amd64**）。
+- **镜像可达性**：本机 `auth.docker.io` 被 DNS 污染、拉不动。必须先经镜像源预拉再重打 tag：
+  `docker pull --platform linux/amd64 dockerproxy.net/jefzda/sweap-images:<tag>` → `docker tag dockerproxy.net/... jefzda/sweap-images:<tag>`。
+- **Harbor 输出目录必须在项目目录之外**（如仓库根 `jobs/`）。`-a langgraph` 会把项目目录整体拷进 trial，输出目录若在项目内会自我递归到 `File name too long`。
 - **落盘**：Harbor 原生输出 `pass_at_k` / `cost_usd` / token 统计到 `<job>/result.json`，另有 agent 轨迹、verifier 输出、`trial.log`（`harbor view <job>` 看轨迹）；汇总进 `eval/results.jsonl`，基线同 schema 单独落盘以便逐题配对。
+- **Patch 落盘**：Stop hook（`summary.py` 的 `finally`）把 `git status --porcelain` + `git diff HEAD` 写进 `{worktree}/.agent/patch.diff`，同时写进 Harbor 约定目录 `/logs/artifacts/patch.diff`。docker 后端下该目录是**宿主挂载**，文件直接出现在 `<job>/<trial>/artifacts/logs/artifacts/patch.diff`（manifest 的 `status` 从 `empty` 变 `ok` 即表示已收集，无需额外注册 artifact）。**口径限制**：只看未提交改动——`git diff` 用 `HEAD` 是为了覆盖 staged，若 agent 自己 `git commit` 则 patch 为空（文件头已注明，不假装「无改动」）。
 
 ## 预算
 
 | 维度 | 上限 | 熔断行为 |
 | --- | --- | --- |
-| 轮数 | 50 turns | `Stop` hook → 写 trace |
-| 上下文 | 200k tokens | `Stop` hook → 写 trace |
+| 轮数 | 150 turns | `Stop` hook → 写 trace |
+| 累计 token | 2M tokens | `Stop` hook → 写 trace |
 | 成本 | 100/3 元 / task（原 $5，按官网价目折算） | `Stop` hook → 写 trace |
 
 - **turns 口径 = 模型调用次数（LLM invocations）**，不是图循环轮数。planner 调用计 1，executor 每次调用各计 1。选此口径的唯一理由：`mini-swe-agent` 的 step 计数同义，基线对比的 `turns/task` 才可比。
+- **累计 token 口径 = 一次 task 内所有模型调用的 `input_tokens + output_tokens` 之和**（含 executor 子调用），**不是**单次上下文窗口占用。单次上下文由下方 `PreCompact` 单独兜。实测真实仓库上约 13k tokens/次调用，故 2M 与 150 turns 大致同档，先到先触发；作用只是拦住「单次调用把上下文炸成超大 prompt」这种病态情况，真正的常驻闸门仍是轮数。
+- **轮数取值依据**：2026-10-01 在 `openlibrary-e8084193` 上实测，每 todo ≈ 25 次模型调用，5-6 步计划需 ~150 次；旧值 50 只够 2 个 todo，agent 定位到 `read_publisher` 却无预算落编辑。成本此时仅 0.108 元，离 33 元上限两个数量级。
 
 - `PreCompact` @150k tokens：把旧轮次摘要成 prior-state block，腾出空间但不丢计划。
 - 记账来源：`usage_metadata` × 模型单价（人民币，空闲时段）；**`cache_read_tokens` 必须计入**——DeepSeek 有前缀缓存，漏算会让元/task 偏高，且重写历史会令缓存失效。
@@ -163,3 +177,4 @@
 5. **`PreCompact` 与消息重建**：摘要 / 裁剪会重写历史；若从纯文本重建消息会丢 `AIMessage.additional_kwargs`，在 thinking 模式触发 400 → 保持原始消息对象，勿重建为 `AIMessage(content=...)`。
 6. **模型 ID 时效**：只用 `deepseek-v4-flash` / `deepseek-v4-pro`；`deepseek-chat` / `deepseek-reasoner` 已于 2026-07-24 停用。provider 文档常滞后，勿照抄。
 7. **解释器版本错配**：本机 3.14.6 上 `--dry-run` 依赖全部解析通过，**不能**外推为容器 3.12 内可安装；落代码前先在 3.12 下验一次依赖解析。
+8. **list 子类挂属性不能进 state**：`_VersionedTodos` 这类「list 子类 + 自定义属性」的 state 在 checkpoint 反序列化后属性会**丢失**（实测 `replan_version` 读回为 `<LOST>`）。state 只放能被 msgpack（含白名单）安全往返的值；replan 版本改用已有的 `replan_count` 渲染。

@@ -173,3 +173,15 @@ def test_recover_aborts_when_planner_returns_same_remaining_steps(tmp_path: Path
 
     assert out["stop_reason"] == "recover_no_progress"
     assert "todo_list" not in out
+
+
+def test_recover_propagates_a_planner_stop_reason(tmp_path: Path) -> None:
+    def failing_plan(state, config):
+        return {"stop_reason": "planner_error:RuntimeError"}
+
+    node = build_recover(failing_plan, worktree=tmp_path)
+    state = _state([ToDoItem(status=ToDoStatus.FAILED, description="old")])
+
+    out = node(state, RunnableConfig())
+
+    assert out["stop_reason"] == "planner_error:RuntimeError"

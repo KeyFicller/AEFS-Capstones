@@ -29,6 +29,7 @@ def build_run_shell(worktree: Path):
                 cwd=worktree,
                 capture_output=True,
                 text=True,
+                errors="replace",
                 timeout=timeout,
             )
         except subprocess.TimeoutExpired:

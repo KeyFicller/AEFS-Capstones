@@ -51,6 +51,7 @@ def build_git(worktree: Path):
                 ["git", "-C", str(worktree), *git_args],
                 capture_output=True,
                 text=True,
+                errors="replace",
                 timeout=SHELL_TIMEOUT_SECONDS,
             )
         except FileNotFoundError:
