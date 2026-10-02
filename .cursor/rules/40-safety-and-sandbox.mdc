@@ -1,6 +1,6 @@
 ---
 description: 通用安全边界——隔离执行、破坏性操作、密钥与网络
-globs: **/*.py,**/*.ts,**/*.tsx
+globs: **/*.py
 alwaysApply: false
 ---
 

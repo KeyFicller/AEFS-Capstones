@@ -1,6 +1,6 @@
 ---
 description: 通用预算控制与可观测性要求
-globs: **/*.py,**/*.ts,**/*.tsx
+globs: **/*.py
 alwaysApply: false
 ---
 

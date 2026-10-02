@@ -1,6 +1,6 @@
 ---
 description: Agent 类项目的通用架构——循环分层、hook 事件面、状态恢复
-globs: **/*.py,**/*.ts,**/*.tsx
+globs: **/*.py
 alwaysApply: false
 ---
 
