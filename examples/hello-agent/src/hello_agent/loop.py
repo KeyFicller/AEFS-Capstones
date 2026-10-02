@@ -1,7 +1,5 @@
 """plan -> act -> observe -> recover 的最小落地，外加硬性 turn 上限。"""
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 
 from hello_agent.tools import TOOLS

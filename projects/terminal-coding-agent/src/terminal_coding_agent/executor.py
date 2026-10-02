@@ -1,7 +1,5 @@
 """Execute stage: start_task -> run_agent -> end_task (parent-graph nodes)."""
 
-from __future__ import annotations
-
 import logging
 from collections.abc import Mapping
 from dataclasses import replace

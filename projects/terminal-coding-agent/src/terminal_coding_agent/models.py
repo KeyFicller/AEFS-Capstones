@@ -1,7 +1,5 @@
 """Model factory: read provider / model name from config and build chat models."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 from langchain.chat_models import BaseChatModel, init_chat_model

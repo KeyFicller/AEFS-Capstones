@@ -1,7 +1,5 @@
 """rich renderers for the interactive CLI. The only module that writes to the console."""
 
-from __future__ import annotations
-
 import re
 import sys
 from collections.abc import Iterator, Mapping

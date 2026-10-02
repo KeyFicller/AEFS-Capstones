@@ -1,7 +1,5 @@
 """Interactive session semantics: per-turn reset and turn execution."""
 
-from __future__ import annotations
-
 from typing import Any
 
 from langchain_core.messages import HumanMessage

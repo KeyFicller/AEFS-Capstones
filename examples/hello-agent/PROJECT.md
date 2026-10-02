@@ -16,7 +16,7 @@
 
 ## 技术栈
 
-Python 3.11+（本示例零依赖）。真实项目按 `20-python-stack` 用
+Python 3.11+（本示例零依赖）。真实项目按 `20-python` 用
 LangGraph / LangChain / PyTorch，模型走 OpenRouter。
 
 ## 指标与基线

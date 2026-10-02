@@ -1,7 +1,5 @@
 """工具层：唯一允许产生副作用的边界。"""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Callable
 

@@ -20,11 +20,11 @@ uv run --no-project python examples/hello-agent/eval/run_eval.py  # 评测
 
 | 路径 | 对应规则 |
 |---|---|
-| `requirements.txt`（仓库根） | `60-python-conventions`：全局依赖唯一来源 |
+| `requirements.txt`（仓库根） | `20-python`：全局依赖唯一来源 |
 | `PROJECT.md` | `10-project-profile`：项目特有信息 |
-| `src/hello_agent/loop.py` | `30-agent-architecture`：plan/act/observe/recover |
-| `src/hello_agent/tools.py` | `20-python-stack`：工具是唯一副作用边界 |
-| `tests/` | `60-python-conventions`、`70-eval-and-verification` |
+| `src/hello_agent/loop.py` | `30-agent`：plan/act/observe/recover |
+| `src/hello_agent/tools.py` | `20-python`：工具是唯一副作用边界 |
+| `tests/` | `20-python`、`70-eval-and-verification` |
 | `eval/` | `70-eval-and-verification`：指标落盘 |
 
 ## 这是模板，不是成品

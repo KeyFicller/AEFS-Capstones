@@ -1,7 +1,5 @@
 """Interactive entry point: a chat REPL over the coding agent graph."""
 
-from __future__ import annotations
-
 import argparse
 import tempfile
 import uuid

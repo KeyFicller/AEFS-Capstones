@@ -5,8 +5,6 @@ and token/model fields follow Langfuse best practices.
 Docs: https://langfuse.com/integrations/frameworks/langchain
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from terminal_coding_agent.telemetry.setup import langfuse_env

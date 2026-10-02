@@ -1,6 +1,3 @@
-
-from __future__ import annotations
-
 from pathlib import Path
 
 def resolve_in_worktree(worktree: Path, user_path: str) -> Path | str:

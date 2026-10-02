@@ -1,7 +1,5 @@
 """Record executor model/tool order and write a Mermaid sequence diagram."""
 
-from __future__ import annotations
-
 import json
 from collections.abc import Callable, Sequence
 from pathlib import Path

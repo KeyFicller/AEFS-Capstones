@@ -8,8 +8,6 @@ and the artifact manifest.
 Usage: python3 scripts/collect_eval_results.py <job-dir> [--out eval/results.jsonl]
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 import re

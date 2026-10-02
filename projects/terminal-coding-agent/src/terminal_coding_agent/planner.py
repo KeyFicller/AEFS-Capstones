@@ -1,7 +1,5 @@
 """Plan stage: one structured-output call that yields the todo list."""
 
-from __future__ import annotations
-
 import logging
 from typing import Any, Callable
 

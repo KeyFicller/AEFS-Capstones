@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from terminal_coding_agent.config import CHARS_PER_TOKEN_APPROX, TOOL_OUTPUT_TOKEN_LIMIT
 
 def truncate(text: str, limit: int = TOOL_OUTPUT_TOKEN_LIMIT) -> str:

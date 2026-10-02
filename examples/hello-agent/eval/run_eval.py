@@ -3,8 +3,6 @@
 真实项目把 TASKS 换成数据集、把 run 换成真实 harness、把基线换掉即可。
 """
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 

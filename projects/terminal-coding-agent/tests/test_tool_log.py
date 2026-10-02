@@ -1,7 +1,5 @@
 """Tool-log middleware and its execute-node wiring."""
 
-from __future__ import annotations
-
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace

@@ -1,7 +1,5 @@
 """Recover stage: bounded replanning after a task reports itself blocked."""
 
-from __future__ import annotations
-
 import json
 from collections.abc import Callable, Sequence
 from dataclasses import replace

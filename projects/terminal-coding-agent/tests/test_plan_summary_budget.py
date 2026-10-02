@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from langchain_core.messages import AIMessage
 
 from terminal_coding_agent.budget import BudgetSession

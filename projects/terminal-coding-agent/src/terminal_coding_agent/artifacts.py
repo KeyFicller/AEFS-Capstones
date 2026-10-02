@@ -5,8 +5,6 @@ convention, so a patch written there outlives the trial (and is the only reason
 a run's edits are visible at all); a local run keeps a copy under the worktree.
 """
 
-from __future__ import annotations
-
 import logging
 import subprocess
 from pathlib import Path

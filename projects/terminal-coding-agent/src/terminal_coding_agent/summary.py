@@ -1,7 +1,5 @@
 """Summary stage — the graph's single Stop point. The trace is written, always."""
 
-from __future__ import annotations
-
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any

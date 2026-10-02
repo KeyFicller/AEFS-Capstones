@@ -3,8 +3,6 @@
 With `enable_hitl`, both entry points (`make_plan`, `recover`) route through `await_plan_approval`.
 """
 
-from __future__ import annotations
-
 import inspect
 import os
 import shutil

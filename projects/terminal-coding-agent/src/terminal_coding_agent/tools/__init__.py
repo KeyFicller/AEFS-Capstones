@@ -1,7 +1,5 @@
 """Tool factories bound to a worktree."""
 
-from __future__ import annotations
-
 from pathlib import Path
 
 from terminal_coding_agent.tools.fs import build_edit_file, build_read_file
