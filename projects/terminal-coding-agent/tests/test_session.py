@@ -118,3 +118,43 @@ def test_real_graph_accepts_a_reset_on_a_fresh_thread(tmp_path: Path, monkeypatc
     values = agent.get_state(config).values
     assert values["turns"] == 0
     assert values["todo_list"] == []
+
+
+from langgraph.types import Command
+
+from terminal_coding_agent.session import pending_interrupts, resume_turn
+
+
+def test_resume_turn_sends_a_resume_command_without_resetting() -> None:
+    graph = _OrderGraph({"stop_reason": "completed"})
+
+    result = resume_turn(graph=graph, config={}, decision="approve")
+
+    assert graph.log == ["invoke"]  # NO reset: the pause *is* the checkpoint
+    assert isinstance(graph.payloads[0], Command)
+    assert result["stop_reason"] == "completed"
+
+
+def test_pending_interrupts_reads_the_paused_snapshot() -> None:
+    class _Task:
+        interrupts = ("a", "b")
+
+    class _Snap:
+        tasks = (_Task(),)
+
+    class _Graph:
+        def get_state(self, config):
+            return _Snap()
+
+    assert pending_interrupts(_Graph(), {}) == ["a", "b"]
+
+
+def test_pending_interrupts_is_empty_when_the_graph_is_not_paused() -> None:
+    class _Snap:
+        tasks = ()
+
+    class _Graph:
+        def get_state(self, config):
+            return _Snap()
+
+    assert pending_interrupts(_Graph(), {}) == []

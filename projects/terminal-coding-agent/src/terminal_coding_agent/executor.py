@@ -12,6 +12,7 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import SummarizationMiddleware
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
+from langgraph.errors import GraphBubbleUp
 
 from terminal_coding_agent.budget import (
     budget_updates,
@@ -23,6 +24,7 @@ from terminal_coding_agent.budget import (
 )
 from terminal_coding_agent.config import PRECOMPACT_TOKENS
 from terminal_coding_agent.middleware import (
+    AskUserMiddleware,
     BlockedReportMiddleware,
     BudgetMiddleware,
     ObservabilityMiddleware,
@@ -53,6 +55,7 @@ def build_execute_nodes(
     worktree: Path,
     sequence_events: list | None = None,
     tool_renderer: Callable[[str, Mapping[str, Any], str], None] | None = None,
+    enable_hitl: bool = False,
 ) -> dict[str, Callable[[CodingAgentState], dict[str, Any]]]:
     """Three parent-graph nodes so IN_PROGRESS is committed (and printed) before the agent runs."""
 
@@ -111,6 +114,8 @@ def build_execute_nodes(
             SafetyMiddleware(),
             BlockedReportMiddleware(),
         ]
+        if enable_hitl:
+            middleware.append(AskUserMiddleware())
         if sequence_events is not None:
             # Recording is on only when the caller asked for a diagram (sequence_path).
             middleware.append(
@@ -133,6 +138,10 @@ def build_execute_nodes(
                 {"messages": [HumanMessage(content=todo_list[task_index].description)]},
                 config=config,
             )
+        except GraphBubbleUp:
+            # `interrupt()` inside the sub-agent must reach the parent graph instead of being
+            # swallowed below into an executor_error. Must precede the broad handler.
+            raise
         except Exception as exc:  # noqa: BLE001 - an error is an observation, not a crash
             logger.exception("executor failed")
             return {

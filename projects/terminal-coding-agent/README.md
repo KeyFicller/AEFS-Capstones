@@ -12,6 +12,10 @@
 
 ![图结构](graph.png)
 
+> `graph.png` 是跑 demo 时顺手产出的，不是自动生成的：拓扑改了就重跑一次
+> `uv run --no-project python -m terminal_coding_agent.graph`（demo 自己放行审批，所以会跑完）。
+> 想要不带闸门的拓扑（Harbor 实际跑的）：`ENABLE_HITL=0` 前缀同一条命令。
+
 ## 跑起来
 
 在仓库根目录（环境是仓库级共享的，一个 `.venv` 所有项目通用）：
@@ -30,6 +34,17 @@ uv run --no-project terminal-coding-agent --worktree /path/to/repo
 ```
 
 `--session <id>` 固定 thread id 可续跑（需连同 `--worktree` 一起传）。
+
+交互式 REPL 默认开启**计划闸门**：计划一生成就停下来摆给你看，`approve? [y/n] ›` 输入
+`y` 放行 / `n` 否决（否决即本轮结束并写 trace）。**replan 也过闸门**：任务中途卡住触发重排计划时
+同样停下来等你确认。否决标签区分两类——初计划 `stop_reason=plan_rejected`，replan `replan_rejected`。
+闸门需要显式 `--worktree`：只有落盘 worktree 才能让「进程被杀后重启、重建审批」成立（默认临时目录退出即删）。
+Harbor 跑批不注入该开关，行为与不开闸门时完全一致。
+
+执行途中 agent 也可能**主动提问**（同一个开关控制）：弹出 `agent asks` 面板，列出至多 4 个选项，
+在 `answer ›` 处输入**编号**选一项，或**直接打一句自己的话**作答。`Ctrl-C` 表示「你自己决定」——
+agent 拿到这个信号后按自己的判断继续跑完，本轮不终止（与计划闸门的 `Ctrl-C` 含义相反，后者等同否决）。
+提问发生在任何工具执行**之前**，所以批准后不会重复执行上一步的工具。
 
 ## 工具
 

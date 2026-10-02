@@ -333,3 +333,82 @@ def _render_to_text(renderable, *, width: int = 60) -> str:
     stream = io.StringIO()
     Console(file=stream, width=width, no_color=True).print(renderable)
     return stream.getvalue()
+
+
+def test_ask_approval_accepts_y(monkeypatch) -> None:
+    stream = _capture(monkeypatch)
+    monkeypatch.setattr("builtins.input", lambda *a: "y")
+
+    assert ui.ask_approval({"plan": "[-]  step-a"}) == "approve"
+    assert "step-a" in stream.getvalue()
+
+
+def test_ask_approval_accepts_n(monkeypatch) -> None:
+    _capture(monkeypatch)
+    monkeypatch.setattr("builtins.input", lambda *a: "n")
+
+    assert ui.ask_approval({"plan": "x"}) == "reject"
+
+
+def test_ask_approval_reasks_on_garbage(monkeypatch) -> None:
+    stream = _capture(monkeypatch)
+    answers = iter(["maybe", "y"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+
+    assert ui.ask_approval({"plan": "x"}) == "approve"
+    assert "answer" in stream.getvalue()
+
+
+def test_ask_approval_skips_the_panel_when_the_caller_already_showed_it(monkeypatch) -> None:
+    """The in-turn caller's Tasks panel stays above the prompt; only the prompt is owed."""
+    stream = _capture(monkeypatch)
+    monkeypatch.setattr("builtins.input", lambda *a: "y")
+
+    assert ui.ask_approval({"plan": "[-]  step-a"}, show_plan=False) == "approve"
+    assert "step-a" not in stream.getvalue()
+
+
+def test_ask_question_accepts_a_numbered_choice(monkeypatch) -> None:
+    stream = _capture(monkeypatch)
+    monkeypatch.setattr("builtins.input", lambda *a: "2")
+
+    out = ui.ask_question(
+        {"type": "question", "question": "which?", "options": ["a", "b", "c"]}
+    )
+
+    assert out == {"answer": "b", "cancelled": False}
+    printed = stream.getvalue()
+    assert "which?" in printed and "1)" in printed and "3)" in printed
+
+
+def test_ask_question_accepts_free_text(monkeypatch) -> None:
+    _capture(monkeypatch)
+    monkeypatch.setattr("builtins.input", lambda *a: "neither, use a queue")
+
+    out = ui.ask_question({"type": "question", "question": "which?", "options": ["a", "b"]})
+
+    assert out == {"answer": "neither, use a queue", "cancelled": False}
+
+
+def test_ask_question_reasks_on_empty_input(monkeypatch) -> None:
+    stream = _capture(monkeypatch)
+    answers = iter(["", "1"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+
+    out = ui.ask_question({"type": "question", "question": "which?", "options": ["a"]})
+
+    assert out == {"answer": "a", "cancelled": False}
+    assert "answer" in stream.getvalue()
+
+
+def test_ask_question_lets_a_dismissal_escape(monkeypatch) -> None:
+    """Policy belongs to the caller: this module only reports that the user walked away."""
+    _capture(monkeypatch)
+
+    def walk_away(*_args):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", walk_away)
+
+    with pytest.raises(EOFError):
+        ui.ask_question({"type": "question", "question": "which?", "options": ["a"]})

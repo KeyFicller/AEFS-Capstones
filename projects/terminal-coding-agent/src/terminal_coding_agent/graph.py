@@ -1,8 +1,12 @@
-"""Top-level assembly: Plan -> start_task -> run_agent -> end_task -> [recover] -> Summary."""
+"""Top-level assembly: make_plan -> start_task -> run_agent -> end_task -> [recover] -> summary.
+
+With `enable_hitl`, both entry points (`make_plan`, `recover`) route through `await_plan_approval`.
+"""
 
 from __future__ import annotations
 
 import inspect
+import os
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -13,6 +17,7 @@ from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import Command, interrupt
 from opentelemetry import trace
 
 from terminal_coding_agent.checkpoint import build_checkpointer
@@ -37,6 +42,30 @@ _AGENT_PROJECT_DIR = Path(__file__).resolve().parents[2]
 
 def _after_make_plan(state: CodingAgentState) -> str:
     if state.get("stop_reason") or not state.get("todo_list"):
+        return "summary"
+    return "start_task"
+
+
+def _after_make_plan_gated(state: CodingAgentState) -> str:
+    if state.get("stop_reason") or not state.get("todo_list"):
+        return "summary"
+    return "await_plan_approval"
+
+
+def _await_plan_approval(state: CodingAgentState) -> dict[str, Any]:
+    """Plan gate. Nothing runs before `interrupt()`: the node re-runs from the top on resume."""
+    decision = interrupt({"plan": format_todos(state.get("todo_list") or [])})
+    if decision == "approve":
+        return {}
+
+    # Non-zero means `recover` rewrote the plan: a different failure mode, counted separately.
+    if state.get("replan_count"):
+        return {"stop_reason": "replan_rejected"}
+    return {"stop_reason": "plan_rejected"}
+
+
+def _after_plan_approval(state: CodingAgentState) -> str:
+    if state.get("stop_reason"):
         return "summary"
     return "start_task"
 
@@ -72,6 +101,13 @@ def _after_recover(state: CodingAgentState) -> str:
     if state.get("stop_reason") or not _has_unsettled_work(state):
         return "summary"
     return "start_task"
+
+
+def _after_recover_gated(state: CodingAgentState) -> str:
+    """`_after_recover` with the gate in place of the bare hand-off to `start_task`."""
+    if state.get("stop_reason") or not _has_unsettled_work(state):
+        return "summary"
+    return "await_plan_approval"
 
 
 def _print_todos(text: str, version: int = 0) -> None:
@@ -142,6 +178,7 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
         worktree=worktree,
         sequence_events=sequence_events,
         tool_renderer=tool_renderer if callable(tool_renderer) else None,
+        enable_hitl=bool(configurable.get("enable_hitl")),
     )
     recover = build_recover(make_plan, worktree=worktree)
 
@@ -162,11 +199,24 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
     coding_agent.add_node("summary", summary)
 
     coding_agent.add_edge(START, "make_plan")
-    coding_agent.add_conditional_edges(
-        "make_plan",
-        _after_make_plan,
-        {"start_task": "start_task", "summary": "summary"},
-    )
+    if configurable.get("enable_hitl"):
+        coding_agent.add_node("await_plan_approval", _await_plan_approval)
+        coding_agent.add_conditional_edges(
+            "make_plan",
+            _after_make_plan_gated,
+            {"await_plan_approval": "await_plan_approval", "summary": "summary"},
+        )
+        coding_agent.add_conditional_edges(
+            "await_plan_approval",
+            _after_plan_approval,
+            {"start_task": "start_task", "summary": "summary"},
+        )
+    else:
+        coding_agent.add_conditional_edges(
+            "make_plan",
+            _after_make_plan,
+            {"start_task": "start_task", "summary": "summary"},
+        )
     coding_agent.add_conditional_edges(
         "start_task",
         _after_start,
@@ -178,11 +228,18 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
         _after_end_task,
         {"start_task": "start_task", "recover": "recover", "summary": "summary"},
     )
-    coding_agent.add_conditional_edges(
-        "recover",
-        _after_recover,
-        {"start_task": "start_task", "summary": "summary"},
-    )
+    if configurable.get("enable_hitl"):
+        coding_agent.add_conditional_edges(
+            "recover",
+            _after_recover_gated,
+            {"await_plan_approval": "await_plan_approval", "summary": "summary"},
+        )
+    else:
+        coding_agent.add_conditional_edges(
+            "recover",
+            _after_recover,
+            {"start_task": "start_task", "summary": "summary"},
+        )
     coding_agent.add_edge("summary", END)
 
     compiled = coding_agent.compile(checkpointer=build_checkpointer(worktree))
@@ -212,21 +269,26 @@ if __name__ == "__main__":
                     "worktree": str(worktree),
                     "mermaid_path": str(Path(__file__).resolve().parents[2] / "graph.png"),
                     "sequence_path": str(Path(__file__).resolve().parents[2] / "sequence.png"),
+                    # Default on so graph.png shows the gate; ENABLE_HITL=0 renders Harbor's.
+                    "enable_hitl": os.environ.get("ENABLE_HITL", "1") != "0",
                 }
             }
         )
 
         from langfuse import propagate_attributes
 
+        demo_config = {"configurable": {"thread_id": "demo"}}
         with propagate_attributes(
             trace_name="terminal-coding-agent-demo",
             tags=["terminal-coding-agent", "demo", "langgraph"],
             metadata={"framework": "langgraph", "role": "demo"},
         ):
             response = agent.invoke(
-                {"messages": [HumanMessage(content=DEMO_TASK)]},
-                config={"configurable": {"thread_id": "demo"}},
+                {"messages": [HumanMessage(content=DEMO_TASK)]}, config=demo_config
             )
+            # Non-interactive: approve every gate, else the run stops here with an empty transcript.
+            while response.get("__interrupt__"):
+                response = agent.invoke(Command(resume="approve"), config=demo_config)
 
         for message in response["messages"]:
             message.pretty_print()

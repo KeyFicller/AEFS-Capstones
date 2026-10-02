@@ -32,6 +32,10 @@ CONSOLE = Console()
 # codes would count toward the prompt width and shift the line.
 PROMPT = "\001\033[1;32m\002you › \001\033[0m\002"
 PLAIN_PROMPT = "you › "
+APPROVAL_PROMPT = "\001\033[1;33m\002approve? [y/n] › \001\033[0m\002"
+PLAIN_APPROVAL_PROMPT = "approve? [y/n] › "
+QUESTION_PROMPT = "\001\033[1;36m\002answer › \001\033[0m\002"
+PLAIN_QUESTION_PROMPT = "answer › "
 
 # Tool log: which argument identifies the call, and what its result counts as.
 TOOL_MARKER = "⚙"
@@ -206,6 +210,62 @@ def ask() -> str:
     mark the ANSI escapes as zero-width. Piped stdin gets the plain text instead.
     """
     return input(PROMPT if sys.stdin.isatty() else PLAIN_PROMPT)
+
+
+def ask_approval(payload: Mapping[str, Any], *, show_plan: bool = True) -> str:
+    """Show the plan and read a decision. Distinct prompt from `ask()` on purpose.
+
+    `show_plan=False` is for a caller that already printed this plan — the turn's own
+    Tasks panel stays as scrollback — so that only the prompt is owed. The payload is
+    byte-identical to what `_announce_todos` rendered, so re-printing it just doubles it.
+    """
+    if show_plan:
+        CONSOLE.print(
+            Panel(
+                str(payload.get("plan", "")),
+                title="plan for approval",
+                border_style="yellow",
+                expand=False,
+            )
+        )
+    prompt = APPROVAL_PROMPT if sys.stdin.isatty() else PLAIN_APPROVAL_PROMPT
+    while True:
+        answer = input(prompt).strip().lower()
+        if answer in {"y", "yes", "approve"}:
+            return "approve"
+        if answer in {"n", "no", "reject"}:
+            return "reject"
+        CONSOLE.print("[yellow]answer y or n[/]")
+
+
+def ask_question(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Show a question with numbered options and read a choice or free text.
+
+    A number picks that option; anything else is taken as the user's own answer.
+    Raises EOFError/KeyboardInterrupt — the caller decides what a dismissal means,
+    exactly as `ask_approval` leaves the plan gate's reject policy to the CLI.
+    """
+    options = [str(option) for option in payload.get("options") or []]
+    body = "\n".join(
+        f"[bold]{index})[/] {option}" for index, option in enumerate(options, start=1)
+    )
+    CONSOLE.print(
+        Panel(
+            f"{payload.get('question', '')}\n\n{body}",
+            title="agent asks",
+            border_style="cyan",
+            expand=False,
+        )
+    )
+    prompt = QUESTION_PROMPT if sys.stdin.isatty() else PLAIN_QUESTION_PROMPT
+    while True:
+        answer = input(prompt).strip()
+        if not answer:
+            CONSOLE.print("[cyan]type a number or your own answer[/]")
+            continue
+        if answer.isdigit() and 1 <= int(answer) <= len(options):
+            return {"answer": options[int(answer) - 1], "cancelled": False}
+        return {"answer": answer, "cancelled": False}
 
 
 def render_reply(text: str) -> None:

@@ -11,6 +11,7 @@ from terminal_coding_agent.graph import (
     _after_end_task,
     _after_make_plan,
     _after_recover,
+    _after_recover_gated,
     make_graph,
 )
 from terminal_coding_agent.models import AgentModels
@@ -288,3 +289,59 @@ def test_make_graph_records_a_sequence_only_when_a_path_is_configured(
     os.environ.pop("DEEPSEEK_API_KEY")
 
     assert captured["sequence_events"] == []
+
+
+def test_gated_graph_adds_the_approval_node(tmp_path: Path) -> None:
+    os.environ["DEEPSEEK_API_KEY"] = "test"
+    agent = make_graph({"configurable": {"worktree": tmp_path, "enable_hitl": True}})
+    os.environ.pop("DEEPSEEK_API_KEY")
+
+    assert "await_plan_approval" in agent.builder.nodes
+    assert list(agent.builder.branches["make_plan"]) == ["_after_make_plan_gated"]
+
+
+def test_ungated_graph_has_no_approval_node(tmp_path: Path) -> None:
+    """Harbor parity: without the flag the node set and routers are unchanged."""
+    os.environ["DEEPSEEK_API_KEY"] = "test"
+    agent = make_graph({"configurable": {"worktree": tmp_path}})
+    os.environ.pop("DEEPSEEK_API_KEY")
+
+    assert "await_plan_approval" not in agent.builder.nodes
+    assert list(agent.builder.branches["make_plan"]) == ["_after_make_plan"]
+
+
+def test_make_graph_forwards_enable_hitl_to_the_execute_nodes(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Harbor parity: absent by default, so the middleware table cannot change."""
+    os.environ["DEEPSEEK_API_KEY"] = "test"
+    captured = _spy_on_execute_nodes(monkeypatch)
+
+    make_graph({"configurable": {"worktree": tmp_path}})
+    assert captured["enable_hitl"] is False
+
+    make_graph({"configurable": {"worktree": tmp_path, "enable_hitl": True}})
+    os.environ.pop("DEEPSEEK_API_KEY")
+
+    assert captured["enable_hitl"] is True
+
+
+def test_gated_graph_gates_the_replan_too(tmp_path: Path) -> None:
+    """A replan is entered from `recover`, not `make_plan` — the gate needs its own edge."""
+    os.environ["DEEPSEEK_API_KEY"] = "test"
+    agent = make_graph({"configurable": {"worktree": tmp_path, "enable_hitl": True}})
+    os.environ.pop("DEEPSEEK_API_KEY")
+
+    assert list(agent.builder.branches["recover"]) == ["_after_recover_gated"]
+
+
+def test_after_recover_gated_only_diverts_a_live_replan() -> None:
+    """Mirrors `_after_recover` except for the one case that must reach the gate."""
+    pending = [ToDoItem(status=ToDoStatus.PENDING, description="a")]
+
+    assert _after_recover_gated(_state(pending)) == "await_plan_approval"
+    assert _after_recover_gated(_state([], stop_reason="recover_exhausted")) == "summary"
+    assert (
+        _after_recover_gated(_state([ToDoItem(status=ToDoStatus.DONE, description="a")]))
+        == "summary"
+    )

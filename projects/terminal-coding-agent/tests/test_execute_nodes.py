@@ -235,3 +235,56 @@ def test_run_agent_installs_the_sequence_logger_only_when_recording(
         assert installed[0].events is events
         assert events[0] == ("task", "fix typo")
 
+
+def test_run_agent_lets_a_graph_interrupt_through(tmp_path, monkeypatch) -> None:
+    """The pause must reach the parent graph, not become an executor_error (design §4)."""
+    from langgraph.errors import GraphBubbleUp
+
+    from terminal_coding_agent import executor as executor_module
+
+    class PausingAgent:
+        def invoke(self, payload, config):
+            raise GraphBubbleUp
+
+    monkeypatch.setattr(executor_module, "create_agent", lambda **kwargs: PausingAgent())
+    nodes = build_execute_nodes(MagicMock(), tools=[], worktree=tmp_path)
+    state = _base_state(
+        [ToDoItem(status=ToDoStatus.IN_PROGRESS, description="fix typo")],
+        current_task_index=0,
+    )
+
+    with pytest.raises(GraphBubbleUp):
+        nodes["run_agent"](state, {})
+
+
+@pytest.mark.parametrize("with_hitl", [True, False])
+def test_run_agent_installs_ask_user_only_when_hitl_is_enabled(
+    tmp_path: Path, monkeypatch, with_hitl: bool
+) -> None:
+    """Harbor parity: without the flag the middleware table is unchanged."""
+    from terminal_coding_agent import executor as executor_module
+    from terminal_coding_agent.middleware.ask_user import AskUserMiddleware
+
+    captured: dict = {}
+
+    class FakeAgent:
+        def invoke(self, payload, config):
+            return {"messages": []}
+
+    def fake_create_agent(**kwargs):
+        captured["middleware"] = kwargs["middleware"]
+        return FakeAgent()
+
+    monkeypatch.setattr(executor_module, "create_agent", fake_create_agent)
+    kwargs = {"enable_hitl": with_hitl} if with_hitl else {}
+    nodes = build_execute_nodes(MagicMock(), tools=[], worktree=tmp_path, **kwargs)
+    state = _base_state(
+        [ToDoItem(status=ToDoStatus.IN_PROGRESS, description="fix typo")],
+        current_task_index=0,
+    )
+
+    nodes["run_agent"](state, {})
+
+    installed = [m for m in captured["middleware"] if isinstance(m, AskUserMiddleware)]
+    assert bool(installed) is with_hitl
+

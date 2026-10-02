@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from langchain_core.messages import HumanMessage
+from langgraph.types import Command
 
 
 def reset_updates() -> dict[str, Any]:
@@ -36,3 +37,14 @@ def run_task_turn(*, graph: Any, config: dict, text: str) -> dict[str, Any]:
     """Reset per-turn state, then run one full plan->act->observe->recover pass."""
     graph.update_state(config, reset_updates())
     return graph.invoke({"messages": [HumanMessage(content=text)]}, config)
+
+
+def resume_turn(*, graph: Any, config: dict, decision: str) -> dict[str, Any]:
+    """Resume a paused turn. Never `update_state`: the pause *is* the checkpoint."""
+    return graph.invoke(Command(resume=decision), config)
+
+
+def pending_interrupts(graph: Any, config: dict) -> list:
+    """Interrupts a paused graph is waiting on; empty when it is not paused."""
+    snapshot = graph.get_state(config)
+    return [item for task in snapshot.tasks for item in task.interrupts]

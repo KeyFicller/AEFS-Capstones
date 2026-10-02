@@ -5,15 +5,16 @@ from __future__ import annotations
 import argparse
 import tempfile
 import uuid
-from contextlib import ExitStack
+from collections.abc import Mapping
+from contextlib import AbstractContextManager, ExitStack, nullcontext
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from terminal_coding_agent import ui
 from terminal_coding_agent.config import ENV_PATH, load_local_env
 from terminal_coding_agent.graph import make_graph
 from terminal_coding_agent.models import build_models
-from terminal_coding_agent.session import run_task_turn
+from terminal_coding_agent.session import pending_interrupts, resume_turn, run_task_turn
 from terminal_coding_agent.telemetry import resolve_model_name
 
 
@@ -25,6 +26,7 @@ def _session_config(*, worktree: Path, session: str) -> dict[str, Any]:
             "thread_id": session,
             "todo_renderer": ui.TodoPanel(),
             "tool_renderer": ui.ToolLog(),
+            "enable_hitl": True,
         }
     }
 
@@ -34,6 +36,51 @@ def _render_task_result(result: dict[str, Any]) -> None:
     if messages:
         ui.render_reply(messages[-1].content)
     ui.render_budget(result)
+
+
+def _answer_prompt(payload: Any, show_plan: bool) -> Any:
+    """Resume value for one pending interrupt, dispatched on the payload's shape.
+
+    A plan gate resumes with a string decision; an `ask_user` question resumes with the
+    answer itself. Dismissal means different things to each, so it is mapped here.
+    """
+    if isinstance(payload, Mapping) and payload.get("type") == "question":
+        try:
+            return ui.ask_question(payload)
+        except (EOFError, KeyboardInterrupt):
+            # A dismissed question is not a rejection: the agent carries on by itself.
+            return {"answer": None, "cancelled": True}
+    try:
+        return ui.ask_approval(payload, show_plan=show_plan)
+    except (EOFError, KeyboardInterrupt):
+        # A declined plan prompt still walks the Stop hook, instead of leaving a live pause.
+        return "reject"
+
+
+def _drive_approvals(
+    *,
+    graph: Any,
+    config: dict[str, Any],
+    pending: Any,
+    show_plan: bool = True,
+    region: Callable[[], AbstractContextManager[Any]] | None = None,
+) -> dict[str, Any]:
+    """Answer pending approvals in-turn until the graph stops pausing.
+
+    `show_plan` applies to the first prompt only; a pause after a resume shows its own plan.
+    `region` wraps the resumed graph, not the prompt — `input()` must stay out of the Live's way.
+    """
+    open_region = region or nullcontext
+    while True:
+        decision = _answer_prompt(pending.value, show_plan)
+        show_plan = True
+
+        with open_region():
+            result = resume_turn(graph=graph, config=config, decision=decision)
+        remaining = result.get("__interrupt__") or []
+        if not remaining:
+            return result
+        pending = remaining[0]
 
 
 def repl(*, graph: Any, config: dict[str, Any], model_name: str) -> None:
@@ -46,6 +93,17 @@ def repl(*, graph: Any, config: dict[str, Any], model_name: str) -> None:
         worktree=configurable["worktree"],
         model=model_name,
     )
+    # A killed process leaves the approval in the checkpoint; rebuild it before reading input.
+    if pending := pending_interrupts(graph, config):
+        try:
+            result = _drive_approvals(
+                graph=graph, config=config, pending=pending[0], region=todos.region
+            )
+            _render_task_result(result)
+        except KeyboardInterrupt:
+            ui.render_error("turn cancelled")
+        except Exception as exc:  # noqa: BLE001 - a bad resume must not end the session
+            ui.render_error(str(exc))
     while True:
         try:
             text = ui.ask().strip()
@@ -56,6 +114,14 @@ def repl(*, graph: Any, config: dict[str, Any], model_name: str) -> None:
         try:
             with todos.region():
                 result = run_task_turn(graph=graph, config=config, text=text)
+            if pending := result.get("__interrupt__"):
+                result = _drive_approvals(
+                    graph=graph,
+                    config=config,
+                    pending=pending[0],
+                    show_plan=False,
+                    region=todos.region,
+                )
             _render_task_result(result)
         except KeyboardInterrupt:
             ui.render_error("turn cancelled")
