@@ -4,13 +4,13 @@
 pytest>=8
 
 # Agent 栈：LangGraph 编排 + LangChain 抽象 + DeepSeek provider
-# （provider 与模型名须可配置，见 .cursor/rules/20-python-stack.mdc）
+# （provider 与模型名须可配置，见 .cursor/rules/20-python.mdc）
 langchain>=1.4.2
 langgraph>=1.2.12
 langgraph-checkpoint-sqlite>=3.1.1
 langchain-deepseek>=1.1.0
 
-# CLI 渲染（TUI / 专用 renderer；库代码禁止 print，见 .cursor/rules/60-python-conventions.mdc）
+# CLI 渲染（TUI / 专用 renderer；库代码禁止 print，见 .cursor/rules/20-python.mdc）
 rich>=14
 
 # OpenTelemetry（gen_ai spans；本地 TracerProvider / InMemory 测试）
@@ -27,6 +27,25 @@ ipython>=9.17.1
 # 本地项目以 editable 方式安装（新增项目在此追加）
 -e ./examples/hello-agent
 -e ./projects/terminal-coding-agent
+-e ./projects/multimodal-doc-qa
 
 # 测试用终端模拟器：把 pty 字节流还原成屏幕，断言 TUI 布局（工具输出在 ToDo 面板之上）
 pyte>=0.8
+
+# multimodal-doc-qa：vision-first Agentic RAG
+# 页面图像编码 / 后期交互检索（本地，MPS）
+colpali-engine==0.3.18
+torch==2.13.0
+transformers==5.18.0
+# 页面渲染 + 合成语料
+pymupdf==1.28.2
+pillow>=12
+matplotlib>=3.11
+# OCR-first 基线
+sentence-transformers>=5
+pytesseract>=0.3
+# 配置 / CLI / 查看器
+pydantic>=2.9
+pydantic-settings>=2.5
+typer>=0.27
+streamlit>=1.40

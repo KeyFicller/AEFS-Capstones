@@ -25,3 +25,8 @@ projects/*/otel.jsonl
 
 # VsCode 
 .vscode/
+
+# Local artifacts
+_artifacts/
+# Built indices + rendered pages (Settings.artifacts_dir default)
+projects/*/artifacts/

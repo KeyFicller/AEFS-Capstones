@@ -1,0 +1,23 @@
+[project]
+name = "multimodal-doc-qa"
+version = "0.1.0"
+description = "Agentic RAG over document images: late-interaction retrieval, a bounded agent loop, evidence viewer"
+requires-python = ">=3.12"
+
+[project.scripts]
+doc-qa = "multimodal_doc_qa.cli:app"
+
+# Dependencies are NOT declared here - they live in the repo-root requirements.txt only.
+# To add one, edit requirements.txt; do not scatter them into sub-projects.
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/multimodal_doc_qa"]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: loads real models / hits the network",
+]
