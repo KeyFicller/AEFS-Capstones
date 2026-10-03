@@ -25,6 +25,7 @@ def _session_config(*, worktree: Path, session: str) -> dict[str, Any]:
             "todo_renderer": ui.TodoPanel(),
             "tool_renderer": ui.ToolLog(),
             "enable_hitl": True,
+            # "local_model": "qwen3:8b"
         }
     }
 

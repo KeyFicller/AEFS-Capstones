@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from langchain.chat_models import BaseChatModel, init_chat_model
 from langchain_core.runnables import RunnableConfig
+from langchain_ollama import ChatOllama
 
 from terminal_coding_agent.config import MODEL
 
@@ -42,8 +43,15 @@ def build_models(config: RunnableConfig) -> AgentModels:
     model_names = {
         role: config.get("configurable", {}).get(role, MODEL) for role in ["planner", "executor"]
     }
-    models = {
-        role: init_chat_model(model_name, extra_body={"thinking": {"type": "disabled"}})
-        for role, model_name in model_names.items()
-    }
+    if local_model := config.get("configurable", {}).get("local_model"):
+        models = {
+            role: ChatOllama(model=local_model, extra_body={"thinking": {"type": "disabled"}})
+            for role, _ in model_names.items()
+        }
+
+    else: 
+        models = {
+            role: init_chat_model(model_name, extra_body={"thinking": {"type": "disabled"}})
+            for role, model_name in model_names.items()
+        }
     return AgentModels(planner=models["planner"], executor=models["executor"])
