@@ -1,7 +1,7 @@
 import subprocess
 from pathlib import Path
 
-from langchain_core.tools import tool
+from langchain_core.tools import BaseTool, tool
 
 from terminal_coding_agent.config import SHELL_TIMEOUT_SECONDS
 from terminal_coding_agent.tools.truncate import truncate
@@ -9,7 +9,6 @@ from terminal_coding_agent.tools.truncate import truncate
 _ALLOWED = frozenset(
     {
         "init",
-        "config",
         "status",
         "diff",
         "log",
@@ -23,10 +22,11 @@ _ALLOWED = frozenset(
         "ls-files",
     }
 )
-_DENIED = frozenset({"push", "pull", "fetch", "clone", "reset"})
+
+_DENIED = frozenset({"push", "pull", "fetch", "clone", "reset", "config"})
 
 
-def build_git(worktree: Path):
+def build_git(worktree: Path) -> BaseTool:
     @tool
     def git(git_args: list[str]) -> str:
         """Run an allowlisted git command in the worktree.

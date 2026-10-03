@@ -1,7 +1,9 @@
 import difflib
+import os
+import tempfile
 from pathlib import Path
 
-from langchain_core.tools import tool
+from langchain_core.tools import BaseTool, tool
 from rich.console import Console
 from rich.syntax import Syntax
 
@@ -12,7 +14,26 @@ from terminal_coding_agent.tools.truncate import truncate
 DEBUG_RENDER_DIFF = False
 
 
-def build_read_file(worktree: Path):
+def _write_atomic(path: Path, content: str) -> None:
+    """Replace `path` through a sibling temp file, keeping its permission bits.
+
+    A killed process (budget, timeout, crash) must not leave a half-written source
+    file behind, which a plain `write_text` truncates first and rewrites after.
+    """
+    mode = path.stat().st_mode
+    handle, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as tmp_file:
+            tmp_file.write(content)
+        tmp_path.chmod(mode)
+        tmp_path.replace(path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
+def build_read_file(worktree: Path) -> BaseTool:
     @tool
     def read_file(path: str) -> str:
         """Read a UTF-8 text file under the worktree.
@@ -34,7 +55,7 @@ def build_read_file(worktree: Path):
     return read_file
 
 
-def build_edit_file(worktree: Path):
+def build_edit_file(worktree: Path) -> BaseTool:
     @tool
     def edit_file(path: str, old_str: str, new_str: str) -> str:
         """Replace a unique old_str with new_str; return unified diff.
@@ -53,6 +74,11 @@ def build_edit_file(worktree: Path):
         if not resolved.exists():
             return truncate(f"Error: file not found: {path}")
 
+        if not old_str:
+            # `"".count("")` is 1, so an empty needle would slip past the uniqueness
+            # check on an empty file and insert at the start.
+            return truncate("Error: old_str must not be empty")
+
         try:
             content = resolved.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
@@ -66,7 +92,7 @@ def build_edit_file(worktree: Path):
 
         new_content = content.replace(old_str, new_str, 1)
         try:
-            resolved.write_text(new_content, encoding="utf-8")
+            _write_atomic(resolved, new_content)
         except OSError as exc:
             return truncate(f"Error: {exc}")
 

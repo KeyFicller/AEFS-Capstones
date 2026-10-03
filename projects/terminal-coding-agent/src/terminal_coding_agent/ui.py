@@ -9,6 +9,7 @@ from typing import Any
 from rich.console import Console, Group, RenderableType
 from rich.live import Live
 from rich.markdown import Markdown
+from rich.markup import escape
 from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.syntax import Syntax
@@ -151,8 +152,9 @@ def _tool_outcome(name: str, result: str) -> str:
         return text.splitlines()[0]
     if name == "edit_file":
         lines = text.splitlines()
-        added = sum(1 for line in lines if line.startswith("+") and not line.startswith("+++"))
-        removed = sum(1 for line in lines if line.startswith("-") and not line.startswith("---"))
+        # Diff headers always carry a space after the marker; `+++foo` is content.
+        added = sum(1 for line in lines if line.startswith("+") and not line.startswith("+++ "))
+        removed = sum(1 for line in lines if line.startswith("-") and not line.startswith("--- "))
         return f"+{added} -{removed}"
     if name in _EXIT_CODE_TOOLS:
         match = re.match(r"exit_code:\s*(-?\d+)", text)
@@ -177,10 +179,11 @@ class ToolLog:
 
     def __call__(self, name: str, args: Mapping[str, Any], result: str) -> None:
         target = _tool_target(name, args)
-        head = f"[cyan]{name}[/]" + (f"  {target}" if target else "")
-        self._console.print(
-            f"[dim]{TOOL_MARKER}[/] {head}  [dim]({_tool_outcome(name, result)})[/]"
-        )
+        # Target and outcome are model/tool text: a path like `foo[bar].py` would be read
+        # as markup and raise MarkupError, so they are escaped, never interpolated raw.
+        head = f"[cyan]{escape(name)}[/]" + (f"  {escape(target)}" if target else "")
+        outcome = escape(_tool_outcome(name, result))
+        self._console.print(f"[dim]{TOOL_MARKER}[/] {head}  [dim]({outcome})[/]")
         if name == "edit_file" and result.strip() and not result.lstrip().startswith("Error:"):
             # background_color="default" keeps each line at its natural width. The
             # default theme background pads lines to 80 columns, which wraps on a
@@ -191,7 +194,9 @@ class ToolLog:
 def banner(*, session: str, worktree: str, model: str) -> None:
     """Opening panel: which thread, which worktree, which model."""
     body = Text.from_markup(
-        f"[bold]session[/]  {session}\n[bold]worktree[/] {worktree}\n[bold]model[/]    {model}"
+        f"[bold]session[/]  {escape(session)}\n"
+        f"[bold]worktree[/] {escape(str(worktree))}\n"
+        f"[bold]model[/]    {escape(model)}"
     )
     CONSOLE.print(Panel(body, title="terminal-coding-agent", border_style="cyan"))
 
@@ -218,7 +223,7 @@ def ask_approval(payload: Mapping[str, Any], *, show_plan: bool = True) -> str:
     if show_plan:
         CONSOLE.print(
             Panel(
-                str(payload.get("plan", "")),
+                escape(str(payload.get("plan", ""))),
                 title="plan for approval",
                 border_style="yellow",
                 expand=False,
@@ -242,10 +247,12 @@ def ask_question(payload: Mapping[str, Any]) -> dict[str, Any]:
     exactly as `ask_approval` leaves the plan gate's reject policy to the CLI.
     """
     options = [str(option) for option in payload.get("options") or []]
-    body = "\n".join(f"[bold]{index})[/] {option}" for index, option in enumerate(options, start=1))
+    body = "\n".join(
+        f"[bold]{index})[/] {escape(option)}" for index, option in enumerate(options, start=1)
+    )
     CONSOLE.print(
         Panel(
-            f"{payload.get('question', '')}\n\n{body}",
+            f"{escape(str(payload.get('question', '')))}\n\n{body}",
             title="agent asks",
             border_style="cyan",
             expand=False,
@@ -257,7 +264,9 @@ def ask_question(payload: Mapping[str, Any]) -> dict[str, Any]:
         if not answer:
             CONSOLE.print("[cyan]type a number or your own answer[/]")
             continue
-        if answer.isdigit() and 1 <= int(answer) <= len(options):
+        # isdecimal(), not isdigit(): isdigit() also accepts characters `int()` rejects
+        # (superscripts), which would raise ValueError out of the prompt.
+        if answer.isdecimal() and 1 <= int(answer) <= len(options):
             return {"answer": options[int(answer) - 1], "cancelled": False}
         return {"answer": answer, "cancelled": False}
 
@@ -267,7 +276,9 @@ def render_reply(text: str) -> None:
 
 
 def render_error(message: str) -> None:
-    CONSOLE.print(Panel(message, title="error", border_style="red"))
+    # escape(): this is the handler for failures, and exception text routinely contains
+    # brackets (`KeyError: 'a[b]'`) — unescaped it would raise MarkupError instead.
+    CONSOLE.print(Panel(escape(message), title="error", border_style="red"))
 
 
 def render_budget(state: Mapping[str, Any]) -> None:

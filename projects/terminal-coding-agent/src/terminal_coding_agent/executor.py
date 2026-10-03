@@ -71,14 +71,15 @@ def build_execute_nodes(
             write_trace(trace, ledger, todo_list=todos, stop_reason=reason)
             return {**budget_updates(ledger), **clear_block, "stop_reason": reason}
 
+        todo_items = list(state.get("todo_list") or [])
         task_index = next(
-            (i for i, item in enumerate(state["todo_list"]) if item.status == ToDoStatus.PENDING),
+            (i for i, item in enumerate(todo_items) if item.status == ToDoStatus.PENDING),
             None,
         )
         if task_index is None:
             raise AssertionError("No pending task found")
 
-        todo_list = list(state["todo_list"])
+        todo_list = list(todo_items)
         todo_list[task_index] = replace(todo_list[task_index], status=ToDoStatus.IN_PROGRESS)
         return {
             "todo_list": todo_list,

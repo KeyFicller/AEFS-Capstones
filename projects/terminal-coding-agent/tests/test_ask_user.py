@@ -199,6 +199,45 @@ def test_only_the_first_question_of_a_batch_is_asked() -> None:
     assert "Error: ask one question per step." in contents
 
 
+def test_a_non_list_options_value_is_an_error_not_a_crash() -> None:
+    """`options` is model output: iterating a number must not raise out of the middleware."""
+    state = {
+        "messages": [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": "ask_user", "args": {"question": "q", "options": 3}, "id": "1"}
+                ],
+            )
+        ]
+    }
+
+    out = AskUserMiddleware().after_model(state, None)
+
+    assert out is not None
+    assert out["messages"][-1].status == "error"
+    assert "1 to 4" in out["messages"][-1].content
+
+
+def test_a_string_options_value_is_not_split_into_characters() -> None:
+    """`options: "abc"` would become three options and pass the bound check unearned."""
+    state = {
+        "messages": [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": "ask_user", "args": {"question": "q", "options": "abc"}, "id": "1"}
+                ],
+            )
+        ]
+    }
+
+    out = AskUserMiddleware().after_model(state, None)
+
+    assert out is not None
+    assert out["messages"][-1].status == "error"
+
+
 def test_the_real_execute_node_surfaces_the_question_to_the_parent_graph(
     tmp_path: Path,
 ) -> None:

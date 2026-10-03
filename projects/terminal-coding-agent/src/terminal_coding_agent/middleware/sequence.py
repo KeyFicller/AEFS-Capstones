@@ -54,7 +54,7 @@ def _append_message(lines: list[str], event: SequenceEvent) -> None:
         preview = event[2] if len(event) > 2 else ""
         lines.append(f"    Model->>{event[1]}: call({preview})")
     elif kind == "return":
-        lines.append(f"    {event[1]}-->>Model: {event[2]}")
+        lines.append(f"    {event[1]}-->>Model: {event[2] if len(event) > 2 else ''}")
     elif kind == "reply":
         lines.append("    Note over Model: reply")
 

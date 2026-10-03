@@ -180,3 +180,15 @@ def test_recover_propagates_a_planner_stop_reason(tmp_path: Path) -> None:
     out = node(state, RunnableConfig())
 
     assert out["stop_reason"] == "planner_error:RuntimeError"
+
+
+def test_evidence_honours_a_non_positive_max_entries() -> None:
+    """`entries[-0:]` is the whole list, so 0 must mean "keep nothing"."""
+    messages = [
+        AIMessage(
+            content="",
+            tool_calls=[{"name": "run_shell", "args": {"command": "pytest -q"}, "id": "1"}],
+        )
+    ]
+
+    assert project_evidence(messages, max_entries=0) == []

@@ -31,3 +31,13 @@ def test_assert_no_content_attributes(tmp_path: Path):
         span.set_attribute("gen_ai.input.messages", "Hello, world!")
         with pytest.raises(ValueError):
             assert_no_content_attributes(span)
+
+
+def test_tool_result_is_a_forbidden_content_attribute(tmp_path: Path):
+    """Tool output is content too: it must be rejected like the arguments are."""
+    provider = TracerProvider()
+    tracer = provider.get_tracer("test")
+    with tracer.start_as_current_span("probe") as span:
+        span.set_attribute("gen_ai.tool.call.result", "file contents")
+        with pytest.raises(ValueError):
+            assert_no_content_attributes(span)

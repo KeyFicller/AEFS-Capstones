@@ -65,7 +65,7 @@ def project_evidence(
                     "detail": f"{message.status}: {message.content}",
                 }
             )
-    tail = entries[-max_entries:]
+    tail = entries[-max_entries:] if max_entries > 0 else []
     return [{**entry, "detail": entry["detail"][:max_chars]} for entry in tail]
 
 

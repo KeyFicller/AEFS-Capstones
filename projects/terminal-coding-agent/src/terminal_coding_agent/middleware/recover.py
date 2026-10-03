@@ -52,7 +52,7 @@ class BlockedReportMiddleware(AgentMiddleware):
         if not blocked:
             return None
 
-        reason = str((blocked[0].get("args") or {}).get("reason", ""))
+        reason = str((blocked[0].get("args") or {}).get("reason") or "")
         skipped = [call for call in last_ai.tool_calls if call["name"] != "report_blocked"]
         return {
             "jump_to": "end",

@@ -113,3 +113,12 @@ def test_one_invoke_writes_one_png(tmp_path: Path) -> None:
     assert "call(pytest)" in written[0]
     assert "call(a.py)" in written[0]
     assert not (tmp_path / "task-0.png").exists()
+
+
+def test_sequence_diagram_tolerates_a_short_event_tuple() -> None:
+    """`sequence_diagram` is public and takes tuples: a 2-tuple must not IndexError."""
+    diagram = sequence_diagram(
+        [("task", "fix the typo"), ("call", "run_shell"), ("return", "run_shell")]
+    )
+
+    assert "run_shell-->>Model" in diagram

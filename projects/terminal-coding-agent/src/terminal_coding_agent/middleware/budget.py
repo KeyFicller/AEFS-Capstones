@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -10,6 +11,8 @@ from terminal_coding_agent.budget import (
     check,
     usage_from_message,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _ai_message_from_result(result: Any) -> AIMessage | None:
@@ -44,48 +47,38 @@ class BudgetMiddleware(AgentMiddleware):
                 updates[key] = value
         return updates or None
 
+    def _bill(self, result: Any) -> None:
+        """Count one model invocation; the cap is only as good as this bookkeeping."""
+        ai_message = _ai_message_from_result(result)
+        if ai_message is None:
+            logger.warning("budget: model result carried no AIMessage; usage not counted")
+            return
+        input_tokens, output_tokens, cache_read = usage_from_message(ai_message)
+        apply_usage(
+            self.ledger,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_tokens=cache_read,
+        )
+        if tripped := check(self.ledger):
+            self.ledger.stop_reason = tripped
+
     def wrap_model_call(self, request: Any, handler: Callable[..., Any]) -> Any:
-        reason = check(self.ledger)
-        if reason is not None:
+        if reason := check(self.ledger):
             self.ledger.stop_reason = reason
             return AIMessage(content=f"Stopped: budget exceeded ({reason})")
 
         result = handler(request)
-        ai_message = _ai_message_from_result(result)
-        if ai_message is not None:
-            input_tokens, output_tokens, cache_read = usage_from_message(ai_message)
-            apply_usage(
-                self.ledger,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                cache_read_tokens=cache_read,
-            )
-            tripped = check(self.ledger)
-            if tripped is not None:
-                self.ledger.stop_reason = tripped
-
+        self._bill(result)
         return result
 
     async def awrap_model_call(self, request: Any, handler: Callable[..., Any]) -> Any:
-        reason = check(self.ledger)
-        if reason is not None:
+        if reason := check(self.ledger):
             self.ledger.stop_reason = reason
             return AIMessage(content=f"Stopped: budget exceeded ({reason})")
 
         result = await handler(request)
-        ai_message = _ai_message_from_result(result)
-        if ai_message is not None:
-            input_tokens, output_tokens, cache_read = usage_from_message(ai_message)
-            apply_usage(
-                self.ledger,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                cache_read_tokens=cache_read,
-            )
-            tripped = check(self.ledger)
-            if tripped is not None:
-                self.ledger.stop_reason = tripped
-
+        self._bill(result)
         return result
 
     def after_agent(self, state: Any, runtime: Any) -> dict[str, Any] | None:

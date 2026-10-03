@@ -12,6 +12,7 @@ FORBIDDEN_ATTR_PREFIXES_OR_KEYS = (
     "gen_ai.input.messages",
     "gen_ai.output.messages",
     "gen_ai.tool.call.arguments",
+    "gen_ai.tool.call.result",
     "gen_ai.prompt",
     "gen_ai.completion",
 )

@@ -317,6 +317,10 @@ def _dismiss(*_args, **_kwargs):
     raise EOFError
 
 
+def _interrupt(*_args, **_kwargs):
+    raise KeyboardInterrupt
+
+
 class _QuestionGraph(_PausingGraph):
     """First invoke pauses on an `ask_user` question; a `Command` input means resume."""
 
@@ -352,7 +356,7 @@ def test_repl_maps_a_dismissed_question_to_the_cancelled_sentinel(tmp_path, monk
     _capture(monkeypatch)
     graph = _QuestionGraph()
     monkeypatch.setattr(ui, "ask", _asker(["fix the typo"]))
-    monkeypatch.setattr(ui, "ask_question", _dismiss)
+    monkeypatch.setattr(ui, "ask_question", _interrupt)
 
     cli.repl(
         graph=graph,
@@ -361,6 +365,23 @@ def test_repl_maps_a_dismissed_question_to_the_cancelled_sentinel(tmp_path, monk
     )
 
     assert graph.payloads[-1].resume == {"answer": None, "cancelled": True}
+
+
+def test_repl_ends_the_turn_on_eof_at_a_question(tmp_path, monkeypatch) -> None:
+    """EOF closes the answer channel for good: resuming would ask again forever."""
+    _capture(monkeypatch)
+    graph = _QuestionGraph()
+    monkeypatch.setattr(ui, "ask", _asker(["fix the typo"]))
+    monkeypatch.setattr(ui, "ask_question", _dismiss)
+
+    cli.repl(
+        graph=graph,
+        config=cli._session_config(worktree=tmp_path, session="s1"),
+        model_name="m",
+    )
+
+    # Only the task turn ran; no resume was issued with a sentinel answer.
+    assert all(isinstance(payload, dict) for payload in graph.payloads)
 
 
 def test_repl_keeps_rejecting_a_declined_plan_prompt(tmp_path, monkeypatch) -> None:

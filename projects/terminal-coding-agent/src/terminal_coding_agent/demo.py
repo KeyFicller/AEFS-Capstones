@@ -1,7 +1,10 @@
 """Seeded worktree + prompt for the local graph.py demo."""
 
+import os
 import subprocess
 from pathlib import Path
+
+from terminal_coding_agent.config import SHELL_TIMEOUT_SECONDS
 
 DEMO_TASK = """\
 You are working in an existing git worktree (already `git init`'d).
@@ -42,6 +45,20 @@ _README = """# demo worktree
 """
 
 
+def _git(worktree: Path, *args: str) -> None:
+    """Run one git command with a bounded timeout and no interactive prompts."""
+    subprocess.run(
+        ["git", *args],
+        cwd=worktree,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=SHELL_TIMEOUT_SECONDS,
+        stdin=subprocess.DEVNULL,
+        env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": "true"},
+    )
+
+
 def seed_demo_worktree(worktree: Path) -> None:
     """Write starter files and create an initial git commit (git init is not tool-allowlisted)."""
     worktree = worktree.resolve()
@@ -49,22 +66,19 @@ def seed_demo_worktree(worktree: Path) -> None:
     (worktree / "greeter.py").write_text(_GREETER_PY, encoding="utf-8")
     (worktree / "README.md").write_text(_README, encoding="utf-8")
 
-    subprocess.run(["git", "init"], cwd=worktree, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "config", "user.email", "demo@example.com"],
+    _git(worktree, "init")
+    _git(worktree, "config", "user.email", "demo@example.com")
+    _git(worktree, "config", "user.name", "Demo Agent")
+    _git(worktree, "add", "greeter.py", "README.md")
+    # Idempotent: on an already-seeded worktree (same bytes) `git add` stages nothing
+    # and a plain `git commit` would fail with "nothing to commit" and check=True.
+    status = subprocess.run(
+        ["git", "status", "--porcelain"],
         cwd=worktree,
         check=True,
         capture_output=True,
-    )
-    subprocess.run(
-        ["git", "config", "user.name", "Demo Agent"], cwd=worktree, check=True, capture_output=True
-    )
-    subprocess.run(
-        ["git", "add", "greeter.py", "README.md"], cwd=worktree, check=True, capture_output=True
-    )
-    subprocess.run(
-        ["git", "commit", "-m", "chore: seed broken greeter for demo"],
-        cwd=worktree,
-        check=True,
-        capture_output=True,
-    )
+        text=True,
+        timeout=SHELL_TIMEOUT_SECONDS,
+    ).stdout
+    if status.strip():
+        _git(worktree, "commit", "-m", "chore: seed broken greeter for demo")

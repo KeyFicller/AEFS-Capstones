@@ -36,9 +36,13 @@ def ask_user(question: str, options: list[str]) -> str:
     return "Error: AskUserMiddleware did not intercept ask_user"
 
 
-def _answer_text(value: Mapping[str, Any]) -> str:
-    """Turn the resume value into the ToolMessage the model reads."""
-    if value.get("cancelled"):
+def _answer_text(value: Any) -> str:
+    """Turn the resume value into the ToolMessage the model reads.
+
+    `interrupt()` can be resumed with anything (`Command(resume=<any>)`), so a
+    non-mapping value is treated as a dismissal instead of raising out of the loop.
+    """
+    if not isinstance(value, Mapping) or value.get("cancelled"):
         return "The user did not answer; use your best judgement and continue."
     return f"User answered: {value.get('answer')}"
 
@@ -77,7 +81,10 @@ class AskUserMiddleware(AgentMiddleware):
         # Nothing above `interrupt()` may have a side effect: on resume this re-runs from the top.
         question, extra = asked[0], asked[1:]
         args = question.get("args") or {}
-        options = [str(option) for option in args.get("options") or []]
+        raw_options = args.get("options")
+        # Model output: only a list counts. Anything else (a bare string, a number, a
+        # dict) is reported back as an error instead of being iterated into shape.
+        options = [str(option) for option in raw_options] if isinstance(raw_options, list) else []
 
         answers: list[ToolMessage] = []
         if MIN_OPTIONS <= len(options) <= MAX_OPTIONS:

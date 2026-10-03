@@ -1,5 +1,6 @@
 """Interactive session semantics: per-turn reset and turn execution."""
 
+from collections.abc import Mapping
 from typing import Any
 
 from langchain_core.messages import HumanMessage
@@ -37,8 +38,12 @@ def run_task_turn(*, graph: Any, config: dict, text: str) -> dict[str, Any]:
     return graph.invoke({"messages": [HumanMessage(content=text)]}, config)
 
 
-def resume_turn(*, graph: Any, config: dict, decision: str) -> dict[str, Any]:
-    """Resume a paused turn. Never `update_state`: the pause *is* the checkpoint."""
+def resume_turn(*, graph: Any, config: dict, decision: str | Mapping[str, Any]) -> dict[str, Any]:
+    """Resume a paused turn. Never `update_state`: the pause *is* the checkpoint.
+
+    `decision` is a string for the plan gate and the `{"answer", "cancelled"}` mapping
+    for an `ask_user` question.
+    """
     return graph.invoke(Command(resume=decision), config)
 
 

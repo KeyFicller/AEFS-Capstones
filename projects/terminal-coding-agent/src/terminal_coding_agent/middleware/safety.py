@@ -14,11 +14,16 @@ _DESTRUCTIVE_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
         r"\brm\s+-[^\s]*f[^\s]*r[^\s]*\s+/",
         r"\bmkfs\b",
         r"\bdd\s+if=",
-        r"\bcurl\b[^|\n]*\|\s*(sh|bash)\b",
-        r"\bwget\b[^|\n]*\|\s*(sh|bash)\b",
-        r":\(\)\s*\{\s*:\|:&\s*\}\s*;?",  # fork bomb
+        # Pipe-to-interpreter covers `sudo bash`, `/bin/sh`, `zsh`, `python3`, ...
+        r"\b(?:curl|wget)\b[^|\n]*\|\s*(?:sudo\s+)?(?:\S*/)?"
+        r"(?:sh|bash|zsh|dash|ksh|python3?|perl|ruby|node)\b",
+        r":\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;?",  # fork bomb
     )
 )
+
+# Quotes and escapes hide a payload from the patterns above; the guard also scans a
+# version with those characters removed (`sh -c 'rm -rf /'` -> `sh -c rm -rf /`).
+_QUOTE_ESCAPE_CHARS = str.maketrans("", "", "'\"\\")
 
 
 def is_destructive_shell(command: str) -> bool:
@@ -26,23 +31,41 @@ def is_destructive_shell(command: str) -> bool:
     text = command.strip()
     if not text:
         return False
-    compact = re.sub(r"\s+", "", text)
-    if re.search(r":\(\)\{:\|:&\};?", compact):
-        return True
-    return any(pattern.search(text) for pattern in _DESTRUCTIVE_PATTERNS)
+    for variant in (text, text.translate(_QUOTE_ESCAPE_CHARS)):
+        compact = re.sub(r"\s+", "", variant)
+        if re.search(r":\(\)\{:\|:&\};?", compact):
+            return True
+        if any(pattern.search(variant) for pattern in _DESTRUCTIVE_PATTERNS):
+            return True
+    return False
 
 
 class SafetyMiddleware(AgentMiddleware):
-    """PreToolUse guard: block destructive run_shell commands (D3)."""
+    """PreToolUse guard: block destructive run_shell commands (D3).
+
+    Both hooks are implemented: the executor calls `agent.invoke`, but
+    `AgentMiddleware.awrap_tool_call` *raises* when only the sync hook exists, so
+    an async caller (or a future switch to `ainvoke`) would turn the guard into a
+    crash instead of a block.
+    """
+
+    def _blocked(self, request: Any) -> ToolMessage | None:
+        tool_call = getattr(request, "tool_call", None) or {}
+        if tool_call.get("name") != "run_shell":
+            return None
+        command = str((tool_call.get("args") or {}).get("command", ""))
+        if not is_destructive_shell(command):
+            return None
+        return ToolMessage(
+            content=(f"Error: blocked by PreToolUse: destructive command: {command}"),
+            tool_call_id=tool_call["id"],
+            status="error",
+        )
 
     def wrap_tool_call(self, request: Any, handler: Callable[..., Any]) -> Any:
-        name = request.tool_call.get("name")
-        if name == "run_shell":
-            command = str((request.tool_call.get("args") or {}).get("command", ""))
-            if is_destructive_shell(command):
-                return ToolMessage(
-                    content=(f"Error: blocked by PreToolUse: destructive command: {command}"),
-                    tool_call_id=request.tool_call["id"],
-                    status="error",
-                )
-        return handler(request)
+        blocked = self._blocked(request)
+        return blocked if blocked is not None else handler(request)
+
+    async def awrap_tool_call(self, request: Any, handler: Callable[..., Any]) -> Any:
+        blocked = self._blocked(request)
+        return blocked if blocked is not None else await handler(request)

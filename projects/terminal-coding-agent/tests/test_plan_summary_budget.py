@@ -23,7 +23,8 @@ def test_budget_session_applies_usage_on_exit() -> None:
     assert updates["stop_reason"] is None
 
 
-def test_budget_session_skips_usage_on_error() -> None:
+def test_budget_session_applies_usage_on_error() -> None:
+    """A message the provider already billed counts even if the block later raised."""
     msg = AIMessage(
         content="ok",
         usage_metadata={
@@ -38,4 +39,5 @@ def test_budget_session_skips_usage_on_error() -> None:
             raise RuntimeError("boom")
     except RuntimeError:
         pass
-    assert budget.updates()["turns"] == 0
+    assert budget.updates()["turns"] == 1
+    assert budget.updates()["tokens"] == 13

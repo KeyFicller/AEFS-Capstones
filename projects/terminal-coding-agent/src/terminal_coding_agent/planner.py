@@ -38,7 +38,9 @@ def build_planner(models: AgentModels) -> Callable[..., dict[str, Any]]:
                     response = planner_model.invoke(state["messages"], config=config)
                     record_chat_usage(span, response["raw"], model=model_name)
                 budget.observe(response["raw"])
-                parsed: Plan = response["parsed"]
+                parsed = response["parsed"]
+                if parsed is None:
+                    raise ValueError(f"structured output parse failed: {response['parsing_error']}")
 
                 def format_steps(plan: Plan) -> str:
                     return f"Task: {plan.task}\n" + "\n".join(f"- {step}" for step in plan.steps)

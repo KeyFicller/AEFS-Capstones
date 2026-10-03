@@ -37,6 +37,10 @@ def _render_task_result(result: dict[str, Any]) -> None:
     ui.render_budget(result)
 
 
+class _StdinClosedError(Exception):
+    """`input()` saw EOF while a question was pending: no answer can arrive again."""
+
+
 def _answer_prompt(payload: Any, show_plan: bool) -> Any:
     """Resume value for one pending interrupt, dispatched on the payload's shape.
 
@@ -46,7 +50,11 @@ def _answer_prompt(payload: Any, show_plan: bool) -> Any:
     if isinstance(payload, Mapping) and payload.get("type") == "question":
         try:
             return ui.ask_question(payload)
-        except (EOFError, KeyboardInterrupt):
+        except EOFError:
+            # Ctrl-D (piped stdin, Harbor log) cannot answer the next question either;
+            # resuming with "carry on" would let the model ask again and loop forever.
+            raise _StdinClosedError from None
+        except KeyboardInterrupt:
             # A dismissed question is not a rejection: the agent carries on by itself.
             return {"answer": None, "cancelled": True}
     try:
@@ -99,6 +107,8 @@ def repl(*, graph: Any, config: dict[str, Any], model_name: str) -> None:
                 graph=graph, config=config, pending=pending[0], region=todos.region
             )
             _render_task_result(result)
+        except _StdinClosedError:
+            return
         except KeyboardInterrupt:
             ui.render_error("turn cancelled")
         except Exception as exc:  # noqa: BLE001 - a bad resume must not end the session
@@ -122,6 +132,10 @@ def repl(*, graph: Any, config: dict[str, Any], model_name: str) -> None:
                     region=todos.region,
                 )
             _render_task_result(result)
+        except _StdinClosedError:
+            # EOF during a question: nothing else can be read, so end the session
+            # instead of re-entering the drain loop with no answer.
+            return
         except KeyboardInterrupt:
             ui.render_error("turn cancelled")
         except Exception as exc:  # noqa: BLE001 - one bad turn must not end the session

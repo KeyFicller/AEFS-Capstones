@@ -1,6 +1,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from terminal_coding_agent.middleware.observability import ObservabilityMiddleware
@@ -53,3 +54,21 @@ def test_wrap_model_and_tool_emit_gen_ai_spans(tmp_path: Path) -> None:
 
     for span in spans:
         assert_no_content_attributes(span)
+
+
+def test_a_span_without_a_model_attribute_is_still_emitted_on_failure(tmp_path: Path) -> None:
+    """A chat span is only useful if it says which model failed."""
+    exporter = InMemorySpanExporter()
+    setup_tracing(worktree=tmp_path, exporter=exporter)
+    middleware = ObservabilityMiddleware(model_name="deepseek-v4-flash")
+
+    def boom(request):
+        raise RuntimeError("429 rate limited")
+
+    with pytest.raises(RuntimeError):
+        middleware.wrap_model_call(_model_request(), boom)
+
+    chat = next(span for span in exporter.get_finished_spans() if span.name.startswith("chat "))
+    assert chat.attributes[ATTR_MODEL] == "deepseek-v4-flash"
+    assert chat.attributes["error.type"] == "RuntimeError"
+    assert_no_content_attributes(chat)

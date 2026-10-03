@@ -407,3 +407,58 @@ def test_ask_question_lets_a_dismissal_escape(monkeypatch) -> None:
 
     with pytest.raises(EOFError):
         ui.ask_question({"type": "question", "question": "which?", "options": ["a"]})
+
+
+def test_tool_log_survives_brackets_in_a_path(monkeypatch) -> None:
+    """A path like `foo[bar].py` is markup to rich: unescaped it would raise MarkupError."""
+    stream = _capture(monkeypatch)
+    log = ui.ToolLog()
+
+    log("read_file", {"path": "src/foo[bar].py"}, "l1\nl2")
+    log("read_file", {"path": "x"}, "Error: [red]boom[/red]")
+
+    out = stream.getvalue()
+    assert "foo[bar].py" in out
+    assert "[red]boom[/red]" in out
+
+
+def test_render_error_survives_brackets(monkeypatch) -> None:
+    """The error renderer is the last line of defence; it must not raise itself."""
+    stream = _capture(monkeypatch)
+
+    ui.render_error("KeyError: 'a[b]'")
+
+    assert "KeyError" in stream.getvalue()
+
+
+def test_banner_survives_bracketed_paths(monkeypatch) -> None:
+    stream = _capture(monkeypatch)
+
+    ui.banner(session="s[1]", worktree="/tmp/wt[x]", model="m")
+
+    out = stream.getvalue()
+    assert "/tmp/wt[x]" in out
+
+
+def test_ask_question_handles_a_unicode_digit(monkeypatch) -> None:
+    """`'²'.isdigit()` is True but `int('²')` raises: the prompt must not crash on it."""
+    _capture(monkeypatch)
+    answers = iter(["²"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+
+    out = ui.ask_question({"type": "question", "question": "which?", "options": ["a", "b"]})
+
+    assert out == {"answer": "²", "cancelled": False}
+
+
+def test_ask_question_escapes_a_bracketed_option(monkeypatch) -> None:
+    stream = _capture(monkeypatch)
+    answers = iter(["1"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+
+    out = ui.ask_question(
+        {"type": "question", "question": "which[?]", "options": ["use [bold]a[/bold]"]}
+    )
+
+    assert out == {"answer": "use [bold]a[/bold]", "cancelled": False}
+    assert "which[?]" in stream.getvalue()

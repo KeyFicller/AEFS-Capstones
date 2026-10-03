@@ -4,6 +4,7 @@ With `enable_hitl`, both entry points (`make_plan`, `recover`) route through `aw
 """
 
 import inspect
+import logging
 import os
 import shutil
 import tempfile
@@ -36,6 +37,7 @@ from terminal_coding_agent.tools import make_tools
 
 # projects/terminal-coding-agent (not the monorepo root)
 _AGENT_PROJECT_DIR = Path(__file__).resolve().parents[2]
+logger = logging.getLogger(__name__)
 
 
 def _after_make_plan(state: CodingAgentState) -> str:
@@ -127,7 +129,7 @@ def _announce_todos(node: Callable) -> Callable:
     so a print inside the reducer repeated itself; the assembly layer sees each
     update exactly once. Nodes that do not rewrite `todo_list` stay silent.
     """
-    takes_config = len(inspect.signature(node).parameters) > 1
+    takes_config = "config" in inspect.signature(node).parameters
 
     def announced(state: CodingAgentState, config: RunnableConfig) -> dict[str, Any]:
         updates = node(state, config) if takes_config else node(state)
@@ -140,16 +142,25 @@ def _announce_todos(node: Callable) -> Callable:
 
 
 def _write_mermaid_png(compiled: CompiledStateGraph, config: RunnableConfig) -> None:
-    """Write a PNG when mermaid_path is set. Nothing is printed or opened."""
+    """Write a PNG when mermaid_path is set. Nothing is printed or opened.
+
+    Rendering goes through mermaid.ink, so it is unavailable in an isolated container
+    and must not be able to fail `make_graph`. Bytes are rendered before touching the
+    target, leaving any previous diagram in place when rendering fails.
+    """
     raw = (config.get("configurable") or {}).get("mermaid_path")
     if not raw:
         return
     png_path = Path(raw)
     if png_path.suffix.lower() != ".png":
         png_path = png_path / "graph.png"
+    try:
+        png_bytes = compiled.get_graph(xray=True).draw_mermaid_png()
+    except Exception:  # noqa: BLE001 - a missing diagram must not break the graph
+        logger.warning("could not render %s", png_path, exc_info=True)
+        return
     png_path.parent.mkdir(parents=True, exist_ok=True)
-    png_path.unlink(missing_ok=True)
-    png_path.write_bytes(compiled.get_graph(xray=True).draw_mermaid_png())
+    png_path.write_bytes(png_bytes)
 
 
 def make_graph(config: RunnableConfig) -> CompiledStateGraph:

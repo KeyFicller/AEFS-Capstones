@@ -25,7 +25,9 @@ def _ai_message_from_result(result: Any) -> AIMessage | None:
 
 
 def _usage_tokens(ai_message: AIMessage) -> tuple[int | None, int | None]:
-    usage = getattr(ai_message, "usage_metadata", None) or {}
+    usage = getattr(ai_message, "usage_metadata", None)
+    if not isinstance(usage, dict):
+        return None, None
     return usage.get("input_tokens"), usage.get("output_tokens")
 
 
@@ -42,6 +44,7 @@ class ObservabilityMiddleware(AgentMiddleware):
                 result = handler(request)
             except Exception as exc:
                 span.set_attribute(ATTR_ERROR_TYPE, type(exc).__name__)
+                set_chat_attributes(span, model=self.model_name)
                 raise
             ai_message = _ai_message_from_result(result)
             input_tokens = output_tokens = None
@@ -63,6 +66,7 @@ class ObservabilityMiddleware(AgentMiddleware):
                 result = await handler(request)
             except Exception as exc:
                 span.set_attribute(ATTR_ERROR_TYPE, type(exc).__name__)
+                set_chat_attributes(span, model=self.model_name)
                 raise
             ai_message = _ai_message_from_result(result)
             input_tokens = output_tokens = None

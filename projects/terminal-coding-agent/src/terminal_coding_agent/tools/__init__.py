@@ -2,13 +2,15 @@
 
 from pathlib import Path
 
+from langchain_core.tools import BaseTool
+
 from terminal_coding_agent.tools.fs import build_edit_file, build_read_file
 from terminal_coding_agent.tools.git import build_git
 from terminal_coding_agent.tools.search import build_ripgrep, build_tree_sitter_symbols
 from terminal_coding_agent.tools.shell import build_run_shell
 
 
-def make_tools(worktree: Path) -> list:
+def make_tools(worktree: Path) -> list[BaseTool]:
     root = worktree.resolve()
     return [
         build_read_file(root),
@@ -20,5 +22,5 @@ def make_tools(worktree: Path) -> list:
     ]
 
 
-def tools_by_name(worktree: Path) -> dict:
-    return {t.name: t for t in make_tools(worktree)}
+def tools_by_name(worktree: Path) -> dict[str, BaseTool]:
+    return {tool.name: tool for tool in make_tools(worktree)}

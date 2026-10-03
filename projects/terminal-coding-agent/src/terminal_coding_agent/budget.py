@@ -56,6 +56,7 @@ def apply_usage(
     output_tokens: int,
     cache_read_tokens: int = 0,
 ) -> None:
+    cache_read_tokens = min(cache_read_tokens, input_tokens)
     ledger.turns += 1
     ledger.input_tokens += input_tokens
     ledger.output_tokens += output_tokens
@@ -136,7 +137,7 @@ class BudgetSession:
         return budget_updates(self.ledger)
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
-        if exc_type is None and self._message is not None:
+        if self._message is not None:
             input_tokens, output_tokens, cache_read = usage_from_message(self._message)
             apply_usage(
                 self.ledger,

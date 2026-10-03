@@ -2,14 +2,14 @@ import ast
 import subprocess
 from pathlib import Path
 
-from langchain_core.tools import tool
+from langchain_core.tools import BaseTool, tool
 
 from terminal_coding_agent.config import SHELL_TIMEOUT_SECONDS
 from terminal_coding_agent.tools.path import resolve_in_worktree
 from terminal_coding_agent.tools.truncate import truncate
 
 
-def build_ripgrep(worktree: Path):
+def build_ripgrep(worktree: Path) -> BaseTool:
     @tool
     def ripgrep(pattern: str, path: str = ".") -> str:
         """Search for a pattern in a file or directory using ripgrep.
@@ -48,6 +48,8 @@ def build_ripgrep(worktree: Path):
             return truncate("Error: rg not found")
         except subprocess.TimeoutExpired:
             return truncate(f"Error: rg timed out after {SHELL_TIMEOUT_SECONDS}s")
+        except OSError as exc:
+            return truncate(f"Error: could not run rg: {exc}")
 
         if results.returncode in (0, 1):
             return truncate(results.stdout)
@@ -56,7 +58,7 @@ def build_ripgrep(worktree: Path):
     return ripgrep
 
 
-def build_tree_sitter_symbols(worktree: Path):
+def build_tree_sitter_symbols(worktree: Path) -> BaseTool:
     @tool
     def tree_sitter_symbols(path: str) -> str:
         """List functions/classes in a Python file (MVP: stdlib ast backend).
@@ -72,12 +74,12 @@ def build_tree_sitter_symbols(worktree: Path):
             return truncate(resolved)
         if not resolved.exists():
             return truncate(f"Error: file not found: {path}")
-        if resolved.suffix != ".py":
+        if resolved.suffix.lower() != ".py":
             return truncate(f"Error: unsupported language (MVP: Python only via ast): {path}")
 
         try:
             tree = ast.parse(resolved.read_text(encoding="utf-8"))
-        except (OSError, SyntaxError) as exc:
+        except (OSError, UnicodeDecodeError, SyntaxError, ValueError) as exc:
             return truncate(f"Error: {exc}")
 
         symbols: list[str] = []

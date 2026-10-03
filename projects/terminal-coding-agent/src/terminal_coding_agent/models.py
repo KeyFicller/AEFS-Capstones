@@ -40,13 +40,12 @@ class AgentModels:
 
 def build_models(config: RunnableConfig) -> AgentModels:
     """Build one model per role; the name comes from config["configurable"][role], else MODEL."""
-    model_names = {
-        role: config.get("configurable", {}).get(role, MODEL) for role in ["planner", "executor"]
-    }
-    if local_model := config.get("configurable", {}).get("local_model"):
+    configurable = config.get("configurable") or {}
+    model_names = {role: configurable.get(role) or MODEL for role in ("planner", "executor")}
+    if local_model := configurable.get("local_model"):
         models = {
             role: ChatOllama(model=local_model, extra_body={"thinking": {"type": "disabled"}})
-            for role, _ in model_names.items()
+            for role in model_names
         }
 
     else:

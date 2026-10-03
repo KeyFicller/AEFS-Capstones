@@ -11,7 +11,14 @@ def _content(result: Any) -> str:
     """The tool's textual result, whichever shape the handler returned."""
     if isinstance(result, ToolMessage):
         content = result.content
-        return content if isinstance(content, str) else str(content)
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return "".join(
+                block.get("text", "") if isinstance(block, dict) else str(block)
+                for block in content
+            )
+        return str(content)
     return str(result)
 
 

@@ -53,12 +53,17 @@ def publish_patch(worktree: Path) -> list[Path]:
     """Write :func:`worktree_patch` to the worktree and, when mounted, to Harbor.
 
     Never raises: it runs from the graph's Stop hook, where an exception would
-    turn an otherwise finished run into a trial failure.
+    turn an otherwise finished run into a trial failure. The diff is built inside
+    the guard too — a git that cannot answer must not escape either.
     """
-    patch = worktree_patch(worktree)
-    targets = [worktree / PATCH_RELPATH]
-    if HARBOR_ARTIFACTS_DIR.is_dir():
-        targets.append(HARBOR_ARTIFACTS_DIR / PATCH_FILENAME)
+    try:
+        patch = worktree_patch(worktree)
+        targets = [worktree / PATCH_RELPATH]
+        if HARBOR_ARTIFACTS_DIR.is_dir():
+            targets.append(HARBOR_ARTIFACTS_DIR / PATCH_FILENAME)
+    except OSError:
+        logger.warning("could not build the patch for %s", worktree, exc_info=True)
+        return []
 
     written: list[Path] = []
     for target in targets:
