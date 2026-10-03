@@ -8,6 +8,7 @@ from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
 from pydantic import ConfigDict
 
+from multimodal_doc_qa.retrievers import within_best_ratio
 from multimodal_doc_qa.schemas import page_id
 
 
@@ -73,6 +74,7 @@ class MultiDocTextRetriever(BaseRetriever):
 
     retrievers: list[TextRetriever]
     k: int = 5
+    min_score_ratio: float = 0.5
 
     def _get_relevant_documents(
         self, query: str, *, run_manager: CallbackManagerForRetrieverRun | None = None
@@ -80,4 +82,4 @@ class MultiDocTextRetriever(BaseRetriever):
         """Return the corpus-wide best ``k`` chunks, best first."""
         merged = [doc for retriever in self.retrievers for doc in retriever.invoke(query)]
         merged.sort(key=lambda doc: -doc.metadata["score"])
-        return merged[: self.k]
+        return within_best_ratio(merged, self.min_score_ratio)[: self.k]

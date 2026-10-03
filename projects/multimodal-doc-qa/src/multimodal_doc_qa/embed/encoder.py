@@ -60,6 +60,22 @@ class MultiVectorEncoder:
                 torch.mps.empty_cache()
         return out
 
+    def encode_texts(self, texts: list[str]) -> list[torch.Tensor]:
+        """Encode document text to a list of ``[n_tokens, dim]`` matrices.
+
+        ``process_texts`` keeps the string on the document side of MaxSim.
+        ``process_queries`` appends query-augmentation tokens and is only for questions.
+        """
+        out: list[torch.Tensor] = []
+        for text in texts:
+            batch = self.processor.process_texts([text]).to(self.settings.device)
+            with torch.no_grad():
+                emb = self.model(**batch)
+            out.append(emb[0].to(torch.float32).cpu())
+            if self.settings.device == "mps":
+                torch.mps.empty_cache()
+        return out
+
     def encode_query(self, text: str) -> torch.Tensor:
         """Encode a query string to a ``[n_tokens, dim]`` matrix."""
         batch = self.processor.process_queries([text]).to(self.settings.device)

@@ -1,4 +1,5 @@
 import pytest
+import torch
 from PIL import Image
 
 from multimodal_doc_qa.config import Settings
@@ -18,6 +19,7 @@ def test_settings_defaults() -> None:
     assert settings.device == "mps"
     assert settings.dtype == "float16"
     assert settings.top_k == 5
+    assert settings.min_score_ratio == 0.5
     assert settings.max_rounds == 5
     assert settings.max_ask_calls == 16
     assert settings.max_ask_tokens == 200_000
@@ -31,6 +33,34 @@ def test_settings_reads_mdq_prefixed_env(monkeypatch: pytest.MonkeyPatch) -> Non
     settings = Settings()
     assert settings.top_k == 9
     assert settings.device == "cpu"
+
+
+def test_encode_texts_calls_process_texts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Document text must not pick up the query-augmentation suffix."""
+
+    class _Batch(dict):
+        def to(self, device: str) -> _Batch:
+            return self
+
+    class _Processor:
+        def process_texts(self, texts: list[str]) -> _Batch:
+            assert texts == ["The tanh gate starts at zero."]
+            return _Batch()
+
+        def process_queries(self, texts: list[str]) -> _Batch:
+            raise AssertionError("document text went through the query prompt")
+
+    class _Model:
+        def __call__(self, **batch: object) -> torch.Tensor:
+            return torch.zeros(1, 4, 128)
+
+    monkeypatch.setattr(encoder_module, "_load", lambda *a, **k: (_Model(), _Processor()))
+    encoder = MultiVectorEncoder("vidore/colSmol-500M", Settings(device="cpu"))
+
+    encoded = encoder.encode_texts(["The tanh gate starts at zero."])
+
+    assert encoded[0].shape == (4, 128)
+    assert encoded[0].dtype == torch.float32
 
 
 def test_encoder_load_failure_propagates(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,7 +1,16 @@
 import pytest
 from pydantic import ValidationError
 
-from multimodal_doc_qa.schemas import BBox, Citation, Question
+from multimodal_doc_qa.schemas import (
+    BBox,
+    Citation,
+    ImageDocument,
+    PdfDocument,
+    Question,
+    TextDocument,
+    load_documents,
+    save_documents,
+)
 
 
 def test_bbox_contains_normalized_inner() -> None:
@@ -29,6 +38,22 @@ def test_bbox_rejects_coordinates_outside_the_normalized_range() -> None:
 def test_bbox_accepts_a_degenerate_but_ordered_rectangle() -> None:
     """A zero-area box is still a location, and the layout can legitimately produce one."""
     assert BBox(x0=0.2, y0=0.3, x1=0.2, y1=0.3)
+
+
+def test_document_catalog_roundtrips_the_three_origins(tmp_path) -> None:
+    docs = [
+        ImageDocument(doc_id="shot"),
+        PdfDocument(doc_id="doc000"),
+        TextDocument(doc_id="note", pages=["The tanh gate starts at zero."]),
+    ]
+    path = tmp_path / "documents.json"
+
+    save_documents(docs, path)
+
+    loaded = load_documents(path)
+    assert isinstance(loaded["shot"], ImageDocument)
+    assert isinstance(loaded["doc000"], PdfDocument)
+    assert loaded["note"] == docs[2]
 
 
 def test_question_roundtrips_through_json() -> None:

@@ -43,7 +43,19 @@ def _retriever(encoder: _SpyEncoder | None = None, **kwargs: object) -> MultiVec
 def test_retriever_returns_pages_ranked_by_maxsim() -> None:
     docs = _retriever(k=2).invoke("anything")
 
-    assert [d.metadata["page_id"] for d in docs] == ["a", "b"]
+    assert [d.metadata["page_id"] for d in docs] == ["a"]
+
+
+def test_retriever_drops_a_page_below_half_the_best_score() -> None:
+    idx = MultiVectorIndex(device="cpu")
+    idx.add("best", torch.tensor([[1.0, 0.0, 0.0, 0.0]]))
+    idx.add("close", torch.tensor([[0.6, 0.0, 0.0, 0.0]]))
+    idx.add("far", torch.tensor([[0.4, 0.0, 0.0, 0.0]]))
+    retriever = MultiVectorRetriever(encoder=_SpyEncoder(), index=idx, k=5, min_score_ratio=0.5)
+
+    docs = retriever.invoke("anything")
+
+    assert [d.metadata["page_id"] for d in docs] == ["best", "close"]
 
 
 def test_retriever_exposes_page_id_and_score_in_the_document() -> None:
@@ -65,8 +77,8 @@ def test_retriever_hands_the_raw_query_to_the_encoder() -> None:
 
 def test_retriever_honours_k() -> None:
     assert len(_retriever(k=1).invoke("anything")) == 1
-    # the default k exceeds the two indexed pages, so both come back
-    assert len(_retriever().invoke("anything")) == 2
+    # the orthogonal page scores 0, so the ratio leaves only the matching page
+    assert len(_retriever().invoke("anything")) == 1
 
 
 def test_retriever_returns_langchain_documents() -> None:

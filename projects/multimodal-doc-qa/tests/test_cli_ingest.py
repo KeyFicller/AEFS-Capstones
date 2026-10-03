@@ -13,14 +13,18 @@ equally, which is enough to prove the query reached an index that has pages in i
 """
 
 import os
+import threading
+import time
 from pathlib import Path
 
 import pymupdf
 import pytest
 import torch
+from rich.console import Console
 from typer.testing import CliRunner
 
 from multimodal_doc_qa.cli import app, cited_materials
+from multimodal_doc_qa.ui import console as ui
 from multimodal_doc_qa.config import Settings, artifact_paths, load_local_env
 from multimodal_doc_qa.schemas import Citation
 from multimodal_doc_qa.index.maxsim import MultiVectorIndex
@@ -31,11 +35,19 @@ DOC_TEXT = "EMEA margin was 16.8%"
 class _StubVisionEncoder:
     """Always returns the same single patch vector, so every page scores identically."""
 
+    image_calls: list[int] = []
+    text_calls: list[list[str]] = []
+
     def __init__(self, *args: object, **kwargs: object) -> None:
         self.model = self
 
     def encode_images(self, images: list[object]) -> list[torch.Tensor]:
+        type(self).image_calls.append(len(images))
         return [torch.tensor([[1.0, 0.0]]) for _ in images]
+
+    def encode_texts(self, texts: list[str]) -> list[torch.Tensor]:
+        type(self).text_calls.append(list(texts))
+        return [torch.tensor([[1.0, 0.0]]) for _ in texts]
 
     def encode_query(self, text: str) -> torch.Tensor:
         return torch.tensor([[1.0, 0.0]])
@@ -76,7 +88,9 @@ class _StubSynth:
     def __init__(self, *args: object, **kwargs: object) -> None:
         pass
 
-    def synthesize(self, messages: object, page_ids: list[str], render_dir: Path) -> object:
+    def synthesize(
+        self, messages: object, page_ids: list[str], render_dir: Path, documents: object = None
+    ) -> object:
         from multimodal_doc_qa.schemas import Answer, Citation
 
         doc_id, _, page = page_ids[0].partition("/p")
@@ -96,6 +110,8 @@ def artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     )
     monkeypatch.setattr("multimodal_doc_qa.retrievers.text.OcrEmbedder", _StubOcrEmbedder)
     _StubOcrEmbedder.calls = []
+    _StubVisionEncoder.image_calls = []
+    _StubVisionEncoder.text_calls = []
     return root
 
 
@@ -155,8 +171,12 @@ def test_ingest_saves_a_vision_index_that_holds_the_pages(corpus: Path, artifact
 def test_ingest_renders_the_pages_it_indexed(corpus: Path, artifacts: Path) -> None:
     _invoke("ingest", "--corpus", str(corpus))
 
+    from multimodal_doc_qa.config import documents_path
+    from multimodal_doc_qa.schemas import PdfDocument, load_documents
+
     render_dir, _, _ = artifact_paths(artifacts)
     assert (render_dir / "doc000" / "p000.png").is_file()
+    assert isinstance(load_documents(documents_path(artifacts))["doc000"], PdfDocument)
 
 
 def test_ingest_saves_an_ocr_index_with_chunk_text(corpus: Path, artifacts: Path) -> None:
@@ -167,6 +187,143 @@ def test_ingest_saves_an_ocr_index_with_chunk_text(corpus: Path, artifacts: Path
     saved = torch.load(ocr_path, weights_only=True)
     assert list(saved) == ["doc000"]
     assert any(DOC_TEXT in text for text, _ in saved["doc000"]["chunks"])
+
+
+def test_a_text_file_is_encoded_as_text_not_rasterized(tmp_path: Path, artifacts: Path) -> None:
+    """Plain text stays text: encode_texts fills the vision index, and no page image is written."""
+    from multimodal_doc_qa.config import documents_path
+    from multimodal_doc_qa.schemas import TextDocument, load_documents
+
+    corpus = tmp_path / "notes"
+    corpus.mkdir()
+    (corpus / "note.txt").write_text("The tanh gate starts at zero.\n", encoding="utf-8")
+
+    result = _invoke("ingest", "--corpus", str(corpus))
+
+    assert result.exit_code == 0, result.stdout
+    render_dir, vision_path, ocr_path = artifact_paths(artifacts)
+    assert not (render_dir / "note").exists()
+    assert _StubVisionEncoder.text_calls == [["The tanh gate starts at zero."]]
+    assert _StubVisionEncoder.image_calls == []
+    assert MultiVectorIndex.load(vision_path).search(torch.tensor([[1.0, 0.0]]), k=5)
+    saved = torch.load(ocr_path, weights_only=True)
+    assert any("tanh gate" in text for text, _ in saved["note"]["chunks"])
+    assert "tanh gate" in (artifacts / "note.txt").read_text(encoding="utf-8")
+    document = load_documents(documents_path(artifacts))["note"]
+    assert isinstance(document, TextDocument)
+    assert document.pages == ["The tanh gate starts at zero."]
+
+
+def test_ingest_skips_a_later_file_with_the_same_bytes(tmp_path: Path, artifacts: Path) -> None:
+    """Dedup is the whole file. The first name in sort order is the one that gets indexed."""
+    from multimodal_doc_qa.config import documents_path
+    from multimodal_doc_qa.schemas import load_documents
+
+    corpus = tmp_path / "notes"
+    corpus.mkdir()
+    body = "The tanh gate starts at zero.\n"
+    (corpus / "b-copy.txt").write_text(body, encoding="utf-8")
+    (corpus / "a-note.txt").write_text(body, encoding="utf-8")
+    (corpus / "other.txt").write_text("A different sentence.\n", encoding="utf-8")
+
+    result = _invoke("ingest", "--corpus", str(corpus))
+
+    assert result.exit_code == 0, result.stdout
+    assert "skip b-copy.txt: same bytes as a-note.txt" in result.stdout
+    assert set(load_documents(documents_path(artifacts))) == {"a-note", "other"}
+    assert _StubVisionEncoder.text_calls == [
+        ["The tanh gate starts at zero."],
+        ["A different sentence."],
+    ]
+    assert not (artifacts / "b-copy.txt").is_file()
+
+
+def test_ingest_keeps_two_files_that_share_a_stem(tmp_path: Path, artifacts: Path) -> None:
+    """``note.pdf`` and ``note.txt`` are two documents. The id becomes the filename."""
+    from multimodal_doc_qa.config import documents_path
+    from multimodal_doc_qa.schemas import PdfDocument, TextDocument, load_documents
+
+    corpus = tmp_path / "notes"
+    corpus.mkdir()
+    with pymupdf.open() as pdf:
+        page = pdf.new_page()
+        page.insert_text((72, 72), "from the pdf")
+        pdf.save(corpus / "note.pdf")
+    (corpus / "note.txt").write_text("from the text file\n", encoding="utf-8")
+
+    result = _invoke("ingest", "--corpus", str(corpus))
+
+    assert result.exit_code == 0, result.stdout
+    docs = load_documents(documents_path(artifacts))
+    assert isinstance(docs["note.pdf"], PdfDocument)
+    assert isinstance(docs["note.txt"], TextDocument)
+    assert docs["note.txt"].pages == ["from the text file"]
+    assert (corpus / "note.txt").read_text(encoding="utf-8") == "from the text file\n"
+    assert (artifacts / "render" / "note.pdf" / "p000.png").is_file()
+    assert not (artifacts / "render" / "note").exists()
+    assert not (artifacts / "note.pdf.txt").exists()
+    assert not (artifacts / "note.txt.txt").exists()
+
+
+def test_cited_materials_find_a_pdf_named_as_its_doc_id(tmp_path: Path) -> None:
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    pdf = artifacts / "Test.pdf"
+    pdf.write_bytes(b"%PDF")
+
+    found = cited_materials([Citation(doc_id="Test.pdf", page=0)], artifacts, {})
+
+    assert found[0].pdf == pdf
+
+
+def test_a_long_text_file_is_one_vision_page_per_chunk(tmp_path: Path, artifacts: Path) -> None:
+    corpus = tmp_path / "notes"
+    corpus.mkdir()
+    (corpus / "note.md").write_text(("alpha " * 120).strip(), encoding="utf-8")
+
+    result = _invoke("ingest", "--corpus", str(corpus))
+
+    assert result.exit_code == 0, result.stdout
+    assert len(_StubVisionEncoder.text_calls[0]) > 1
+    _, vision_path, _ = artifact_paths(artifacts)
+    assert len(MultiVectorIndex.load(vision_path).search(torch.tensor([[1.0, 0.0]]), k=5)) > 1
+
+
+def test_an_image_file_is_encoded_as_an_image(tmp_path: Path, artifacts: Path, monkeypatch) -> None:
+    from PIL import Image
+
+    from multimodal_doc_qa.config import documents_path
+    from multimodal_doc_qa.schemas import ImageDocument, load_documents
+
+    monkeypatch.setattr(
+        "multimodal_doc_qa.baseline.ocr.extract_image_text", lambda image: "a lone chart"
+    )
+    corpus = tmp_path / "pics"
+    corpus.mkdir()
+    Image.new("RGB", (8, 8), "white").save(corpus / "chart.png")
+
+    result = _invoke("ingest", "--corpus", str(corpus))
+
+    assert result.exit_code == 0, result.stdout
+    render_dir, vision_path, ocr_path = artifact_paths(artifacts)
+    assert (render_dir / "chart" / "p000.png").is_file()
+    assert _StubVisionEncoder.image_calls == [1]
+    assert _StubVisionEncoder.text_calls == []
+    assert MultiVectorIndex.load(vision_path).search(torch.tensor([[1.0, 0.0]]), k=5)
+    saved = torch.load(ocr_path, weights_only=True)
+    assert saved["chart"]["chunks"] == [("a lone chart", 0)]
+    document = load_documents(documents_path(artifacts))["chart"]
+    assert isinstance(document, ImageDocument)
+
+
+def test_ingest_refuses_an_empty_text_file(tmp_path: Path, artifacts: Path) -> None:
+    corpus = tmp_path / "notes"
+    corpus.mkdir()
+    (corpus / "blank.txt").write_text(" \n\t", encoding="utf-8")
+
+    result = _invoke("ingest", "--corpus", str(corpus))
+
+    assert result.exit_code == 1
 
 
 def test_ingest_refuses_an_empty_corpus(tmp_path: Path, artifacts: Path) -> None:
@@ -263,6 +420,8 @@ def test_cited_materials_resolve_pdf_png_and_page_text(tmp_path: Path) -> None:
     png.write_bytes(b"png")
     pdf = artifacts / "Test.pdf"
     pdf.write_bytes(b"%PDF")
+    txt = artifacts / "Test.txt"
+    txt.write_text("page text", encoding="utf-8")
 
     found = cited_materials(
         [Citation(doc_id="Test", page=24)],
@@ -271,8 +430,78 @@ def test_cited_materials_resolve_pdf_png_and_page_text(tmp_path: Path) -> None:
     )
 
     assert found[0].pdf == pdf
+    assert found[0].txt == txt
     assert found[0].png == png
     assert found[0].text == "Flamingo objectives"
+
+
+def test_working_prints_nothing_off_a_terminal(capsys: pytest.CaptureFixture[str]) -> None:
+    with ui.working():
+        print("ran", flush=True)
+
+    out = capsys.readouterr().out
+    assert "ran" in out
+    assert ui.WORKING_MESSAGE not in out
+
+
+def test_working_shows_the_spinner_on_a_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
+    pty = pytest.importorskip("pty")
+    monkeypatch.setenv("TERM", "xterm-256color")
+    try:
+        master, slave = pty.openpty()
+    except OSError as exc:
+        pytest.skip(f"no pty available: {exc}")
+    stream = os.fdopen(slave, "w")
+    chunks: list[bytes] = []
+
+    def drain() -> None:
+        while True:
+            try:
+                data = os.read(master, 65536)
+            except OSError:
+                return
+            if not data:
+                return
+            chunks.append(data)
+
+    reader = threading.Thread(target=drain, daemon=True)
+    reader.start()
+    monkeypatch.setattr(ui, "CONSOLE", Console(file=stream, force_terminal=True, width=40))
+    with ui.working():
+        time.sleep(0.4)
+        stream.flush()
+    stream.close()
+    reader.join(timeout=5)
+    os.close(master)
+
+    assert ui.WORKING_MESSAGE in b"".join(chunks).decode("utf-8", "replace")
+
+
+def test_render_sources_skips_files_the_citation_does_not_have(capsys: pytest.CaptureFixture[str]) -> None:
+    from multimodal_doc_qa.cli import CitedMaterial
+    from multimodal_doc_qa.ui.console import render_sources
+
+    render_sources(
+        [
+            CitedMaterial(
+                doc_id="Test.txt",
+                page=0,
+                pdf=None,
+                txt=Path("Test.txt.txt"),
+                png=Path("missing.png"),
+                text="小明吃了80个饺子",
+                bbox=None,
+            )
+        ]
+    )
+
+    out = capsys.readouterr().out
+    assert "Test.txt/p000" in out
+    assert "Test.txt.txt" in out
+    assert "小明吃了80个饺子" in out
+    assert "pdf" not in out
+    assert "png" not in out
+    assert "bbox" not in out
 
 
 def test_cited_materials_leave_pdf_and_text_empty_when_absent(tmp_path: Path) -> None:
@@ -280,6 +509,7 @@ def test_cited_materials_leave_pdf_and_text_empty_when_absent(tmp_path: Path) ->
     found = cited_materials([Citation(doc_id="Test", page=1)], artifacts, {})
 
     assert found[0].pdf is None
+    assert found[0].txt is None
     assert found[0].text is None
     assert found[0].png == artifacts / "render" / "Test" / "p001.png"
 

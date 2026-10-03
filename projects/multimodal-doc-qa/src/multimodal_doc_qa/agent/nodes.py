@@ -1,16 +1,16 @@
 """Agent nodes: ``plan``, ``assess``, ``verify``. Structured output only; a schema miss is a failure.
 
-``assess`` and ``verify`` are shown page images, not page ids.
+``assess`` and ``verify`` are shown the retrieved pages, not page ids.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, Field
 
-from multimodal_doc_qa.schemas import Answer, page_id
+from multimodal_doc_qa.schemas import Answer, Document, page_id
 from multimodal_doc_qa.synth.answer import build_page_blocks, prompt_messages, question_text
 
 _PLAN_SYS = (
@@ -18,9 +18,9 @@ _PLAN_SYS = (
     "Each sub-query must stand alone; do not restate the whole question."
 )
 _ASSESS_SYS = (
-    "You are shown the page images already retrieved for a question. List only the "
-    "follow-up sub-queries still needed to answer it; leave the list empty if these pages "
-    "are sufficient."
+    "You are shown the pages already retrieved for a question. A page is either an image "
+    "or a text passage. List only the follow-up sub-queries still needed to answer it; "
+    "leave the list empty if these pages are sufficient."
 )
 _VERIFY_SYS = (
     "You are shown the pages an answer cites. List every claim in the answer that those "
@@ -53,12 +53,16 @@ def plan(model: Any, messages: Sequence[BaseMessage]) -> list[str]:
 
 
 def assess(
-    model: Any, messages: Sequence[BaseMessage], page_ids: list[str], render_dir: Path
+    model: Any,
+    messages: Sequence[BaseMessage],
+    page_ids: list[str],
+    render_dir: Path,
+    documents: Mapping[str, Document] | None = None,
 ) -> list[str]:
     """Return the sub-queries still needed, or ``[]`` when the page pool suffices."""
     content = [
         {"type": "text", "text": f"question: {question_text(messages)}"},
-        *build_page_blocks(page_ids, render_dir),
+        *build_page_blocks(page_ids, render_dir, documents),
     ]
     result = model.invoke(prompt_messages(_ASSESS_SYS, messages, content))
     return list(result.followups)
@@ -70,6 +74,7 @@ def verify(
     answer: Answer,
     pool: list[str],
     render_dir: Path,
+    documents: Mapping[str, Document] | None = None,
 ) -> list[str]:
     """Claims the citations do not support.
 
@@ -90,7 +95,7 @@ def verify(
                 f"cited: {', '.join(inside)}"
             ),
         },
-        *build_page_blocks(inside, render_dir),
+        *build_page_blocks(inside, render_dir, documents),
     ]
     result = model.invoke(prompt_messages(_VERIFY_SYS, messages, content))
     return violations + list(result.unsupported)

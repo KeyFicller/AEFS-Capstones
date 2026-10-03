@@ -17,7 +17,7 @@ from pydantic import ValidationError
 from multimodal_doc_qa.config import Settings
 from langchain_core.messages import HumanMessage
 
-from multimodal_doc_qa.schemas import Answer, Citation
+from multimodal_doc_qa.schemas import Answer, Citation, TextDocument
 from multimodal_doc_qa.synth.answer import AnswerSynthesizer, build_page_blocks
 
 
@@ -84,6 +84,17 @@ def test_build_page_blocks_does_not_send_a_file_path(tmp_path: Path) -> None:
 def test_build_page_blocks_reports_a_missing_render(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         build_page_blocks(["doc000/p999"], tmp_path)
+
+
+def test_build_page_blocks_sends_text_for_a_text_document(tmp_path: Path) -> None:
+    blocks = build_page_blocks(
+        ["note/p000"],
+        tmp_path,
+        {"note": TextDocument(doc_id="note", pages=["The tanh gate starts at zero."])},
+    )
+
+    assert [b["type"] for b in blocks] == ["text", "text"]
+    assert blocks[1]["text"] == "The tanh gate starts at zero."
 
 
 # ------------------------------------------------------------ AnswerSynthesizer

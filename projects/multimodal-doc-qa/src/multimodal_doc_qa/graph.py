@@ -17,7 +17,7 @@ from langgraph.graph.message import MessagesState
 from multimodal_doc_qa.budget import Budget
 from multimodal_doc_qa.config import Settings
 from multimodal_doc_qa.agent import nodes
-from multimodal_doc_qa.schemas import Answer
+from multimodal_doc_qa.schemas import Answer, Document
 
 
 class AskState(MessagesState):
@@ -58,6 +58,7 @@ class GraphDeps:
     verifier_model: Any
     synth: Any
     render_dir: Path
+    documents: dict[str, Document] | None = None
     budget: Budget | None = None
 
 
@@ -89,7 +90,11 @@ def build_graph(deps: GraphDeps, settings: Settings):
             return {"stop_reason": "budget_exhausted"}
         budget.spend_call()
         followups = nodes.assess(
-            deps.assessor_model, state["messages"], state["page_ids"], deps.render_dir
+            deps.assessor_model,
+            state["messages"],
+            state["page_ids"],
+            deps.render_dir,
+            deps.documents,
         )
         return {"subqueries": followups}
 
@@ -97,7 +102,9 @@ def build_graph(deps: GraphDeps, settings: Settings):
         if budget.exhausted():
             return {"stop_reason": "budget_exhausted"}
         budget.spend_call()
-        answer = deps.synth.synthesize(state["messages"], state["page_ids"], deps.render_dir)
+        answer = deps.synth.synthesize(
+            state["messages"], state["page_ids"], deps.render_dir, deps.documents
+        )
         return {"answer": answer.model_dump()}
 
     def verify_node(state: AskState) -> dict:
@@ -106,7 +113,12 @@ def build_graph(deps: GraphDeps, settings: Settings):
         budget.spend_call()
         answer = Answer.model_validate(state["answer"])
         unsupported = nodes.verify(
-            deps.verifier_model, state["messages"], answer, state["page_ids"], deps.render_dir
+            deps.verifier_model,
+            state["messages"],
+            answer,
+            state["page_ids"],
+            deps.render_dir,
+            deps.documents,
         )
         return {"unsupported": unsupported, "subqueries": unsupported}
 

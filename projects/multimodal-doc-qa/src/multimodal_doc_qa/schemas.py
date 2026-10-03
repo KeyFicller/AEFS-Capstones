@@ -1,8 +1,10 @@
 """Corpus and QA schemas. Page ids are ``{doc_id}/p{page:03d}``."""
 
-from typing import Literal
+import base64
+from pathlib import Path
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, TypeAdapter, model_validator
 
 PageKind = Literal["paragraph", "table", "chart", "handwriting", "formula"]
 
@@ -85,10 +87,80 @@ class PageSpec(BaseModel):
     facts: list[Fact] = Field(default_factory=list)
 
 class DocSpec(BaseModel):
-    """One PDF document plus all of its pages."""
+    """One synthetic PDF in the generated corpus, plus the facts on its pages.
+
+    Ingested documents are ``ImageDocument``, ``PdfDocument``, and ``TextDocument``.
+    """
     doc_id: str
     pdf_path: str
     pages: list[PageSpec]
+
+
+class Document(BaseModel):
+    """One ingested document. The subclass says what a page of it is."""
+
+    doc_id: str
+
+    def evidence_block(self, page: int, render_dir: Path) -> dict:
+        """Content the answerer sees for ``page``. Subclasses supply the bytes or the text."""
+        raise NotImplementedError
+
+
+def _png_block(doc_id: str, page: int, render_dir: Path) -> dict:
+    path = render_dir / doc_id / f"p{page:03d}.png"
+    data = base64.b64encode(path.read_bytes()).decode()
+    return {"type": "image_url", "image_url": {"url": "data:image/png;base64," + data}}
+
+
+class ImageDocument(Document):
+    """A file that is already an image. One page, encoded with ``encode_images``."""
+
+    origin: Literal["image"] = "image"
+
+    def evidence_block(self, page: int, render_dir: Path) -> dict:
+        return _png_block(self.doc_id, page, render_dir)
+
+
+class PdfDocument(Document):
+    """Pages rasterized from a PDF and encoded with ``encode_images``."""
+
+    origin: Literal["pdf"] = "pdf"
+
+    def evidence_block(self, page: int, render_dir: Path) -> dict:
+        return _png_block(self.doc_id, page, render_dir)
+
+
+class TextDocument(Document):
+    """Plain text. Each page is one chunk, encoded with ``encode_texts``."""
+
+    origin: Literal["text"] = "text"
+    pages: list[str]
+
+    def evidence_block(self, page: int, render_dir: Path) -> dict:
+        try:
+            body = self.pages[page]
+        except IndexError as exc:
+            raise FileNotFoundError(f"no text for {self.doc_id} page {page}") from exc
+        return {"type": "text", "text": body}
+
+
+AnyDocument = Annotated[
+    ImageDocument | PdfDocument | TextDocument,
+    Field(discriminator="origin"),
+]
+
+
+def save_documents(docs: list[ImageDocument | PdfDocument | TextDocument], path: Path) -> None:
+    """Write the ingest catalog. ``origin`` selects the subclass on load."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = TypeAdapter(list[AnyDocument]).dump_json(docs, indent=2)
+    path.write_text(payload.decode(), encoding="utf-8")
+
+
+def load_documents(path: Path) -> dict[str, ImageDocument | PdfDocument | TextDocument]:
+    """Read a catalog written by ``save_documents``, keyed by ``doc_id``."""
+    docs = TypeAdapter(list[AnyDocument]).validate_json(path.read_text(encoding="utf-8"))
+    return {doc.doc_id: doc for doc in docs}
 
 class CorpusManifest(BaseModel):
     """Corpus tree root: generation seed plus every document (seed reproduces the corpus)."""

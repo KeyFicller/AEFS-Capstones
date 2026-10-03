@@ -56,7 +56,9 @@ class _FakeSynth:
         self.cited = cited
         self.pools: list[list[str]] = []
 
-    def synthesize(self, messages: object, page_ids: list[str], render_dir: Path) -> Answer:
+    def synthesize(
+        self, messages: object, page_ids: list[str], render_dir: Path, documents: object = None
+    ) -> Answer:
         self.pools.append(list(page_ids))
         citations = [Citation(doc_id="doc000", page=0)] if self.cited else []
         return Answer(text="16.8%", citations=citations)

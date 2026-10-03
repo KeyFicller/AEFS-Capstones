@@ -35,6 +35,11 @@ def extract_page_texts(pdf_path: Path, page_images: list[Path]) -> list[str]:
     return texts
 
 
+def extract_image_text(image: Image.Image) -> str:
+    """OCR one standalone image. A PDF page with a text layer never comes through here."""
+    return pytesseract.image_to_string(image).strip()
+
+
 def chunk_texts(page_texts: list[str], max_chars: int = 400) -> list[tuple[str, int]]:
     """``(chunk, page_index)`` pieces of at most ``max_chars``, split on whitespace.
 

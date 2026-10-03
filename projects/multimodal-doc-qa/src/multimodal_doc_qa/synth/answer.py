@@ -3,42 +3,44 @@
 ``Citation.bbox`` may be omitted. A malformed box may not.
 """
 
-import base64
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, trim_messages
 
 from multimodal_doc_qa.config import Settings
-from multimodal_doc_qa.schemas import Answer
+from multimodal_doc_qa.schemas import Answer, Document, PdfDocument
 
 # Current question plus four earlier turns (human, assistant).
 _HISTORY_MESSAGES = 9
 
 _SYSTEM = (
-    "Answer ONLY from the provided page images. Cite every claim with the doc_id and "
-    "the page you read it from. Include a bbox normalized to 0..1 when you can localize "
-    "the claim (x0, y0 top-left; x1, y1 bottom-right); omit bbox when you cannot."
+    "Answer ONLY from the provided pages. A page is either an image or a text passage. "
+    "Cite every claim with the doc_id and the page you read it from. Include a bbox "
+    "normalized to 0..1 when you can localize the claim on an image "
+    "(x0, y0 top-left; x1, y1 bottom-right); omit bbox for a text passage or when you cannot."
 )
 
 
-def _data_url(png: Path) -> str:
-    return "data:image/png;base64," + base64.b64encode(png.read_bytes()).decode()
+def build_page_blocks(
+    page_ids: list[str],
+    render_dir: Path,
+    documents: Mapping[str, Document] | None = None,
+) -> list[dict]:
+    """One label plus the page itself, for each id.
 
-
-def build_page_blocks(page_ids: list[str], render_dir: Path) -> list[dict]:
-    """Image content parts, each preceded by a text label of its page id.
-
-    Without the label the model cannot cite a page back. The image is a data URL; a file path is useless to a hosted model.
+    Without the label the model cannot cite a page back. An image page is a data URL;
+    a file path is useless to a hosted model. A text page is the chunk itself.
+    A document missing from ``documents`` is treated as a rasterized PDF page.
     """
-    return [
-        block
-        for pid in page_ids
-        for block in (
-            {"type": "text", "text": f"page {pid}"},
-            {"type": "image_url", "image_url": {"url": _data_url(render_dir / f"{pid}.png")}},
-        )
-    ]
+    catalog = documents or {}
+    blocks: list[dict] = []
+    for pid in page_ids:
+        doc_id, _, page_token = pid.partition("/p")
+        doc = catalog.get(doc_id, PdfDocument(doc_id=doc_id))
+        blocks.append({"type": "text", "text": f"page {pid}"})
+        blocks.append(doc.evidence_block(int(page_token), render_dir))
+    return blocks
 
 
 def question_text(messages: Sequence[BaseMessage]) -> str:
@@ -102,14 +104,18 @@ class AnswerSynthesizer:
         self._structured = self._model.with_structured_output(Answer)
 
     def synthesize(
-        self, messages: Sequence[BaseMessage], page_ids: list[str], render_dir: Path
+        self,
+        messages: Sequence[BaseMessage],
+        page_ids: list[str],
+        render_dir: Path,
+        documents: Mapping[str, Document] | None = None,
     ) -> Answer:
-        """Answer the latest human message from the rendered pages.
+        """Answer the latest human message from the retrieved pages.
 
         A reply that misses ``Answer`` raises. Earlier turns stay as messages.
         """
         content = [
             {"type": "text", "text": question_text(messages)},
-            *build_page_blocks(page_ids, render_dir),
+            *build_page_blocks(page_ids, render_dir, documents),
         ]
         return self._structured.invoke(prompt_messages(_SYSTEM, messages, content))

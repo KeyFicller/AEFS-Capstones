@@ -12,6 +12,7 @@ from pydantic import ConfigDict
 import torch
 
 from multimodal_doc_qa.index.maxsim import MultiVectorIndex
+from multimodal_doc_qa.retrievers import within_best_ratio
 
 
 class MultiVectorRetriever(BaseRetriever):
@@ -22,15 +23,17 @@ class MultiVectorRetriever(BaseRetriever):
     encoder: Any
     index: MultiVectorIndex
     k: int = 5
+    min_score_ratio: float = 0.5
 
     def _get_relevant_documents(
         self, query: str, *, run_manager: CallbackManagerForRetrieverRun | None = None
     ) -> list[Document]:
         """Best ``k`` pages. ``page_content`` and ``metadata["page_id"]`` are the page id."""
         query_vec: torch.Tensor = self.encoder.encode_query(query)
-        return [
+        hits = [
             Document(
                 page_content=hit.page_id,
                 metadata={"page_id": hit.page_id, "score": hit.score}
             ) for hit in self.index.search(query_vec, k=self.k)
         ]
+        return within_best_ratio(hits, self.min_score_ratio)

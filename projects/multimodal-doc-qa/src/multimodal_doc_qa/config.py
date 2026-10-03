@@ -42,6 +42,11 @@ def artifact_paths(root: Path) -> tuple[Path, Path, Path]:
     return root / "render", root / "vision_index.pt", root / "ocr_index.pt"
 
 
+def documents_path(root: Path) -> Path:
+    """Ingest catalog. Each entry is an image, a rasterized PDF, or a text file."""
+    return root / "documents.json"
+
+
 class Settings(BaseSettings):
     """Settings from the environment, prefix ``MDQ_``."""
 
@@ -53,6 +58,7 @@ class Settings(BaseSettings):
     device: str = _device()
     dtype: str = "float16"
     top_k: int = 5
+    min_score_ratio: float = 0.5
     max_rounds: int = 5
     max_ask_calls: int = 16
     max_ask_tokens: int = 200_000

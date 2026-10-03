@@ -1,7 +1,8 @@
 """Rich renderers for the interactive CLI. The only module that writes to the console."""
 
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Protocol
 
@@ -9,8 +10,10 @@ from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.shortcuts import PromptSession
 from rich.console import Console
+from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.spinner import Spinner
 from rich.text import Text
 
 from multimodal_doc_qa.schemas import page_id
@@ -18,6 +21,7 @@ from multimodal_doc_qa.schemas import page_id
 CONSOLE = Console()
 
 PLAIN_PROMPT = "you › "
+WORKING_MESSAGE = "working…"
 
 _TEXT_PREVIEW = 800
 
@@ -28,9 +32,33 @@ class SourceLine(Protocol):
     doc_id: str
     page: int
     pdf: Path | None
+    txt: Path | None
     png: Path
     text: str | None
     bbox: object
+
+
+@contextmanager
+def working() -> Iterator[None]:
+    """Show ``working…`` while the model runs. A no-op off a terminal.
+
+    The prompt stays outside this block. ``transient`` clears the line before the
+    answer panels print, and stdout is not redirected so logs are not captured.
+    """
+    if not CONSOLE.is_interactive:
+        yield
+        return
+    spinner = Spinner("dots", text=Text(WORKING_MESSAGE, style="bold cyan"))
+    with Live(
+        spinner,
+        console=CONSOLE,
+        auto_refresh=True,
+        refresh_per_second=10,
+        transient=True,
+        redirect_stdout=False,
+        redirect_stderr=False,
+    ):
+        yield
 
 
 def echo(message: str) -> None:
@@ -114,22 +142,24 @@ def render_error(message: str) -> None:
 
 
 def render_sources(materials: list[SourceLine]) -> None:
-    """One panel per turn: the pdf, page image, and OCR text behind each citation."""
+    """One panel per turn: only the files that actually back each citation."""
     if not materials:
         CONSOLE.print("[yellow]sources  none[/]")
         return
     blocks: list[str] = []
     for item in materials:
-        pdf = str(item.pdf) if item.pdf is not None else f"{item.doc_id}.pdf  [yellow]not in artifacts[/]"
-        png = str(item.png) if item.png.is_file() else f"{item.png}  [yellow]missing[/]"
-        text = _clip(item.text) if item.text else "[yellow]no OCR text for this page[/]"
-        blocks.append(
-            f"[bold]{page_id(item.doc_id, item.page)}[/]\n"
-            f"[bold]pdf[/]   {pdf}\n"
-            f"[bold]png[/]   {png}\n"
-            f"[bold]text[/]  {text}\n"
-            f"[bold]bbox[/]  {item.bbox}"
-        )
+        lines = [f"[bold]{page_id(item.doc_id, item.page)}[/]"]
+        if item.pdf is not None:
+            lines.append(f"[bold]pdf[/]   {item.pdf}")
+        if item.txt is not None:
+            lines.append(f"[bold]txt[/]   {item.txt}")
+        if item.png.is_file():
+            lines.append(f"[bold]png[/]   {item.png}")
+        if item.text:
+            lines.append(f"[bold]text[/]  {_clip(item.text)}")
+        if item.bbox is not None:
+            lines.append(f"[bold]bbox[/]  {item.bbox}")
+        blocks.append("\n".join(lines))
     CONSOLE.print(Panel("\n\n".join(blocks), title="sources", border_style="cyan", expand=False))
 
 
