@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": ".cursor/hooks/superpowers-session-start.sh"
+      },
+      {
+        "command": "node .cursor/skills/ponytail/hooks/ponytail-activate.js",
+        "timeout": 5
+      }
+    ],
+    "beforeSubmitPrompt": [
+      {
+        "command": "node .cursor/skills/ponytail/hooks/ponytail-mode-tracker.js",
+        "timeout": 5
+      }
+    ]
+  }
+}

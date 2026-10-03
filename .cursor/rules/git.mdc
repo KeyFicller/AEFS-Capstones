@@ -1,0 +1,10 @@
+---
+description: Git——提交是用户的动作
+alwaysApply: true
+---
+
+# Git
+
+- 禁止自行 `git commit`（含 `--amend`）、`rebase`、`push`、`reset --hard`、`stash`、`checkout -- <file>`。用户当次明确要求才做；做前先 `git status` + `git diff` 展示内容。
+- agent 的终点是：改动落到工作区，报告「改了哪些文件、为什么、建议提交信息」，停。
+- 撤销提交但保留改动用 `git reset --mixed`。

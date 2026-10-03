@@ -1,0 +1,17 @@
+---
+description: Capstone 工作流——PROJECT.md 唯一来源、feature 级 spec-driven
+alwaysApply: true
+---
+
+# Capstone 工作流
+
+- 一个项目一个顶层目录 `projects/<name>/`，一次只聚焦一个。
+- `PROJECT.md` 是项目特有信息（架构 / 栈 / 指标 / 预算 / 交付物）的唯一来源；与规则冲突以它为准。新项目的栏目照抄既有项目的 `PROJECT.md`。
+- feature 级 spec-driven，顺序固定，没走到的那步不提前写：
+  1. `docs/features/<slug>/design.md`——只写行为与架构决策。取舍由用户拍板，没拍板的不写死。
+  2. 用户确认 design 后才写 `impl_plan.md`；决策变了同一轮改 design。
+  3. 按 impl_plan 实现；要偏离先改文档再改代码。
+  4. 落地后回写 `PROJECT.md`。
+  此路径覆盖 superpowers `brainstorming` / `writing-plans` 的默认 `docs/superpowers/`。
+- 不交 demo：不硬编码结果、不用假数据、不绕过真实流程。
+- 宣称「完成 / 修好 / 通过」前贴出证据：`pytest` 全绿、评测指标（含基线对比）、交付命令端到端跑通。拿不到就明说「未验证」。

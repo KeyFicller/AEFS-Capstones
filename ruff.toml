@@ -1,0 +1,34 @@
+# Repo-wide lint/format config. Replaces the former `python-review-fix` skill's
+# mechanical checks; naming/comment review stays a human+agent task.
+target-version = "py311"
+line-length = 100
+extend-exclude = [".venv", "_artifacts", "jobs", "**/harbor_tasks/**"]
+
+[lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes (unused imports/variables)
+    "I",        # isort (stdlib / third-party / local grouping)
+    "UP",       # pyupgrade (modern syntax, f-strings)
+    "B",        # bugbear (mutable default args, etc.)
+    "C4",       # comprehensions over manual loops
+    "SIM",      # simplify
+    "N",        # pep8-naming
+    "A",        # shadowing builtins (list, dict, id, type, input ...)
+    "BLE",      # blind `except Exception`
+    "E722",     # bare `except:`
+    "PTH",      # pathlib over os.path / bare open()
+    "T20",      # print in library code
+]
+ignore = [
+    "E501",     # line length is handled by the formatter
+]
+
+[lint.per-file-ignores]
+"**/tests/**" = ["T20"]
+"**/eval/**" = ["T20"]
+"**/scripts/**" = ["T20"]
+"**/cli*.py" = ["T20"]
+
+[format]
+quote-style = "double"

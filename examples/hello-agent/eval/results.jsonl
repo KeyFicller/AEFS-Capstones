@@ -1,3 +1,3 @@
-{"task": "hello a", "done": true, "turns": 3}
-{"task": "hello b", "done": true, "turns": 3}
-{"task": "hello c", "done": true, "turns": 3}
+{"input": "a", "pass": true}
+{"input": "b", "pass": true}
+{"input": "c", "pass": true}

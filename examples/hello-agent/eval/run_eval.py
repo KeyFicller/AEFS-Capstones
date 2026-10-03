@@ -1,26 +1,23 @@
-"""最小评测：跑几个任务，写 eval/results.jsonl，打印 pass@1。
+"""Minimal eval: run a few cases, write eval/results.jsonl, print the score.
 
-真实项目把 TASKS 换成数据集、把 run 换成真实 harness、把基线换掉即可。
+Real projects swap CASES for a dataset, `hello` for the real harness, and add a baseline.
 """
 
 import json
 from pathlib import Path
 
-from hello_agent.loop import run
+from hello_agent.core import hello
 
-TASKS = ["hello a", "hello b", "hello c"]
+CASES = [("a", "hello, a!"), ("b", "hello, b!"), ("c", "hello, c!")]
 
 
 def main() -> None:
-    rows = [
-        {"task": task, "done": (result := run(task)).done, "turns": result.turns}
-        for task in TASKS
-    ]
+    rows = [{"input": name, "pass": hello(name) == expected} for name, expected in CASES]
     out = Path(__file__).with_name("results.jsonl")
     out.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
 
-    pass_at_1 = sum(row["done"] for row in rows) / len(rows)
-    print(f"pass@1={pass_at_1:.2f}  baseline=hello-world  -> {out}")
+    score = sum(row["pass"] for row in rows) / len(rows)
+    print(f"pass@1={score:.2f}  -> {out}")
 
 
 if __name__ == "__main__":

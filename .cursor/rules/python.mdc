@@ -1,0 +1,40 @@
+---
+description: Python 硬性基础——技术选型、共享环境、项目布局、代码风格、代码一律英文
+globs: **/*.py
+alwaysApply: false
+---
+
+# 技术选型（所有项目共享）
+
+- **编排**：LangGraph 表达状态机 / 多 agent / 子图；LangChain 做 model / tool / retriever 抽象。不绕过框架手搓调度。
+- **模型**：经 LangChain 抽象（`init_chat_model` / `ChatDeepSeek`，`langchain-deepseek>=1.1.0`），默认 `deepseek-v4-flash`。provider 与模型名集中在单一构造点、可配置，禁止硬编码进业务逻辑。
+- **模型 ID 只写现行的**：改动前查官方 changelog，别照抄教程（`deepseek-chat` / `deepseek-reasoner` 已于 2026-07-24 停用）。
+- **深度学习**：PyTorch，设备与精度可配置，禁止隐式 `.cuda()`。
+- **结构化输出**：带 schema 解析，禁止正则抠 JSON。
+- **可复现**：固定随机种子与依赖版本。
+
+# 共享环境
+
+- 仓库根一个 `.venv`，所有项目共用；禁止子项目另建。
+- 依赖唯一来源是根 `requirements.txt`；本地项目以 `-e ./projects/<project>` 加入；子项目 `pyproject.toml` 只声明打包 / 入口点。
+- 环境 / 建项目 / 测试 / 运行统一走根目录 `./start.sh`（见 skill `start`），不手写等价 uv 命令。
+
+# 布局
+
+```
+projects/<project>/
+  src/<pkg>/   tests/   eval/   PROJECT.md   README.md   pyproject.toml
+```
+
+# 风格
+
+- 公开函数 / 类必须有类型注解，禁止 `Any` 兜底。
+- 库代码用 `logging` 不用 `print`；CLI 输出走专用 renderer。
+- 错误用异常 + 上下文抛出；禁止裸 `except:` 或吞异常。
+- 机械检查交给 `ruff`（根 `ruff.toml`）。
+
+# 语言
+
+- 源码与配置文件（`py` / `toml` / `sh` / `json` / `yaml` …）中不得出现中文：注释、docstring、标识符、字符串、日志、异常、测试名全英文。`.md` 文档用中文。
+- 碰到的旧中文一并改英文；没碰到的不动。
+- docstring 只写做什么 / 为什么，不写变更记录——那是 `PROJECT.md` 的事。

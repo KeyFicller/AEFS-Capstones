@@ -1,14 +1,13 @@
 [project]
 name = "hello-agent"
 version = "0.1.0"
-description = "Hello-world 级模板：示意符合 rules 的完成态项目长什么样"
+description = "Template project for ./start.sh new"
 requires-python = ">=3.11"
 
 [project.scripts]
 hello-agent = "hello_agent.cli:main"
 
-# 依赖不在这里声明 —— 统一在仓库根 requirements.txt
-# 新增依赖：改 requirements.txt，不要散落到子项目。
+# No dependencies here: they live in the repo-root requirements.txt.
 
 [build-system]
 requires = ["hatchling"]

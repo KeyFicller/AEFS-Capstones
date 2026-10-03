@@ -1,0 +1,24 @@
+---
+description: README 写法——根目录只做导航，项目 README 只放运行效果图、LangGraph 图、启动命令
+globs: **/README.md
+alwaysApply: false
+---
+
+# README
+
+## 根目录 `README.md`
+
+只做导航：一句话说明仓库是什么 + 项目表（名称 / 一句话 / 链接到项目 README 与 PROJECT.md）。不写任何项目细节。
+
+## 项目 `README.md`
+
+固定四段，顺序不变，其他一律不写：
+
+1. **标题 + 一句话**：这是什么。
+2. **跑起来长什么样**：一张实跑截图（`example.png`），REPL / CLI / UI 皆可。
+3. **架构长什么样**：一张 LangGraph 图（`graph.png`，`graph.get_graph().draw_mermaid_png()` 产出），下面最多三行说清节点职责。图替代文字，不要再写一段架构说明。
+4. **跑起来**：从仓库根执行的命令，按「装 → 跑 → 评测」顺序，每条一行注释。
+
+不放的：目录结构、工具清单、设计取舍、评测结果与口径、已知限制、变更记录——这些归 `PROJECT.md`。
+
+图片与 README 同目录；拓扑或 UI 变了就重截 / 重生成，不要留过期图。
