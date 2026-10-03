@@ -116,6 +116,8 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 | `src/multimodal_doc_qa/ui/` | Streamlit 查看器 | streamlit |
 | `src/multimodal_doc_qa/cli.py` | `ingest` / `ask` / `eval` 入口 | typer |
 
+**图产物**：`graph.png` 由 `python -m multimodal_doc_qa.graph` 生成（这条命令会先写图，再加载编码器、把语料页建进内存索引、真的问一题），拓扑改了重跑；`example.png` 为手工截图。README 只放这两张图。
+
 ## 技术栈
 
 - **Python**：共享 venv **3.14.6**；全栈依赖已用 `uv pip install --dry-run` 验证可解析。
@@ -199,6 +201,11 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 ## 交付物
 
 - **CLI**：`doc-qa`（加载 artifacts 后进入 REPL）、`doc-qa chat [--mode]`、`doc-qa ingest <corpus_dir>`、`doc-qa ask "<question>"`、`doc-qa eval [--mode] [--max-tokens] [--max-seconds]`。
+- **CLI 细节**：
+  - REPL（不带子命令）：两条索引启动时都加载，`--mode` 只决定开场停在哪条；提示符 `you ›`，下面状态栏是当前路径与编码器；`Shift-Tab` 切 vision / ocr，不重新加载模型；空行忽略；`:q` / Ctrl-C / Ctrl-D 退出，一轮还在跑时 Ctrl-C 只取消这一轮。
+  - `ingest --corpus` 接受 `pdf` / 图片（`png` / `jpg` / `jpeg` / `webp`）/ `txt` / `md`：PDF 与图片走 `encode_images`；纯文本按块切、用同一视觉编码器的 `encode_texts` 进视觉索引，不光栅化。字节相同的后一份文件跳过。只有一份文件时 `doc_id` 是词干，同词干有两份则用完整文件名、两份都入库。
+  - 检索在 top-k 之后还过分数线：低于本轮最高分 `MDQ_MIN_SCORE_RATIO`（默认 `0.5`）的页不进结果。引用面板只打印这份材料真正有的文件类型（文本页不出现 pdf / png）。
+  - CLI 自己读仓库根 `local.env`（环境里已有的同名变量不会被盖掉）；`ask` / REPL / `eval` 调 DeepSeek，需要 `DEEPSEEK_API_KEY`。
 - **查看器**：`streamlit run ...`——证据框叠加 + vision / OCR 并排。
 - **评测**：`eval/results.jsonl` + 一份对照报告（内容类型 × 范式矩阵）。
 - **`outputs/skill-doc-qa.md`**：描述交付物与如何复现。

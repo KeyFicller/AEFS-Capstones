@@ -1,6 +1,6 @@
 ---
 description: README 写法——根目录只做导航，项目 README 只放运行效果图、LangGraph 图、启动命令
-globs: **/README.md
+globs: README.md,projects/*/README.md,examples/*/README.md
 alwaysApply: false
 ---
 
@@ -21,4 +21,6 @@ alwaysApply: false
 
 不放的：目录结构、工具清单、设计取舍、评测结果与口径、已知限制、变更记录——这些归 `PROJECT.md`。
 
-图片与 README 同目录；拓扑或 UI 变了就重截 / 重生成，不要留过期图。
+图片与 README 同目录；拓扑或 UI 变了就重截 / 重生成，不要留过期图。图片怎么生成、为什么这么截，写在 `PROJECT.md`。
+
+例外：`examples/hello-agent/` 是脚手架模板，无 UI 也无图，只留标题 + 一句话 + 跑起来。

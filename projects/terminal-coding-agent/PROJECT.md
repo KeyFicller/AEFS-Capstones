@@ -58,6 +58,10 @@
 | token 记账 | runner 自动累加 `result["messages"]` 的 `usage_metadata` |
 | 运行位置 | 项目 copytree 进容器 `/installed-agent/langgraph-project`；容器内 venv 为 `/opt/harbor-langgraph-venv`，**Python 3.12**；**不会**带上仓库根 `requirements.txt`，项目须可自安装 |
 
+**模块路径**：`graph.py`（图装配）· `cli.py`（REPL 入口）· `tools/`（6 个工具，唯一副作用边界）· `ui.py`（控制台渲染）· `middleware/` · `harbor_tasks/`（`l1-`…`l5-` 五档能力题 + `greeter-fix` 烟测）· `scripts/verify_harbor_tasks_local.sh`（本地双向验证）· `scripts/collect_eval_results.py`（汇总 job 到 `eval/results.jsonl`）· `tests/`（单测）。
+
+**图产物**：`graph.png` 由 `python -m terminal_coding_agent.graph` 生成（demo 自己放行审批，所以会跑完；前缀 `ENABLE_HITL=0` 得到 Harbor 实际跑的无闸门拓扑），拓扑改了重跑一次；`example.png` 为手工截图。README 只放这两张图。
+
 ## 技术栈
 
 - **Python**：本机共享 venv 3.14.6，**容器内 3.12** → 代码须 3.12 兼容
@@ -71,7 +75,7 @@
 ## 指标与评测
 
 - **主指标**：**手写 Harbor 任务集通过率** = `reward=1` 的任务数 / 任务总数，**逐档报告**（L1–L5 各报通过与否），不报平均值。任务集固定、提交进库，不挑题。
-- **任务集**：`harbor_tasks/` 下 **5 个**手写任务，按 **L2 定位难度**逐级递进（L1 可见测试点名函数 → L2 症状在调用方、真因在被调方 → L3 只有现象、无可见测试 → L4 规格散文、可见测试全绿 → L5 架构不变量 + 诱饵）。每题自带 `instruction.md` + verifier（`reward` 0/1）+ 可用的 `solution/solve.sh`；`greeter-fix` 保留为烟测，不计入能力分。任务集是交付物，改它必须同步改本节并说明原因。
+- **任务集**：`harbor_tasks/` 下 **5 个**手写任务（`l1-shipping-average` / `l2-unit-resolution` / `l3-metrics-labels` / `l4-cancelled-orders` / `l5-settings-cache`），按 **L2 定位难度**逐级递进（L1 可见测试点名函数 → L2 症状在调用方、真因在被调方 → L3 只有现象、无可见测试 → L4 规格散文、可见测试全绿 → L5 架构不变量 + 诱饵）。每题自带 `instruction.md` + verifier（`reward` 0/1）+ 可用的 `solution/solve.sh`；`greeter-fix` 保留为烟测，不计入能力分。任务集是交付物，改它必须同步改本节并说明原因。
 - **每题双向可证伪**（本地 `scripts/verify_harbor_tasks_local.sh` 强制）：未修改 → `reward=0`，参考解 → `reward=1`；L2/L5 另加作弊解必须判红。
 - **同批记录**：`turns/task`、`tokens/task`（in/out 分开）、`元/task`、`stop_reason`、artifact 收集状态。
 - **只与自己比**：不做外部基线对比，数字只用于跨版本比较，不得声称与任何外部 harness 的横向胜负。
@@ -147,6 +151,7 @@
   - `--worktree` 缺省为**临时目录**，会话结束即删，`.agent/` 不会落进你的项目；要真让 agent 改某个仓库必须显式传 `--worktree <repo>`，续跑同 `--session` 也需连同传
   - `todo_renderer` / `tool_renderer` 经 `configurable` 注入（`make_graph` → executor）；Harbor 不注入 → todo 走 `_print_todos` 进 `langgraph-run.log`，且不装 `ToolLogMiddleware`。交互式终端下一个 turn 内：todo 面板原地覆盖刷新，与 `working…` 指示器共用一块 `Live`；工具调用一行摘要（`edit_file` 附着色 diff），追加在面板上方，单块原地刷新
   - 每轮页脚只显示 `turns` 与 `stop`。token / cost 明知不准故不展示（provider `usage_metadata` 常缺字段）；记账本身保留，硬闸门仍依赖它
+  - **用户可见用法**：`approve? [y/n] ›` 处 `y` 放行 / `n` 否决（否决即本轮结束并写 trace）；闸门需要显式 `--worktree`，只有落盘 worktree 才能做到「进程被杀后重启、重建审批」。执行途中 agent 可能弹 `agent asks` 面板，在 `answer ›` 输入**编号**选一项，或**直接打一句自己的话**作答；`Ctrl-C` 表示「你自己决定」，agent 按自己判断跑完、本轮不终止（与闸门处 `Ctrl-C` 的含义相反）。提问发生在任何工具执行**之前**，批准后不会重跑上一步工具
 <<<<<<< HEAD
   - **计划闸门（HITL，2026-10-02）**：`configurable["enable_hitl"]` 为真时（只由 CLI 注入），父图插入 `await_plan_approval` 节点，用 LangGraph 动态 `interrupt()` 暂停并把计划摆给用户；`Command(resume="approve")` 继续，`"reject"` → 走 `summary` 写 trace。**两条入口**：`make_plan`（初计划）与 `recover`（replan，`_after_recover_gated`）；replan 那条必须显式接线——`recover` 把 `make_plan` 当**普通函数**调用（`recover.py`），不经图上的边，闸门不在其路径上。**拒绝标签区分两类失败**（评测报告要分类计数）：初计划被否 → `stop_reason="plan_rejected"`；replan 被否 → `"replan_rejected"`，判据是闸门处的 `replan_count`（`recover` 返回前已 +1，先于闸门落地）。**暂停态落 checkpoint**：显式 `--worktree` + 同 `--session` 可在进程被杀后重启重建审批（`pending_interrupts` 读 `get_state().tasks[].interrupts`）。恢复**不**经 `run_task_turn`（不 `update_state`，否则铲平暂停点）。未注入该 flag（Harbor）时节点集与路由与改动前逐字一致
     - **agent 提问（HITL，2026-10-02）**：`enable_hitl` 为真时 executor 多一个 `ask_user` 工具（`middleware/ask_user.py`），模型可在执行途中给人 1–4 个选项并接受自由文本作答。**中断落在 `after_model` 中间件里，即 ToolNode 之前**：LangGraph 的 resume 重放粒度是整个节点，若把 `interrupt()` 放进工具体内，ToolNode 会把同批调用再执行一遍（实测副作用工具执行 **2** 次）；停在 ToolNode 之前则无东西可重放（实测 **1** 次）。这与框架自带的 `HumanInTheLoopMiddleware` 落点一致。`ask_user` 是**信号工具**：`after_model` 就地答掉该调用、把答案注入为带匹配 `tool_call_id` 的 `ToolMessage`，工具 body 永不执行（同 `report_blocked` 先例）。**该调用必须保留在 `tool_calls` 里**——`create_agent` 的 model→边在 `len(tool_calls) == 0` 时直接结束循环，摘掉它会让 resume 后模型再不被调用、答案无人使用（实现期实测抓到的 bug）；保留则路由落到「有调用但无 pending」一支回到模型。契约：选项数不在 1–4 时不中断、回 error `ToolMessage`；一批多个只问第一个；未作答（Ctrl-C / EOF）→ `{"answer": None, "cancelled": True}`，本轮**不终止**，agent 自行判断继续。**不新增 state 字段**（答案走消息流）。未注入该 flag 时工具表与中间件表逐字一致（Harbor 平价）
