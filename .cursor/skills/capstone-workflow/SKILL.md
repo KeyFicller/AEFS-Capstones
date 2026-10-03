@@ -10,12 +10,12 @@ description: AEFS capstone 项目的完整生命周期工作流（接谱→设�
 
 ## 生命周期（每步都有验证门槛）
 
-1. **接谱**：读该项目 spec（`docs/en.md` + Build It / Ship It / rubric），产出或更新 `PROJECT.md`。
-   → 验证：PROJECT.md 覆盖架构、栈、指标、预算、交付物。
-2. **设计**：画出模块边界与数据流，列出待实现清单。
-   → 验证：与 spec 架构一致，无遗漏层。
-3. **实现**：先让骨架端到端跑通，再逐模块补全。
-   → 验证：每次改动后 `pytest` 绿。
+1. **接谱**：读该项目 spec（`docs/en.md` + Build It / Ship It / rubric），产出项目整体的 `PROJECT.md`，并把范围拆成 features。
+   → 验证：PROJECT.md 覆盖架构、栈、指标、预算、交付物，且 features 列全。
+2. **设计**：一次一个 feature。先写 `docs/features/<slug>/design.md`，期间追问用户，行为和架构由用户拍板。用户确认后才写 `impl_plan.md`；方案若改了决策，同步改 design。见规则 `05-spec-driven`。
+   → 验证：design 已经用户确认，且与 impl_plan 一致。
+3. **实现**：按该 feature 的 impl_plan 做。要偏离先改 design 和 impl_plan。落地后回写 `PROJECT.md`。
+   → 验证：每次改动后 `pytest` 绿，且 `PROJECT.md` 反映已落地的 feature。
 4. **加固**：安全、预算、可观测性、错误恢复。
    → 验证：安全用例通过 + trace 完整。
 5. **评测**：跑指标并与基线对比。

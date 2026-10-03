@@ -9,6 +9,7 @@ alwaysApply: true
 接谱 → 设计 → 实现 → 加固 → 评测 → 交付；每步都有验证门槛，未过门槛不进入下一步。
 
 - 项目特有信息一律来自该项目的 `PROJECT.md`；冲突时以 PROJECT.md 为准。
+- 每个 feature 走 spec-driven：design（拷打决策）→ 确认后 impl_plan（同步改 design）→ 实现 → 回写 `PROJECT.md`。见规则 `05-spec-driven`。
 - 一次聚焦一个项目，每个项目一个顶层目录，依赖与评测互相隔离。
 - 未验证不得宣称完成。
 

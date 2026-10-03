@@ -1,0 +1,25 @@
+---
+description: Spec-driven——先 PROJECT.md 拆 feature，再 design、确认后 impl_plan，落地后回写
+alwaysApply: true
+---
+
+# Spec-driven
+
+一个 feature 的顺序是固定的。没走到的那一步，不提前写。
+
+## 顺序
+
+1. **项目整体**：先写 `PROJECT.md`，把课程 spec 拆成 features。这是项目级合同，不是某个 feature 的设计稿。
+2. **design**：一次只做一个 feature。写出 `docs/features/<slug>/design.md`。这一步只做行为和架构决策，不写实现步骤。
+3. **拷打**：design 期间不断追问用户。行为、边界、架构取舍由用户拍板。没拍板的不要写死，也不要自己选一个先这样。
+4. **确认**：用户明确认可这份 design 之后，才写 `docs/features/<slug>/impl_plan.md`。
+5. **方案**：写 impl_plan 时若决策变了，同一轮改 design。两份不一致时，以刚确认的决策为准改文档，不要留分歧。
+6. **实现**：按 impl_plan 写代码。实现中要偏离，先改 design 和 impl_plan，再改代码。
+7. **回写**：该 feature 落地之后，更新 `PROJECT.md`（feature 状态、实际架构、范围、预算、指标）。
+
+## 反模式
+
+- 从 feature 列表直接写代码，或 design 还没确认就写 impl_plan。
+- design 阶段替用户做行为或架构决定。
+- impl_plan 改了决策，design 不改。
+- 代码落地了，`PROJECT.md` 仍是拆 feature 时的旧描述。
