@@ -10,12 +10,14 @@ from pathlib import Path
 import torch
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 def _device() -> str:
     if torch.cuda.is_available():
         return "cuda"
     if torch.backends.mps.is_available():
         return "mps"
     return "cpu"
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 REPO_ROOT = Path(__file__).resolve().parents[4]

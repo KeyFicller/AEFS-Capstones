@@ -1,7 +1,8 @@
 """Plan stage: one structured-output call that yields the todo list."""
 
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
@@ -40,9 +41,7 @@ def build_planner(models: AgentModels) -> Callable[..., dict[str, Any]]:
                 parsed: Plan = response["parsed"]
 
                 def format_steps(plan: Plan) -> str:
-                    return f"Task: {plan.task}\n" + "\n".join(
-                        f"- {step}" for step in plan.steps
-                    )
+                    return f"Task: {plan.task}\n" + "\n".join(f"- {step}" for step in plan.steps)
 
                 domain = {
                     "messages": [AIMessage(content=format_steps(parsed))],

@@ -84,7 +84,9 @@ def _score(question: Question, run: QuestionRun, k: int, iou_threshold: float) -
         "ranked": run.ranked,
         "pool": run.pool,
         "ndcg_at_k": round(ndcg_at_k(run.ranked, relevant, k), 4),
-        "iou_at_threshold": round(iou_at_threshold(citations, question.evidence, threshold=iou_threshold), 4),
+        "iou_at_threshold": round(
+            iou_at_threshold(citations, question.evidence, threshold=iou_threshold), 4
+        ),
         "bbox_hit_rate": round(bbox_hit_rate(citations, question.evidence), 4),
         "rounds": run.rounds,
         "calls": run.calls,
@@ -134,11 +136,7 @@ def run_eval(
     with out_path.open("a") as handle:
         header = {
             "kind": "run",
-            **(
-                provenance(settings, mode, k, len(questions), iou_threshold)
-                if settings
-                else {}
-            ),
+            **(provenance(settings, mode, k, len(questions), iou_threshold) if settings else {}),
         }
         handle.write(json.dumps(header) + "\n")
         handle.flush()

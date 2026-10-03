@@ -83,9 +83,7 @@ class ObservabilityMiddleware(AgentMiddleware):
         tracer = get_tracer()
         with tracer.start_as_current_span(f"execute_tool {tool_name}") as span:
             span.set_attribute(ATTR_OPERATION, "execute_tool")
-            set_tool_attributes(
-                span, tool_name=tool_name, tool_call_id=tool_call_id
-            )
+            set_tool_attributes(span, tool_name=tool_name, tool_call_id=tool_call_id)
             try:
                 result = handler(request)
             except Exception as exc:
@@ -102,9 +100,7 @@ class ObservabilityMiddleware(AgentMiddleware):
         tracer = get_tracer()
         with tracer.start_as_current_span(f"execute_tool {tool_name}") as span:
             span.set_attribute(ATTR_OPERATION, "execute_tool")
-            set_tool_attributes(
-                span, tool_name=tool_name, tool_call_id=tool_call_id
-            )
+            set_tool_attributes(span, tool_name=tool_name, tool_call_id=tool_call_id)
             try:
                 result = await handler(request)
             except Exception as exc:

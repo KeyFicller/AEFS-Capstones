@@ -1,8 +1,8 @@
 import subprocess
-
 from pathlib import Path
 
 from terminal_coding_agent.tools.git import build_git
+
 
 def test_git_push_rejected(tmp_path: Path) -> None:
     tool = build_git(tmp_path)

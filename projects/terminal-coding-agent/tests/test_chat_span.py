@@ -2,7 +2,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-
 from terminal_coding_agent.telemetry.attrs import ATTR_INPUT_TOKENS, ATTR_MODEL
 from terminal_coding_agent.telemetry.chat import (
     chat_span,

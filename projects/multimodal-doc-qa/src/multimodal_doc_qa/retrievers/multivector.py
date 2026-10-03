@@ -5,11 +5,11 @@
 
 from typing import Any
 
+import torch
 from langchain_core.callbacks import CallbackManagerForRetrieverRun
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
 from pydantic import ConfigDict
-import torch
 
 from multimodal_doc_qa.index.maxsim import MultiVectorIndex
 from multimodal_doc_qa.retrievers import within_best_ratio
@@ -32,8 +32,8 @@ class MultiVectorRetriever(BaseRetriever):
         query_vec: torch.Tensor = self.encoder.encode_query(query)
         hits = [
             Document(
-                page_content=hit.page_id,
-                metadata={"page_id": hit.page_id, "score": hit.score}
-            ) for hit in self.index.search(query_vec, k=self.k)
+                page_content=hit.page_id, metadata={"page_id": hit.page_id, "score": hit.score}
+            )
+            for hit in self.index.search(query_vec, k=self.k)
         ]
         return within_best_ratio(hits, self.min_score_ratio)

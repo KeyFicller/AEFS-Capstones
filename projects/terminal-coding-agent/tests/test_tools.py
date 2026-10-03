@@ -2,6 +2,7 @@ from pathlib import Path
 
 from terminal_coding_agent.tools import make_tools, tools_by_name
 
+
 def test_make_tools(tmp_path: Path) -> None:
     names = {t.name for t in make_tools(tmp_path)}
 

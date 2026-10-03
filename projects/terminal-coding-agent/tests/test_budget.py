@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from terminal_coding_agent import config
 from terminal_coding_agent.budget import (
     BudgetLedger,
     apply_usage,
@@ -7,12 +8,14 @@ from terminal_coding_agent.budget import (
     price_usage,
     write_trace,
 )
-from terminal_coding_agent import config
 
 
 def test_price_usage_includes_cache_read():
     # 1M cache hit + 0 miss + 0 out
-    assert price_usage(input_tokens=1_000_000, output_tokens=0, cache_read_tokens=1_000_000) == config.PRICE_CACHE_HIT_PER_M
+    assert (
+        price_usage(input_tokens=1_000_000, output_tokens=0, cache_read_tokens=1_000_000)
+        == config.PRICE_CACHE_HIT_PER_M
+    )
     # 1M miss + 1M out
     cost = price_usage(input_tokens=1_000_000, output_tokens=1_000_000, cache_read_tokens=0)
     assert cost == config.PRICE_CACHE_MISS_PER_M + config.PRICE_OUTPUT_PER_M

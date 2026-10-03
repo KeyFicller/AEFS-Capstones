@@ -2,12 +2,11 @@ import difflib
 from pathlib import Path
 
 from langchain_core.tools import tool
+from rich.console import Console
+from rich.syntax import Syntax
 
 from terminal_coding_agent.tools.path import resolve_in_worktree
 from terminal_coding_agent.tools.truncate import truncate
-
-from rich.console import Console
-from rich.syntax import Syntax
 
 # Debug-only: flip to True to pretty-print edit diffs to the console.
 DEBUG_RENDER_DIFF = False

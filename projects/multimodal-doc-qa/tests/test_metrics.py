@@ -5,9 +5,8 @@ import math
 from pathlib import Path
 
 import pytest
-
 from multimodal_doc_qa.eval.metrics import bbox_hit_rate, iou_at_threshold, ndcg_at_k
-from multimodal_doc_qa.eval.run import QuestionRun, RESULTS_PATH, run_eval
+from multimodal_doc_qa.eval.run import RESULTS_PATH, QuestionRun, run_eval
 from multimodal_doc_qa.schemas import Answer, BBox, Citation, Question
 
 
@@ -214,7 +213,9 @@ def _question(qid: str = "q1", page: int = 0) -> Question:
     )
 
 
-def _run(page: int = 0, stop_reason: str = "", cited: bool = True, answered: bool = True) -> QuestionRun:
+def _run(
+    page: int = 0, stop_reason: str = "", cited: bool = True, answered: bool = True
+) -> QuestionRun:
     """One question's outcome. ``answered=False`` is the graph refusing to answer at all."""
     from multimodal_doc_qa.schemas import page_id
 
@@ -396,11 +397,20 @@ def test_two_runs_append_without_merging(tmp_path: Path) -> None:
     """Appending is right, as long as each run is delimited and identified."""
     out = tmp_path / "results.jsonl"
 
-    run_eval([_question()], lambda q: _run(), out_path=out, settings=_settings(), mode="vision", k=5)
+    run_eval(
+        [_question()], lambda q: _run(), out_path=out, settings=_settings(), mode="vision", k=5
+    )
     run_eval([_question()], lambda q: _run(), out_path=out, settings=_settings(), mode="ocr", k=5)
 
     rows = _read(out)
-    assert [row["kind"] for row in rows] == ["run", "question", "summary", "run", "question", "summary"]
+    assert [row["kind"] for row in rows] == [
+        "run",
+        "question",
+        "summary",
+        "run",
+        "question",
+        "summary",
+    ]
     assert [row["mode"] for row in rows if row["kind"] == "run"] == ["vision", "ocr"]
 
 

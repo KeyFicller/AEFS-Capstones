@@ -58,9 +58,7 @@ def build_git(worktree: Path):
             return truncate(f"Error: git command Timeout: {git_args}")
 
         return truncate(
-            f"exit_code: {result.returncode}\n"
-            f"stdout:\n{result.stdout}\n"
-            f"stderr:\n{result.stderr}"
+            f"exit_code: {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
 
     return git

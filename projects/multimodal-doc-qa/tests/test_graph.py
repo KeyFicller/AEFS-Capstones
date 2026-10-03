@@ -9,13 +9,12 @@ reaches ``max_rounds + 1`` before anyone notices.
 
 from pathlib import Path
 
-from PIL import Image
 from langchain_core.documents import Document
-
-from multimodal_doc_qa.config import Settings
 from multimodal_doc_qa.budget import Budget
+from multimodal_doc_qa.config import Settings
 from multimodal_doc_qa.graph import GraphDeps, build_graph, initial_state
-from multimodal_doc_qa.schemas import Answer, Citation, page_id
+from multimodal_doc_qa.schemas import Answer, Citation
+from PIL import Image
 
 
 class _Retriever:
@@ -27,9 +26,7 @@ class _Retriever:
 
     def invoke(self, query: str) -> list[Document]:
         self.queries.append(query)
-        return [
-            Document(page_content=p, metadata={"page_id": p, "score": 1.0}) for p in self.pages
-        ]
+        return [Document(page_content=p, metadata={"page_id": p, "score": 1.0}) for p in self.pages]
 
 
 class _StubModel:

@@ -12,7 +12,6 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import tool
 from langgraph.types import Command
-
 from terminal_coding_agent.checkpoint import build_checkpointer
 from terminal_coding_agent.middleware.ask_user import AskUserMiddleware
 from terminal_coding_agent.state import CodingAgentState, ToDoItem, ToDoStatus
@@ -205,7 +204,6 @@ def test_the_real_execute_node_surfaces_the_question_to_the_parent_graph(
 ) -> None:
     """Composition check: the real node and the real middleware table, only the model is scripted."""
     from langgraph.graph import END, START, StateGraph
-
     from terminal_coding_agent.executor import build_execute_nodes
     from terminal_coding_agent.models import AgentModels
 

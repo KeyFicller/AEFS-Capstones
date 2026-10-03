@@ -11,11 +11,9 @@ import pymupdf
 import pytest
 import torch
 from langchain_core.documents import Document
-from PIL import Image
-
 from multimodal_doc_qa.baseline import ocr
 from multimodal_doc_qa.retrievers.text import TextRetriever
-
+from PIL import Image
 
 # ------------------------------------------------------------------- chunking
 
@@ -123,9 +121,7 @@ def test_extract_page_texts_pairs_each_page_with_its_own_image(tmp_path, monkeyp
     pdf = _pdf(tmp_path, ["", ""])
     images = [_png(tmp_path / f"p{i:03d}.png", width=10 + i) for i in range(2)]
 
-    monkeypatch.setattr(
-        ocr.pytesseract, "image_to_string", lambda img, *a, **kw: str(img.size[0])
-    )
+    monkeypatch.setattr(ocr.pytesseract, "image_to_string", lambda img, *a, **kw: str(img.size[0]))
 
     assert ocr.extract_page_texts(pdf, images) == ["10", "11"]
 

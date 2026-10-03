@@ -2,7 +2,6 @@ from pathlib import Path
 
 from langchain.agents.middleware.types import ModelResponse
 from langchain_core.messages import AIMessage, HumanMessage
-
 from terminal_coding_agent import config
 from terminal_coding_agent.budget import BudgetLedger
 from terminal_coding_agent.middleware.budget import BudgetMiddleware

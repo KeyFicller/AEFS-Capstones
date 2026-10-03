@@ -50,9 +50,18 @@ def seed_demo_worktree(worktree: Path) -> None:
     (worktree / "README.md").write_text(_README, encoding="utf-8")
 
     subprocess.run(["git", "init"], cwd=worktree, check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.email", "demo@example.com"], cwd=worktree, check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.name", "Demo Agent"], cwd=worktree, check=True, capture_output=True)
-    subprocess.run(["git", "add", "greeter.py", "README.md"], cwd=worktree, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "demo@example.com"],
+        cwd=worktree,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Demo Agent"], cwd=worktree, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "add", "greeter.py", "README.md"], cwd=worktree, check=True, capture_output=True
+    )
     subprocess.run(
         ["git", "commit", "-m", "chore: seed broken greeter for demo"],
         cwd=worktree,

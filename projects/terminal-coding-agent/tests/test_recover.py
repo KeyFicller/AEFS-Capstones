@@ -3,7 +3,6 @@ from pathlib import Path
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
-
 from terminal_coding_agent.recover import build_recover, project_evidence
 from terminal_coding_agent.state import ToDoItem, ToDoStatus
 
@@ -61,9 +60,7 @@ def _make_plan_returning(*steps: str):
     def make_plan(state, config):
         return {
             "messages": [AIMessage(content="replanned")],
-            "todo_list": [
-                ToDoItem(status=ToDoStatus.PENDING, description=step) for step in steps
-            ],
+            "todo_list": [ToDoItem(status=ToDoStatus.PENDING, description=step) for step in steps],
             "turns": state.get("turns", 0) + 1,
         }
 

@@ -1,10 +1,10 @@
 """Execute stage: start_task -> run_agent -> end_task (parent-graph nodes)."""
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import SummarizationMiddleware
@@ -72,20 +72,14 @@ def build_execute_nodes(
             return {**budget_updates(ledger), **clear_block, "stop_reason": reason}
 
         task_index = next(
-            (
-                i
-                for i, item in enumerate(state["todo_list"])
-                if item.status == ToDoStatus.PENDING
-            ),
+            (i for i, item in enumerate(state["todo_list"]) if item.status == ToDoStatus.PENDING),
             None,
         )
         if task_index is None:
             raise AssertionError("No pending task found")
 
         todo_list = list(state["todo_list"])
-        todo_list[task_index] = replace(
-            todo_list[task_index], status=ToDoStatus.IN_PROGRESS
-        )
+        todo_list[task_index] = replace(todo_list[task_index], status=ToDoStatus.IN_PROGRESS)
         return {
             "todo_list": todo_list,
             "current_task_index": task_index,
@@ -105,9 +99,7 @@ def build_execute_nodes(
 
         middleware = [
             BudgetMiddleware(ledger),
-            SummarizationMiddleware(
-                models.executor, trigger=("tokens", PRECOMPACT_TOKENS)
-            ),
+            SummarizationMiddleware(models.executor, trigger=("tokens", PRECOMPACT_TOKENS)),
             ObservabilityMiddleware(resolve_model_name(models.executor)),
             SafetyMiddleware(),
             BlockedReportMiddleware(),
@@ -117,9 +109,7 @@ def build_execute_nodes(
         if sequence_events is not None:
             # Recording is on only when the caller asked for a diagram (sequence_path).
             middleware.append(
-                SequenceMiddleware(
-                    sequence_events, description=todo_list[task_index].description
-                )
+                SequenceMiddleware(sequence_events, description=todo_list[task_index].description)
             )
         if tool_renderer is not None:
             # Last = innermost, so a guard that short-circuits the call is not logged as output.
@@ -170,11 +160,7 @@ def build_execute_nodes(
             final_status = ToDoStatus.FAILED if (ledger.stop_reason or blocked) else ToDoStatus.DONE
             todo_list[task_index] = replace(todo_list[task_index], status=final_status)
             current = todo_list[task_index]
-            outcome = (
-                "successfully completed"
-                if current.status == ToDoStatus.DONE
-                else "failed"
-            )
+            outcome = "successfully completed" if current.status == ToDoStatus.DONE else "failed"
             write_trace(
                 trace,
                 ledger,
@@ -184,9 +170,7 @@ def build_execute_nodes(
             return {
                 **budget_updates(ledger),
                 "todo_list": todo_list,
-                "messages": [
-                    AIMessage(content=f"Task {current.description} {outcome}.")
-                ],
+                "messages": [AIMessage(content=f"Task {current.description} {outcome}.")],
                 "current_task_index": None,
             }
 

@@ -3,7 +3,6 @@ from pathlib import Path
 
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START, StateGraph
-
 from terminal_coding_agent.checkpoint import build_checkpointer, checkpoint_path
 from terminal_coding_agent.state import CodingAgentState, ToDoItem, ToDoStatus
 
@@ -34,18 +33,14 @@ def test_ainvoke_checkpoints(tmp_path: Path) -> None:
     """Harbor's LangGraph runner only calls `ainvoke`; a sync-only saver raises there."""
     cfg = {"configurable": {"thread_id": "t-async"}}
     app = _tiny_graph().compile(checkpointer=build_checkpointer(tmp_path))
-    values = asyncio.run(
-        app.ainvoke({"messages": [HumanMessage(content="hi")]}, cfg)
-    )
+    values = asyncio.run(app.ainvoke({"messages": [HumanMessage(content="hi")]}, cfg))
     assert values["todo_list"][0].status is ToDoStatus.DONE
     assert checkpoint_path(tmp_path).is_file()
 
 
 def test_run_resumes_from_interrupt(tmp_path: Path) -> None:
     cfg = {"configurable": {"thread_id": "t2"}}
-    app = _tiny_graph().compile(
-        checkpointer=build_checkpointer(tmp_path), interrupt_before=["n"]
-    )
+    app = _tiny_graph().compile(checkpointer=build_checkpointer(tmp_path), interrupt_before=["n"])
     app.invoke({"messages": [HumanMessage(content="hi")]}, cfg)
     assert app.get_state(cfg).next == ("n",)
 

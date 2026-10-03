@@ -20,14 +20,13 @@ from pathlib import Path
 import pymupdf
 import pytest
 import torch
+from multimodal_doc_qa.cli import app, cited_materials
+from multimodal_doc_qa.config import Settings, artifact_paths, load_local_env
+from multimodal_doc_qa.index.maxsim import MultiVectorIndex
+from multimodal_doc_qa.schemas import Citation
+from multimodal_doc_qa.ui import console as ui
 from rich.console import Console
 from typer.testing import CliRunner
-
-from multimodal_doc_qa.cli import app, cited_materials
-from multimodal_doc_qa.ui import console as ui
-from multimodal_doc_qa.config import Settings, artifact_paths, load_local_env
-from multimodal_doc_qa.schemas import Citation
-from multimodal_doc_qa.index.maxsim import MultiVectorIndex
 
 DOC_TEXT = "EMEA margin was 16.8%"
 
@@ -105,9 +104,7 @@ def artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Point every command at a throwaway artifacts root and stub the model weights."""
     root = tmp_path / "artifacts"
     monkeypatch.setenv("MDQ_ARTIFACTS_DIR", str(root))
-    monkeypatch.setattr(
-        "multimodal_doc_qa.embed.encoder.MultiVectorEncoder", _StubVisionEncoder
-    )
+    monkeypatch.setattr("multimodal_doc_qa.embed.encoder.MultiVectorEncoder", _StubVisionEncoder)
     monkeypatch.setattr("multimodal_doc_qa.retrievers.text.OcrEmbedder", _StubOcrEmbedder)
     _StubOcrEmbedder.calls = []
     _StubVisionEncoder.image_calls = []
@@ -290,10 +287,9 @@ def test_a_long_text_file_is_one_vision_page_per_chunk(tmp_path: Path, artifacts
 
 
 def test_an_image_file_is_encoded_as_an_image(tmp_path: Path, artifacts: Path, monkeypatch) -> None:
-    from PIL import Image
-
     from multimodal_doc_qa.config import documents_path
     from multimodal_doc_qa.schemas import ImageDocument, load_documents
+    from PIL import Image
 
     monkeypatch.setattr(
         "multimodal_doc_qa.baseline.ocr.extract_image_text", lambda image: "a lone chart"
@@ -359,7 +355,9 @@ def test_ask_answers_from_the_pages_ingest_indexed(
     corpus: Path, artifacts: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The end-to-end contract: ingest, then ask, with no re-encoding in between."""
-    monkeypatch.setattr("multimodal_doc_qa.synth.answer.build_chat_model", lambda *a, **k: _StubChat())
+    monkeypatch.setattr(
+        "multimodal_doc_qa.synth.answer.build_chat_model", lambda *a, **k: _StubChat()
+    )
     monkeypatch.setattr("multimodal_doc_qa.synth.answer.AnswerSynthesizer", _StubSynth)
     _invoke("ingest", "--corpus", str(corpus))
 
@@ -374,7 +372,9 @@ def test_ask_reports_no_answer_when_nothing_was_ingested(
     artifacts: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An ask against a missing index must say so, not raise from inside torch.load."""
-    monkeypatch.setattr("multimodal_doc_qa.synth.answer.build_chat_model", lambda *a, **k: _StubChat())
+    monkeypatch.setattr(
+        "multimodal_doc_qa.synth.answer.build_chat_model", lambda *a, **k: _StubChat()
+    )
     monkeypatch.setattr("multimodal_doc_qa.synth.answer.AnswerSynthesizer", _StubSynth)
 
     result = _invoke("ask", "what was the EMEA margin?")
@@ -391,7 +391,9 @@ def test_ingest_and_ocr_ask_load_the_configured_ocr_embedder(
     A query vector from a different model than the one that wrote the index scores silently wrong.
     """
     monkeypatch.setenv("MDQ_OCR_EMBEDDER_MODEL", "org/fake-text")
-    monkeypatch.setattr("multimodal_doc_qa.synth.answer.build_chat_model", lambda *a, **k: _StubChat())
+    monkeypatch.setattr(
+        "multimodal_doc_qa.synth.answer.build_chat_model", lambda *a, **k: _StubChat()
+    )
     monkeypatch.setattr("multimodal_doc_qa.synth.answer.AnswerSynthesizer", _StubSynth)
     device = Settings().device
 
@@ -402,8 +404,12 @@ def test_ingest_and_ocr_ask_load_the_configured_ocr_embedder(
     assert _StubOcrEmbedder.calls == [("org/fake-text", device), ("org/fake-text", device)]
 
 
-def test_the_ocr_arm_retrieves_text_chunks(corpus: Path, artifacts: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("multimodal_doc_qa.synth.answer.build_chat_model", lambda *a, **k: _StubChat())
+def test_the_ocr_arm_retrieves_text_chunks(
+    corpus: Path, artifacts: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "multimodal_doc_qa.synth.answer.build_chat_model", lambda *a, **k: _StubChat()
+    )
     monkeypatch.setattr("multimodal_doc_qa.synth.answer.AnswerSynthesizer", _StubSynth)
     _invoke("ingest", "--corpus", str(corpus))
 
@@ -477,7 +483,9 @@ def test_working_shows_the_spinner_on_a_terminal(monkeypatch: pytest.MonkeyPatch
     assert ui.WORKING_MESSAGE in b"".join(chunks).decode("utf-8", "replace")
 
 
-def test_render_sources_skips_files_the_citation_does_not_have(capsys: pytest.CaptureFixture[str]) -> None:
+def test_render_sources_skips_files_the_citation_does_not_have(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     from multimodal_doc_qa.cli import CitedMaterial
     from multimodal_doc_qa.ui.console import render_sources
 
@@ -518,7 +526,9 @@ def test_repl_prints_the_answer_and_the_cited_files(
     corpus: Path, artifacts: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Two turns, one process: the indexes stay loaded and each turn names its files."""
-    monkeypatch.setattr("multimodal_doc_qa.synth.answer.build_chat_model", lambda *a, **k: _StubChat())
+    monkeypatch.setattr(
+        "multimodal_doc_qa.synth.answer.build_chat_model", lambda *a, **k: _StubChat()
+    )
     monkeypatch.setattr("multimodal_doc_qa.synth.answer.AnswerSynthesizer", _StubSynth)
     _invoke("ingest", "--corpus", str(corpus))
 
@@ -548,10 +558,9 @@ def test_no_command_can_select_the_ocr_path(artifacts: Path) -> None:
 
 def test_shift_tab_switches_the_retrieval_path_on_the_status_bar() -> None:
     """Shift-Tab flips the path the status bar is showing, before the line is submitted."""
+    from multimodal_doc_qa.ui.console import Prompt, other_mode, status_bar
     from prompt_toolkit.input import create_pipe_input
     from prompt_toolkit.output import DummyOutput
-
-    from multimodal_doc_qa.ui.console import Prompt, other_mode, status_bar
 
     mode = {"value": "vision"}
 

@@ -2,7 +2,7 @@
 # mechanical checks; naming/comment review stays a human+agent task.
 target-version = "py311"
 line-length = 100
-extend-exclude = [".venv", "_artifacts", "jobs", "**/harbor_tasks/**"]
+extend-exclude = [".venv", ".cursor", "_artifacts", "jobs", "**/harbor_tasks/**"]
 
 [lint]
 select = [

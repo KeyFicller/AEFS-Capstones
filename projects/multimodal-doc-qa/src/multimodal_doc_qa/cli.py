@@ -12,7 +12,13 @@ import typer
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from multimodal_doc_qa.budget import Budget
-from multimodal_doc_qa.config import ENV_PATH, Settings, artifact_paths, documents_path, load_local_env
+from multimodal_doc_qa.config import (
+    ENV_PATH,
+    Settings,
+    artifact_paths,
+    documents_path,
+    load_local_env,
+)
 from multimodal_doc_qa.graph import GraphDeps, build_graph, initial_state
 from multimodal_doc_qa.schemas import (
     Answer,
@@ -224,7 +230,9 @@ def _index_source(source, doc_id, artifacts, render_dir, vision, vision_encoder,
         sidecar = artifacts / f"{document.doc_id}.txt"
         if sidecar.resolve() != source.resolve():
             sidecar.write_text("\n\n".join(page_texts), encoding="utf-8")
-    ui.echo(f"  {document.doc_id}: {document.origin} {len(page_texts)} pages, {len(chunks)} text chunks")
+    ui.echo(
+        f"  {document.doc_id}: {document.origin} {len(page_texts)} pages, {len(chunks)} text chunks"
+    )
     return document, {"index": ocr_embedder.encode([text for text, _ in chunks]), "chunks": chunks}
 
 
@@ -469,7 +477,9 @@ def _eval_one(question, settings: Settings, retriever):
     )
 
 
-def _print_eval(summary: dict, settings: Settings, mode: str, iou_threshold: float, written: Path) -> None:
+def _print_eval(
+    summary: dict, settings: Settings, mode: str, iou_threshold: float, written: Path
+) -> None:
     ui.echo(f"[bold]{mode}[/] over {summary['n_done']}/{summary['n_questions']} questions")
     ui.echo(
         f"nDCG@{settings.top_k} {summary['ndcg_at_k']:.4f}"
@@ -498,9 +508,7 @@ def _repl(mode: str) -> None:
     """
     settings = Settings()
     artifacts = settings.artifacts_dir
-    loaded = {
-        path: _open_retriever(settings, path) for path in (mode, ui.other_mode(mode))
-    }
+    loaded = {path: _open_retriever(settings, path) for path in (mode, ui.other_mode(mode))}
     page_texts = _ocr_page_texts(settings)
     ui.banner(
         artifacts=str(artifacts),
@@ -539,7 +547,9 @@ def _read_question(prompt: ui.Prompt) -> str | None:
     return question
 
 
-def _run_turn(settings, retriever, question: str, history: list[BaseMessage], artifacts, page_texts) -> None:
+def _run_turn(
+    settings, retriever, question: str, history: list[BaseMessage], artifacts, page_texts
+) -> None:
     """One ask. A failure is printed and the session stays up."""
     try:
         budget = Budget.from_settings(settings)

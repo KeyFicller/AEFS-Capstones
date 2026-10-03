@@ -11,12 +11,12 @@ from pathlib import Path
 from typing import Any
 
 from langchain_core.messages import BaseMessage, HumanMessage
-from langgraph.graph import StateGraph, START, END
+from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import MessagesState
 
+from multimodal_doc_qa.agent import nodes
 from multimodal_doc_qa.budget import Budget
 from multimodal_doc_qa.config import Settings
-from multimodal_doc_qa.agent import nodes
 from multimodal_doc_qa.schemas import Answer, Document
 
 
@@ -161,10 +161,16 @@ def build_graph(deps: GraphDeps, settings: Settings):
     graph.add_node("recover", recover_node)
     graph.add_edge(START, "plan")
     graph.add_conditional_edges("plan", after_plan, {"retrieve": "retrieve", END: END})
-    graph.add_conditional_edges("retrieve", after_retrieve, {"recover": "recover", "assess": "assess"})
-    graph.add_conditional_edges("assess", after_assess, {"retrieve": "retrieve", "synthesize": "synthesize", END: END})
+    graph.add_conditional_edges(
+        "retrieve", after_retrieve, {"recover": "recover", "assess": "assess"}
+    )
+    graph.add_conditional_edges(
+        "assess", after_assess, {"retrieve": "retrieve", "synthesize": "synthesize", END: END}
+    )
     graph.add_conditional_edges("synthesize", after_synthesize, {"verify": "verify", END: END})
-    graph.add_conditional_edges("verify", after_verify, {"retrieve": "retrieve", "recover": "recover", END: END})
+    graph.add_conditional_edges(
+        "verify", after_verify, {"retrieve": "retrieve", "recover": "recover", END: END}
+    )
     graph.add_edge("recover", END)
 
     compiled = graph.compile()
@@ -255,10 +261,7 @@ if __name__ == "__main__":
     print(f"expected  {_DEMO_EXPECTED}")
     print(f"answer    {answer.text if answer else '<none>'}")
     for citation in answer.citations if answer else []:
-        print(
-            f"cite      {page_id(citation.doc_id, citation.page)}"
-            f"  bbox={citation.bbox}"
-        )
+        print(f"cite      {page_id(citation.doc_id, citation.page)}  bbox={citation.bbox}")
     print(f"pages     {len(out['page_ids'])}/{total} retrieved  {out['page_ids']}")
     print(f"rounds    {out['rounds']} (max {settings.max_rounds})")
     print(f"unsupported  {out['unsupported']}")

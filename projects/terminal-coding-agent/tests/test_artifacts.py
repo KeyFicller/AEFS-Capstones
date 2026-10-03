@@ -60,9 +60,9 @@ def test_publish_patch_also_targets_the_mounted_harbor_dir(tmp_path: Path) -> No
         written = publish_patch(repo)
 
     assert harbor_dir / "patch.diff" in written
-    assert (harbor_dir / "patch.diff").read_text(
-        encoding="utf-8"
-    ) == (repo / PATCH_RELPATH).read_text(encoding="utf-8")
+    assert (harbor_dir / "patch.diff").read_text(encoding="utf-8") == (
+        repo / PATCH_RELPATH
+    ).read_text(encoding="utf-8")
 
 
 def test_publish_patch_never_raises_when_git_is_missing(tmp_path: Path) -> None:

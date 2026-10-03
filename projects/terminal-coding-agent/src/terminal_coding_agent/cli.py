@@ -3,10 +3,10 @@
 import argparse
 import tempfile
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager, ExitStack, nullcontext
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from terminal_coding_agent import ui
 from terminal_coding_agent.config import ENV_PATH, load_local_env

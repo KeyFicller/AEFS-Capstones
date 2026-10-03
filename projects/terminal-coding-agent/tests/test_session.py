@@ -2,7 +2,6 @@ import os
 from pathlib import Path
 
 from langchain_core.messages import AIMessage
-
 from terminal_coding_agent import graph as graph_module
 from terminal_coding_agent.graph import make_graph
 from terminal_coding_agent.models import AgentModels
@@ -119,7 +118,6 @@ def test_real_graph_accepts_a_reset_on_a_fresh_thread(tmp_path: Path, monkeypatc
 
 
 from langgraph.types import Command
-
 from terminal_coding_agent.session import pending_interrupts, resume_turn
 
 

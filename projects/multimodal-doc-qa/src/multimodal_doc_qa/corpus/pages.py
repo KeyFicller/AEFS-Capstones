@@ -223,7 +223,12 @@ def render_formula_page(
             fid,
             expr,
             ax.text(
-                0.5, 0.85 - i * 0.15, expr, fontsize=26, ha="center", va="center",
+                0.5,
+                0.85 - i * 0.15,
+                expr,
+                fontsize=26,
+                ha="center",
+                va="center",
                 transform=ax.transAxes,
             ),
         )

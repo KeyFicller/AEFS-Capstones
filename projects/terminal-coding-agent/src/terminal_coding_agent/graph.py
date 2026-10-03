@@ -79,9 +79,7 @@ _SETTLED_STATUSES = frozenset({ToDoStatus.DONE, ToDoStatus.DEPRECATED})
 
 def _has_unsettled_work(state: CodingAgentState) -> bool:
     """True while some todo still needs the agent: neither finished nor retired."""
-    return any(
-        item.status not in _SETTLED_STATUSES for item in state.get("todo_list") or []
-    )
+    return any(item.status not in _SETTLED_STATUSES for item in state.get("todo_list") or [])
 
 
 def _after_end_task(state: CodingAgentState) -> str:

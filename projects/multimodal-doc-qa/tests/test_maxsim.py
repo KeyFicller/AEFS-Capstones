@@ -2,7 +2,6 @@ from pathlib import Path
 
 import pytest
 import torch
-
 from multimodal_doc_qa.index.maxsim import MultiVectorIndex, maxsim
 
 
@@ -32,7 +31,9 @@ def test_maxsim_rewards_a_page_with_a_patch_for_every_query_token() -> None:
 
     assert float(maxsim(query, covers_both)) > float(maxsim(query, repeats_one))
     # pooling is blind to the difference: both pages score the same
-    assert _mean_pool_score(query, covers_both) == pytest.approx(_mean_pool_score(query, repeats_one))
+    assert _mean_pool_score(query, covers_both) == pytest.approx(
+        _mean_pool_score(query, repeats_one)
+    )
 
 
 def test_index_ranks_matching_page_first() -> None:

@@ -34,9 +34,7 @@ def build_run_shell(worktree: Path):
             return truncate(f"Error: command Timeout: {command}")
 
         return truncate(
-            f"exit_code: {result.returncode}\n"
-            f"stdout:\n{result.stdout}\n"
-            f"stderr:\n{result.stderr}"
+            f"exit_code: {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
 
     return run_shell

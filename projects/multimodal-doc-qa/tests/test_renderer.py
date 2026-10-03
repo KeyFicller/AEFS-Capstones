@@ -1,10 +1,9 @@
 from pathlib import Path
 
-from PIL import Image
-
 from multimodal_doc_qa.corpus.generate import generate_corpus
 from multimodal_doc_qa.corpus.pages import PAGE_H, PAGE_W
 from multimodal_doc_qa.render.renderer import render_pages
+from PIL import Image
 
 
 def test_render_pages_long_edge_normalized(tmp_path: Path) -> None:

@@ -3,7 +3,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 from langchain_core.messages import AIMessage
-
 from terminal_coding_agent import graph as graph_module
 from terminal_coding_agent.graph import (
     _after_end_task,
@@ -206,9 +205,7 @@ def test_invoke_without_thread_id_uses_injected_default(tmp_path: Path) -> None:
     assert agent.config["configurable"]["thread_id"]
 
 
-def test_compiled_make_plan_announces_the_plan(
-    tmp_path: Path, monkeypatch, capsys
-) -> None:
+def test_compiled_make_plan_announces_the_plan(tmp_path: Path, monkeypatch, capsys) -> None:
     """The plan must reach the console during a real run, not only in the demo."""
     plan = Plan(task="fix the typo", steps=["locate the typo", "edit it"])
 
@@ -308,9 +305,7 @@ def test_ungated_graph_has_no_approval_node(tmp_path: Path) -> None:
     assert list(agent.builder.branches["make_plan"]) == ["_after_make_plan"]
 
 
-def test_make_graph_forwards_enable_hitl_to_the_execute_nodes(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_make_graph_forwards_enable_hitl_to_the_execute_nodes(tmp_path: Path, monkeypatch) -> None:
     """Harbor parity: absent by default, so the middleware table cannot change."""
     os.environ["DEEPSEEK_API_KEY"] = "test"
     captured = _spy_on_execute_nodes(monkeypatch)

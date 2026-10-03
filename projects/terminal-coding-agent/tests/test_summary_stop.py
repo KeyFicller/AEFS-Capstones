@@ -3,7 +3,6 @@ from pathlib import Path
 
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
-
 from terminal_coding_agent.models import AgentModels
 from terminal_coding_agent.state import ToDoItem, ToDoStatus
 from terminal_coding_agent.summary import build_summary

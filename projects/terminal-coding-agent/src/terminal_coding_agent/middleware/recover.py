@@ -1,8 +1,6 @@
 """Recover: the executor reports a blocked task and the agent loop stops."""
 
-from typing import Any
-
-from typing_extensions import NotRequired
+from typing import Any, NotRequired
 
 from langchain.agents.middleware.types import AgentMiddleware, AgentState, hook_config
 from langchain_core.messages import AIMessage, ToolMessage

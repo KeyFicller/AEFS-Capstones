@@ -11,14 +11,12 @@ import base64
 from pathlib import Path
 
 import pytest
-from PIL import Image
-from pydantic import ValidationError
-
-from multimodal_doc_qa.config import Settings
 from langchain_core.messages import HumanMessage
-
+from multimodal_doc_qa.config import Settings
 from multimodal_doc_qa.schemas import Answer, Citation, TextDocument
 from multimodal_doc_qa.synth.answer import AnswerSynthesizer, build_page_blocks
+from PIL import Image
+from pydantic import ValidationError
 
 
 def _page(tmp_path: Path, page_id: str, size: tuple[int, int] = (4, 3)) -> Path:

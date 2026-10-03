@@ -19,6 +19,7 @@ def page_id(doc_id: str, page: int) -> str:
 
 class BBox(BaseModel):
     """Leaf of the corpus tree: normalized (0..1) rectangle."""
+
     x0: float = Field(ge=0.0, le=1.0)
     y0: float = Field(ge=0.0, le=1.0)
     x1: float = Field(ge=0.0, le=1.0)
@@ -29,8 +30,7 @@ class BBox(BaseModel):
         """Reject inverted corners. ``ge``/``le`` alone accept ``x0 > x1``, which then contains nothing."""
         if self.x0 > self.x1 or self.y0 > self.y1:
             raise ValueError(
-                f"bbox corners are inverted: x0={self.x0} x1={self.x1} "
-                f"y0={self.y0} y1={self.y1}"
+                f"bbox corners are inverted: x0={self.x0} x1={self.x1} y0={self.y0} y1={self.y1}"
             )
         return self
 
@@ -55,42 +55,54 @@ class BBox(BaseModel):
         intersection = (x1 - x0) * (y1 - y0)
         return intersection / (self.area + other.area - intersection)
 
+
 class Citation(BaseModel):
     """One citation in an answer: doc_id + page always present; bbox may be absent."""
+
     doc_id: str
     page: int
     bbox: BBox | None = None
 
+
 class Answer(BaseModel):
     """Answerer output: text plus citations (mirrors Question.evidence)."""
+
     text: str
     citations: list[Citation] = Field(default_factory=list)
 
+
 class ScoredPage(BaseModel):
     """Retrieval output; a standalone leaf consumed only by retrievers and eval."""
+
     page_id: str
     score: float
 
+
 class Fact(BaseModel):
     """One answerable fact on a page, carrying its own bbox: the ground-truth unit."""
+
     fact_id: str
     text: str
     page: int
     bbox: BBox
 
+
 class PageSpec(BaseModel):
     """One page: kind selects the renderer, scanned decides whether a text layer exists."""
+
     doc_id: str
     page: int
     kind: PageKind
     scanned: bool
     facts: list[Fact] = Field(default_factory=list)
 
+
 class DocSpec(BaseModel):
     """One synthetic PDF in the generated corpus, plus the facts on its pages.
 
     Ingested documents are ``ImageDocument``, ``PdfDocument``, and ``TextDocument``.
     """
+
     doc_id: str
     pdf_path: str
     pages: list[PageSpec]
@@ -162,16 +174,19 @@ def load_documents(path: Path) -> dict[str, ImageDocument | PdfDocument | TextDo
     docs = TypeAdapter(list[AnyDocument]).validate_json(path.read_text(encoding="utf-8"))
     return {doc.doc_id: doc for doc in docs}
 
+
 class CorpusManifest(BaseModel):
     """Corpus tree root: generation seed plus every document (seed reproduces the corpus)."""
+
     seed: int
     docs: list[DocSpec]
 
+
 class Question(BaseModel):
     """Holdout question: evidence marks the answer's page / box, hops how many pages it needs."""
+
     qid: str
     text: str
     answer: str
     evidence: list[Citation]
     hops: int = 1
-

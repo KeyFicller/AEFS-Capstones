@@ -1,5 +1,6 @@
 from pathlib import Path
 
+
 def resolve_in_worktree(worktree: Path, user_path: str) -> Path | str:
     if not user_path or not user_path.strip():
         return "Error: path is empty"

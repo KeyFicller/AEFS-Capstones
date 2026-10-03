@@ -5,7 +5,6 @@ from pathlib import Path
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
-
 from terminal_coding_agent.checkpoint import build_checkpointer
 from terminal_coding_agent.graph import _after_plan_approval, _await_plan_approval
 from terminal_coding_agent.state import CodingAgentState, ToDoItem, ToDoStatus

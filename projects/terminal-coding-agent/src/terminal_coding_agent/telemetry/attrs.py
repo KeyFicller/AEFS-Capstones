@@ -1,6 +1,5 @@
 from opentelemetry.trace import Span
 
-
 ATTR_OPERATION = "gen_ai.operation.name"
 ATTR_MODEL = "gen_ai.request.model"
 ATTR_INPUT_TOKENS = "gen_ai.usage.input_tokens"
@@ -16,6 +15,7 @@ FORBIDDEN_ATTR_PREFIXES_OR_KEYS = (
     "gen_ai.prompt",
     "gen_ai.completion",
 )
+
 
 def set_chat_attributes(
     span: Span,
@@ -42,6 +42,7 @@ def set_tool_attributes(
     span.set_attribute(ATTR_TOOL_NAME, tool_name)
     if tool_call_id is not None:
         span.set_attribute(ATTR_TOOL_CALL_ID, tool_call_id)
+
 
 def assert_no_content_attributes(span: Span) -> None:
     for key, value in span.attributes.items():

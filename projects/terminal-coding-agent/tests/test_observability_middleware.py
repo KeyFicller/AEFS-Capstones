@@ -3,7 +3,6 @@ from types import SimpleNamespace
 
 from langchain_core.messages import AIMessage, ToolMessage
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-
 from terminal_coding_agent.middleware.observability import ObservabilityMiddleware
 from terminal_coding_agent.telemetry.attrs import (
     ATTR_MODEL,

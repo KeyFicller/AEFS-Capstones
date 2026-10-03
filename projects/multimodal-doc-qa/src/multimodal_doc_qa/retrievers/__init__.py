@@ -14,4 +14,3 @@ def within_best_ratio(documents: list, ratio: float) -> list:
         return []
     floor = best * ratio
     return [document for document in documents if document.metadata["score"] >= floor]
-

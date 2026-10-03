@@ -8,7 +8,6 @@ import time
 
 import pytest
 from rich.console import Console
-
 from terminal_coding_agent import ui
 from terminal_coding_agent.state import ToDoItem, ToDoStatus, format_todos
 
@@ -370,9 +369,7 @@ def test_ask_question_accepts_a_numbered_choice(monkeypatch) -> None:
     stream = _capture(monkeypatch)
     monkeypatch.setattr("builtins.input", lambda *a: "2")
 
-    out = ui.ask_question(
-        {"type": "question", "question": "which?", "options": ["a", "b", "c"]}
-    )
+    out = ui.ask_question({"type": "question", "question": "which?", "options": ["a", "b", "c"]})
 
     assert out == {"answer": "b", "cancelled": False}
     printed = stream.getvalue()

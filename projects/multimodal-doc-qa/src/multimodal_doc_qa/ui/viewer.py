@@ -125,13 +125,13 @@ def render_app() -> None:
 
     with st.sidebar:
         st.header("Inputs")
-        artifacts = Path(
-            st.text_input("Artifacts directory", value=str(settings.artifacts_dir))
-        )
+        artifacts = Path(st.text_input("Artifacts directory", value=str(settings.artifacts_dir)))
         results = [
             path
             for path in (
-                st.text_input("vision results.jsonl", value=os.environ.get("MDQ_RESULTS_VISION", "")),
+                st.text_input(
+                    "vision results.jsonl", value=os.environ.get("MDQ_RESULTS_VISION", "")
+                ),
                 st.text_input("ocr results.jsonl", value=os.environ.get("MDQ_RESULTS_OCR", "")),
             )
             if path

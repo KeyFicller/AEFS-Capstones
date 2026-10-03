@@ -2,6 +2,7 @@ from pathlib import Path
 
 from terminal_coding_agent.tools.shell import build_run_shell
 
+
 def test_run_shell_timeout(tmp_path: Path) -> None:
     tool = build_run_shell(tmp_path)
     out = tool.invoke({"command": "sleep 5", "timeout_sec": 1})

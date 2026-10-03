@@ -14,7 +14,6 @@ from typing import Any
 from langchain.agents.middleware.types import AgentMiddleware, AgentState
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import tool
-
 from langgraph.types import interrupt
 
 MIN_OPTIONS = 1

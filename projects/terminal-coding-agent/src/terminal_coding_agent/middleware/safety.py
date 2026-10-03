@@ -41,10 +41,7 @@ class SafetyMiddleware(AgentMiddleware):
             command = str((request.tool_call.get("args") or {}).get("command", ""))
             if is_destructive_shell(command):
                 return ToolMessage(
-                    content=(
-                        "Error: blocked by PreToolUse: "
-                        f"destructive command: {command}"
-                    ),
+                    content=(f"Error: blocked by PreToolUse: destructive command: {command}"),
                     tool_call_id=request.tool_call["id"],
                     status="error",
                 )

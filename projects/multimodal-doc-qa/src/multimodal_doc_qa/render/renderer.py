@@ -41,4 +41,3 @@ if __name__ == "__main__":
         out_dir = artifacts / pdf_path.stem
         paths = render_pages(pdf_path, out_dir)
         print(f"{pdf_path.name} -> {out_dir.name}/  ({len(paths)} pages)")
-

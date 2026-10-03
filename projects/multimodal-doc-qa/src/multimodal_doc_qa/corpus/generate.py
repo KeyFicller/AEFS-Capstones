@@ -48,8 +48,26 @@ _TEXT_LAYER_MAX_SIZE = 24.0
 # across documents and compresses the nDCG gap the benchmark exists to measure.
 _SEGMENTS: tuple[str, ...] = ("EMEA", "APAC", "North America", "LatAm", "Nordics", "MEA")
 _FIGURES: tuple[float, ...] = (
-    16.8, 22.1, 4.3, 9.7, 31.4, 12.6, 18.9, 7.2, 25.6, 11.3,
-    29.8, 6.5, 20.4, 13.7, 8.1, 27.3, 15.2, 33.9, 10.4, 24.7,
+    16.8,
+    22.1,
+    4.3,
+    9.7,
+    31.4,
+    12.6,
+    18.9,
+    7.2,
+    25.6,
+    11.3,
+    29.8,
+    6.5,
+    20.4,
+    13.7,
+    8.1,
+    27.3,
+    15.2,
+    33.9,
+    10.4,
+    24.7,
 )
 _FORMULAS: tuple[str, ...] = (
     r"$margin = \frac{rev - cost}{rev}$",
@@ -141,9 +159,7 @@ def _insert_text_layer(pdf_page: pymupdf.Page, runs: list[TextRun]) -> None:
         )
 
 
-def generate_corpus(
-    out_dir: Path, n_docs: int, seed: int
-) -> tuple[CorpusManifest, list[Question]]:
+def generate_corpus(out_dir: Path, n_docs: int, seed: int) -> tuple[CorpusManifest, list[Question]]:
     """Write a reproducible synthetic corpus and its holdout questions.
 
     Writes ``<doc_id>.pdf``, ``ground_truth.json`` and ``questions.json`` into
@@ -265,8 +281,7 @@ if __name__ == "__main__":
 
     for doc in manifest.docs:
         pages = ", ".join(
-            f"p{page.page}:{page.kind}{' (scan)' if page.scanned else ''}"
-            for page in doc.pages
+            f"p{page.page}:{page.kind}{' (scan)' if page.scanned else ''}" for page in doc.pages
         )
         print(f"{doc.doc_id} -> {doc.pdf_path}  [{pages}]")
     print(f"{len(questions)} questions -> {out_dir / 'questions.json'}")

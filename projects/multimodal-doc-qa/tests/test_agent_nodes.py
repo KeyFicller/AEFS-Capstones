@@ -10,11 +10,10 @@ their jobs at all -- and nothing else in the suite would notice.
 
 from pathlib import Path
 
-from PIL import Image
 from langchain_core.messages import AIMessage, HumanMessage
-
 from multimodal_doc_qa.agent.nodes import Followups, Subqueries, Unsupported, assess, plan, verify
 from multimodal_doc_qa.schemas import Answer, Citation
+from PIL import Image
 
 
 class _StubModel:
@@ -95,13 +94,13 @@ def test_plan_asks_without_any_page() -> None:
 def test_assess_returns_the_followups() -> None:
     model = _StubModel(Followups(followups=["which regions?"]))
 
-    assert assess(model, _ask("margin?"), [], Path(".")) == ["which regions?"]
+    assert assess(model, _ask("margin?"), [], Path()) == ["which regions?"]
 
 
 def test_assess_empty_means_the_pool_is_sufficient() -> None:
     model = _StubModel(Followups(followups=[]))
 
-    assert assess(model, _ask("margin?"), [], Path(".")) == []
+    assert assess(model, _ask("margin?"), [], Path()) == []
 
 
 def test_assess_shows_the_page_images_not_just_their_ids(tmp_path: Path) -> None:
@@ -138,7 +137,13 @@ def test_verify_shows_the_cited_page_images(tmp_path: Path) -> None:
     _page(tmp_path, "doc000/p002")
     model = _StubModel(Unsupported(unsupported=[]))
 
-    verify(model, _ask("margin?"), _answer(Citation(doc_id="doc000", page=2)), ["doc000/p002"], tmp_path)
+    verify(
+        model,
+        _ask("margin?"),
+        _answer(Citation(doc_id="doc000", page=2)),
+        ["doc000/p002"],
+        tmp_path,
+    )
 
     assert len(_images(model.calls[0])) == 1
 
@@ -147,7 +152,16 @@ def test_verify_passes_when_every_citation_is_supported(tmp_path: Path) -> None:
     _page(tmp_path, "doc000/p000")
     model = _StubModel(Unsupported(unsupported=[]))
 
-    assert verify(model, _ask("margin?"), _answer(Citation(doc_id="doc000", page=0)), ["doc000/p000"], tmp_path) == []
+    assert (
+        verify(
+            model,
+            _ask("margin?"),
+            _answer(Citation(doc_id="doc000", page=0)),
+            ["doc000/p000"],
+            tmp_path,
+        )
+        == []
+    )
 
 
 def test_verify_flags_a_citation_outside_the_pool_without_asking_the_model(

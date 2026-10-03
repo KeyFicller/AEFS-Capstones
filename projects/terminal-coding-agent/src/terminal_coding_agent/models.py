@@ -49,7 +49,7 @@ def build_models(config: RunnableConfig) -> AgentModels:
             for role, _ in model_names.items()
         }
 
-    else: 
+    else:
         models = {
             role: init_chat_model(model_name, extra_body={"thinking": {"type": "disabled"}})
             for role, model_name in model_names.items()

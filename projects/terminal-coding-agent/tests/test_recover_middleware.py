@@ -4,7 +4,6 @@ from langchain.agents import create_agent
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
-
 from terminal_coding_agent.middleware.recover import BlockedReportMiddleware
 
 

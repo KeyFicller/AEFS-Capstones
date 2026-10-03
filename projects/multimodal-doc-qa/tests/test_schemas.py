@@ -1,6 +1,4 @@
 import pytest
-from pydantic import ValidationError
-
 from multimodal_doc_qa.schemas import (
     BBox,
     Citation,
@@ -11,6 +9,7 @@ from multimodal_doc_qa.schemas import (
     load_documents,
     save_documents,
 )
+from pydantic import ValidationError
 
 
 def test_bbox_contains_normalized_inner() -> None:

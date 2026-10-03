@@ -46,18 +46,13 @@ class MultiVectorIndex:
     def save(self, path: Path) -> None:
         """Persist the index to ``path`` (parent directories are created)."""
         path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save(
-            {pid: v.cpu() for pid, v in self._vectors.items()},
-            path
-        )
+        torch.save({pid: v.cpu() for pid, v in self._vectors.items()}, path)
 
     @classmethod
     def load(cls, path: Path) -> MultiVectorIndex:
         """Load an index written by ``save``."""
         obj = cls(device="cpu")
-        obj._vectors = {
-            pid: v for pid, v in torch.load(path, weights_only=True).items()
-        }
+        obj._vectors = {pid: v for pid, v in torch.load(path, weights_only=True).items()}
         return obj
 
     def nbytes(self) -> int:

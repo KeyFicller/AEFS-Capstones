@@ -30,15 +30,11 @@ def langfuse_env() -> tuple[str, str, str] | None:
     secret_key = os.environ.get("LANGFUSE_SECRET_KEY", "").strip()
     if not public_key or not secret_key:
         return None
-    base_url = (
-        os.environ.get("LANGFUSE_BASE_URL", "").strip() or DEFAULT_LANGFUSE_BASE_URL
-    )
+    base_url = os.environ.get("LANGFUSE_BASE_URL", "").strip() or DEFAULT_LANGFUSE_BASE_URL
     return public_key, secret_key, base_url
 
 
-def langfuse_otlp_exporter(
-    *, public_key: str, secret_key: str, base_url: str
-) -> SpanExporter:
+def langfuse_otlp_exporter(*, public_key: str, secret_key: str, base_url: str) -> SpanExporter:
     """OTLP HTTP exporter aimed at Langfuse `/api/public/otel`."""
     endpoint = f"{base_url.rstrip('/')}/api/public/otel"
     token = base64.b64encode(f"{public_key}:{secret_key}".encode()).decode()
@@ -73,9 +69,7 @@ class JSONLSpanExporter(SpanExporter):
 
 def configure_default_exporters(provider: TracerProvider, worktree: Path) -> None:
     """JSONL always. Optional OTLP only when LANGFUSE_OTLP=1 (CallbackHandler is preferred)."""
-    provider.add_span_processor(
-        SimpleSpanProcessor(JSONLSpanExporter(otel_jsonl_path(worktree)))
-    )
+    provider.add_span_processor(SimpleSpanProcessor(JSONLSpanExporter(otel_jsonl_path(worktree))))
     if os.environ.get("LANGFUSE_OTLP", "").strip() != "1":
         return
     creds = langfuse_env()
@@ -93,9 +87,7 @@ def configure_default_exporters(provider: TracerProvider, worktree: Path) -> Non
     )
 
 
-def setup_tracing(
-    *, worktree: Path, exporter: SpanExporter | None = None
-) -> TracerProvider:
+def setup_tracing(*, worktree: Path, exporter: SpanExporter | None = None) -> TracerProvider:
     current = trace.get_tracer_provider()
     if isinstance(current, TracerProvider):
         # Global provider is once-only; attach extra exporters for later callers (tests).

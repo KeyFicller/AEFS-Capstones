@@ -3,8 +3,6 @@
 import json
 from pathlib import Path
 
-from PIL import Image
-
 from multimodal_doc_qa.schemas import BBox, Citation
 from multimodal_doc_qa.ui.viewer import (
     CITED,
@@ -14,6 +12,7 @@ from multimodal_doc_qa.ui.viewer import (
     load_runs,
     runs_for_question,
 )
+from PIL import Image
 
 
 def _citation(doc_id: str = "d", page: int = 0, bbox: BBox | None = None) -> Citation:
@@ -30,9 +29,7 @@ def _box(x0: float, y0: float, x1: float, y1: float) -> BBox:
 def test_draw_citations_marks_the_box_on_the_page() -> None:
     image = Image.new("RGB", (100, 200), "white")
 
-    out = draw_citations(
-        image, [_citation(bbox=_box(0.1, 0.2, 0.3, 0.4))], doc_id="d", page=0
-    )
+    out = draw_citations(image, [_citation(bbox=_box(0.1, 0.2, 0.3, 0.4))], doc_id="d", page=0)
 
     assert out.getpixel((10, 40)) != (255, 255, 255)
 
@@ -158,7 +155,11 @@ def _write_results(path: Path, run_mode: str, qid: str, answer: str) -> None:
             "qid": qid,
             "answer": answer,
             "citations": [
-                {"doc_id": "doc000", "page": 0, "bbox": {"x0": 0.1, "y0": 0.1, "x1": 0.2, "y1": 0.2}}
+                {
+                    "doc_id": "doc000",
+                    "page": 0,
+                    "bbox": {"x0": 0.1, "y0": 0.1, "x1": 0.2, "y1": 0.2},
+                }
             ],
             "ndcg_at_k": 1.0,
         },
@@ -240,9 +241,8 @@ def test_the_app_renders_a_real_result_without_raising(tmp_path: Path) -> None:
     Streamlit executes the script on connect, so a served page proves nothing about the
     script. ``AppTest`` runs it for real and collects exceptions.
     """
-    from streamlit.testing.v1 import AppTest
-
     from multimodal_doc_qa.ui import viewer
+    from streamlit.testing.v1 import AppTest
 
     artifacts = tmp_path / "artifacts"
     (artifacts / "render" / "doc000").mkdir(parents=True)
@@ -282,9 +282,8 @@ def test_the_app_renders_a_real_result_without_raising(tmp_path: Path) -> None:
 
 def test_the_app_says_what_to_do_before_it_has_inputs() -> None:
     """No results file is the first state a reader meets; it must not look like a crash."""
-    from streamlit.testing.v1 import AppTest
-
     from multimodal_doc_qa.ui import viewer
+    from streamlit.testing.v1 import AppTest
 
     app = AppTest.from_file(viewer.__file__)
     app.run()

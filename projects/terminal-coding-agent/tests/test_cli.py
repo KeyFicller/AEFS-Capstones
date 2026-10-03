@@ -5,7 +5,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from rich.console import Console
-
 from terminal_coding_agent import cli, ui
 
 
@@ -215,7 +214,9 @@ def test_repl_does_not_reprint_the_plan_the_turn_already_rendered(tmp_path, monk
     _capture(monkeypatch)
     seen: list[dict] = []
     monkeypatch.setattr(ui, "ask", _asker(["fix the typo"]))
-    monkeypatch.setattr(ui, "ask_approval", lambda payload, **kwargs: seen.append(kwargs) or "approve")
+    monkeypatch.setattr(
+        ui, "ask_approval", lambda payload, **kwargs: seen.append(kwargs) or "approve"
+    )
 
     cli.repl(
         graph=_PausingGraph(),
@@ -294,7 +295,9 @@ def test_repl_rebuilds_a_pending_approval_at_startup(tmp_path, monkeypatch) -> N
     graph = _PendingAtStartupGraph()
     seen: list[dict] = []
     monkeypatch.setattr(ui, "ask", _asker([]))  # EOF: no user turn at all
-    monkeypatch.setattr(ui, "ask_approval", lambda payload, **kwargs: seen.append(kwargs) or "approve")
+    monkeypatch.setattr(
+        ui, "ask_approval", lambda payload, **kwargs: seen.append(kwargs) or "approve"
+    )
 
     cli.repl(
         graph=graph,

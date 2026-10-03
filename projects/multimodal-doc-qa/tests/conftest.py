@@ -25,4 +25,3 @@ def _no_ambient_mdq_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in list(os.environ):
         if name.startswith("MDQ_"):
             monkeypatch.delenv(name)
-

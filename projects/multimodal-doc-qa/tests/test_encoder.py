@@ -1,10 +1,9 @@
 import pytest
 import torch
-from PIL import Image
-
 from multimodal_doc_qa.config import Settings
 from multimodal_doc_qa.embed import encoder as encoder_module
 from multimodal_doc_qa.embed.encoder import MultiVectorEncoder
+from PIL import Image
 
 
 def test_settings_defaults() -> None:

@@ -6,7 +6,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-
 from terminal_coding_agent import config
 from terminal_coding_agent.executor import _final_agent_message, build_execute_nodes
 from terminal_coding_agent.middleware import SequenceMiddleware
@@ -72,6 +71,7 @@ def test_final_agent_message_keeps_last_plain_ai() -> None:
     final = _final_agent_message(messages)
     assert final is not None
     assert final.content == "fixed the typo"
+
 
 def test_run_agent_blocked_records_evidence_without_transcript(tmp_path, monkeypatch) -> None:
     from terminal_coding_agent import executor as executor_module
@@ -237,7 +237,6 @@ def test_run_agent_installs_the_sequence_logger_only_when_recording(
 def test_run_agent_lets_a_graph_interrupt_through(tmp_path, monkeypatch) -> None:
     """The pause must reach the parent graph, not become an executor_error (design §4)."""
     from langgraph.errors import GraphBubbleUp
-
     from terminal_coding_agent import executor as executor_module
 
     class PausingAgent:
@@ -285,4 +284,3 @@ def test_run_agent_installs_ask_user_only_when_hitl_is_enabled(
 
     installed = [m for m in captured["middleware"] if isinstance(m, AskUserMiddleware)]
     assert bool(installed) is with_hitl
-

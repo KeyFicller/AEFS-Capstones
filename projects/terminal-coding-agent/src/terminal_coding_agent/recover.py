@@ -80,8 +80,7 @@ def _replan_instruction(state: CodingAgentState) -> str:
     )
 
     evidence = "\n".join(
-        f"- {entry['action']}  {entry['detail']}"
-        for entry in state.get("blocked_evidence") or []
+        f"- {entry['action']}  {entry['detail']}" for entry in state.get("blocked_evidence") or []
     )
 
     return (

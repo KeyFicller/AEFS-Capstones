@@ -2,15 +2,18 @@ from pathlib import Path
 
 from terminal_coding_agent.tools.fs import build_edit_file, build_read_file
 
+
 def test_read_file(tmp_path: Path) -> None:
     (tmp_path / "f.txt").write_text("hello", encoding="utf-8")
     tool = build_read_file(tmp_path)
     assert tool.invoke({"path": "f.txt"}) == "hello"
 
+
 def test_read_missing(tmp_path: Path) -> None:
     tool = build_read_file(tmp_path)
     out = tool.invoke({"path": "nope.txt"})
     assert out.startswith("Error:")
+
 
 def test_read_file_survives_non_utf8(tmp_path: Path) -> None:
     """A binary file (e.g. MARC .mrc) must decode lossily instead of raising UnicodeDecodeError."""
@@ -18,29 +21,24 @@ def test_read_file_survives_non_utf8(tmp_path: Path) -> None:
     tool = build_read_file(tmp_path)
     assert tool.invoke({"path": "blob.bin"}) != ""
 
+
 def test_edit_unique(tmp_path: Path) -> None:
     (tmp_path / "f.txt").write_text("a x a\n", encoding="utf-8")
     tool = build_edit_file(tmp_path)
-    out = tool.invoke(
-        {"path": "f.txt",
-        "old_str": "x",
-        "new_str": "y"}
-    )
+    out = tool.invoke({"path": "f.txt", "old_str": "x", "new_str": "y"})
 
     assert "y" in (tmp_path / "f.txt").read_text(encoding="utf-8")
     assert "---" in out or "@@" in out or "+y" in out
 
+
 def test_edit_zero_matches_no_write(tmp_path: Path) -> None:
     (tmp_path / "f.txt").write_text("abc", encoding="utf-8")
     tool = build_edit_file(tmp_path)
-    out = tool.invoke(
-        {"path": "f.txt",
-        "old_str": "zzz",
-        "new_str": "yyy"}
-    )
+    out = tool.invoke({"path": "f.txt", "old_str": "zzz", "new_str": "yyy"})
 
     assert out.startswith("Error:")
     assert (tmp_path / "f.txt").read_text(encoding="utf-8") == "abc"
+
 
 def test_edit_multi_matches_no_write(tmp_path: Path) -> None:
     (tmp_path / "f.txt").write_text("x x", encoding="utf-8")

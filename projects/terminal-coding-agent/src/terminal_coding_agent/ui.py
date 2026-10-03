@@ -185,9 +185,7 @@ class ToolLog:
             # background_color="default" keeps each line at its natural width. The
             # default theme background pads lines to 80 columns, which wraps on a
             # narrower terminal and desyncs the live panel's height accounting.
-            self._console.print(
-                Syntax(result, "diff", background_color="default", word_wrap=True)
-            )
+            self._console.print(Syntax(result, "diff", background_color="default", word_wrap=True))
 
 
 def banner(*, session: str, worktree: str, model: str) -> None:
@@ -244,9 +242,7 @@ def ask_question(payload: Mapping[str, Any]) -> dict[str, Any]:
     exactly as `ask_approval` leaves the plan gate's reject policy to the CLI.
     """
     options = [str(option) for option in payload.get("options") or []]
-    body = "\n".join(
-        f"[bold]{index})[/] {option}" for index, option in enumerate(options, start=1)
-    )
+    body = "\n".join(f"[bold]{index})[/] {option}" for index, option in enumerate(options, start=1))
     CONSOLE.print(
         Panel(
             f"{payload.get('question', '')}\n\n{body}",
@@ -281,6 +277,5 @@ def render_budget(state: Mapping[str, Any]) -> None:
     (missing/incomplete provider metadata), so surfacing it invites wrong numbers.
     """
     CONSOLE.print(
-        f"[bold]turns[/] {state.get('turns', 0)}   "
-        f"[bold]stop[/] {state.get('stop_reason') or 'ok'}"
+        f"[bold]turns[/] {state.get('turns', 0)}   [bold]stop[/] {state.get('stop_reason') or 'ok'}"
     )

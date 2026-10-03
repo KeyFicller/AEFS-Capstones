@@ -69,9 +69,7 @@ class AsyncCapableSqliteSaver(SqliteSaver):
         metadata: CheckpointMetadata,
         new_versions: ChannelVersions,
     ) -> RunnableConfig:
-        return await asyncio.to_thread(
-            self.put, config, checkpoint, metadata, new_versions
-        )
+        return await asyncio.to_thread(self.put, config, checkpoint, metadata, new_versions)
 
     async def aput_writes(
         self,

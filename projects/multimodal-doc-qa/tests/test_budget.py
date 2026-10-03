@@ -9,7 +9,6 @@ import time
 from types import SimpleNamespace
 
 import pytest
-
 from multimodal_doc_qa.budget import Budget, BudgetCallback
 from multimodal_doc_qa.config import Settings
 
@@ -119,7 +118,9 @@ def test_the_callback_ignores_generations_without_a_usage_report() -> None:
 
 
 def test_from_settings_reads_all_three_caps() -> None:
-    budget = Budget.from_settings(Settings(max_ask_calls=7, max_ask_tokens=1234, max_ask_seconds=9.0))
+    budget = Budget.from_settings(
+        Settings(max_ask_calls=7, max_ask_tokens=1234, max_ask_seconds=9.0)
+    )
 
     assert (budget.max_calls, budget.max_tokens, budget.max_seconds) == (7, 1234, 9.0)
 

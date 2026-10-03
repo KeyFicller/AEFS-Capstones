@@ -10,7 +10,6 @@ citation parser, the viewer -- reads that shape.
 import pytest
 import torch
 from langchain_core.documents import Document
-
 from multimodal_doc_qa.index.maxsim import MultiVectorIndex
 from multimodal_doc_qa.retrievers.multivector import MultiVectorRetriever
 

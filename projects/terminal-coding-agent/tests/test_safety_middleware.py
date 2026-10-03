@@ -1,7 +1,6 @@
 from types import SimpleNamespace
 
 from langchain_core.messages import ToolMessage
-
 from terminal_coding_agent.middleware.safety import SafetyMiddleware, is_destructive_shell
 
 

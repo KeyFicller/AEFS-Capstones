@@ -3,7 +3,6 @@ import random
 from pathlib import Path
 
 import pymupdf
-
 from multimodal_doc_qa.corpus.generate import _insert_text_layer, generate_corpus
 from multimodal_doc_qa.corpus.pages import (
     PAGE_H,

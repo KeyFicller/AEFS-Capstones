@@ -88,11 +88,13 @@ def other_mode(mode: str) -> str:
 
 def status_bar(mode: str, embedder: str) -> FormattedText:
     """The line under the prompt: which retrieval path is active."""
-    return FormattedText([
-        ("", " retrieval  "),
-        ("bold", mode),
-        ("", f"    {embedder}    shift-tab switches"),
-    ])
+    return FormattedText(
+        [
+            ("", " retrieval  "),
+            ("bold", mode),
+            ("", f"    {embedder}    shift-tab switches"),
+        ]
+    )
 
 
 class Prompt:

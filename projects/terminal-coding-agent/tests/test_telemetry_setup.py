@@ -5,7 +5,6 @@ from unittest.mock import MagicMock, patch
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-
 from terminal_coding_agent.telemetry.langfuse_callback import langfuse_callback_handler
 from terminal_coding_agent.telemetry.setup import (
     configure_default_exporters,
@@ -40,9 +39,7 @@ def test_langfuse_env_reads_keys_and_base(monkeypatch) -> None:
 
 
 def test_langfuse_otlp_exporter_endpoint_and_headers() -> None:
-    with patch(
-        "terminal_coding_agent.telemetry.setup.OTLPSpanExporter"
-    ) as exporter_cls:
+    with patch("terminal_coding_agent.telemetry.setup.OTLPSpanExporter") as exporter_cls:
         exporter_cls.return_value = MagicMock(name="otlp")
         langfuse_otlp_exporter(
             public_key="pk-test",
@@ -56,9 +53,7 @@ def test_langfuse_otlp_exporter_endpoint_and_headers() -> None:
         assert kwargs["headers"]["x-langfuse-ingestion-version"] == "4"
 
 
-def test_configure_default_exporters_jsonl_only_even_with_keys(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_configure_default_exporters_jsonl_only_even_with_keys(tmp_path: Path, monkeypatch) -> None:
     """CallbackHandler is the default Langfuse path; OTLP needs LANGFUSE_OTLP=1."""
     monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-test")
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test")
@@ -70,9 +65,7 @@ def test_configure_default_exporters_jsonl_only_even_with_keys(
     assert isinstance(processors[0], SimpleSpanProcessor)
 
 
-def test_configure_default_exporters_otlp_opt_in(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_configure_default_exporters_otlp_opt_in(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-test")
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test")
     monkeypatch.setenv("LANGFUSE_OTLP", "1")
@@ -98,9 +91,7 @@ def test_langfuse_callback_handler_when_keys_set(monkeypatch) -> None:
     monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-test")
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test")
     fake = MagicMock(name="handler")
-    with patch(
-        "langfuse.langchain.CallbackHandler", return_value=fake
-    ) as handler_cls:
+    with patch("langfuse.langchain.CallbackHandler", return_value=fake) as handler_cls:
         out = langfuse_callback_handler()
     assert out is fake
     handler_cls.assert_called_once_with()

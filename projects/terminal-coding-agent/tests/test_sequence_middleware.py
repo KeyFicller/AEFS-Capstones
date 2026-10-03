@@ -3,7 +3,6 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from langchain_core.messages import AIMessage, ToolMessage
-
 from terminal_coding_agent.middleware.sequence import (
     SequenceMiddleware,
     _call_preview,

@@ -1,7 +1,9 @@
-from terminal_coding_agent.telemetry.attrs import *
-import pytest
 from pathlib import Path
+
+import pytest
 from opentelemetry.sdk.trace import TracerProvider
+from terminal_coding_agent.telemetry.attrs import *
+
 
 def test_set_chat_attributes(tmp_path: Path):
     provider = TracerProvider()
@@ -12,6 +14,7 @@ def test_set_chat_attributes(tmp_path: Path):
         assert span.attributes[ATTR_INPUT_TOKENS] == 100
         assert span.attributes[ATTR_OUTPUT_TOKENS] == 200
 
+
 def test_set_tool_attributes(tmp_path: Path):
     provider = TracerProvider()
     tracer = provider.get_tracer("test")
@@ -19,6 +22,7 @@ def test_set_tool_attributes(tmp_path: Path):
         set_tool_attributes(span, tool_name="tool", tool_call_id="123")
         assert span.attributes[ATTR_TOOL_NAME] == "tool"
         assert span.attributes[ATTR_TOOL_CALL_ID] == "123"
+
 
 def test_assert_no_content_attributes(tmp_path: Path):
     provider = TracerProvider()

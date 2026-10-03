@@ -6,12 +6,11 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+import terminal_coding_agent.executor as executor_module
 from langchain.agents import create_agent
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import tool
-
-import terminal_coding_agent.executor as executor_module
 from terminal_coding_agent.executor import build_execute_nodes
 from terminal_coding_agent.middleware import ToolLogMiddleware
 from terminal_coding_agent.state import ToDoItem, ToDoStatus
@@ -81,7 +80,9 @@ def test_a_real_agent_run_drives_the_renderer() -> None:
     agent = create_agent(
         model=_FakeModel(messages=iter(script)),
         tools=[read_file],
-        middleware=[ToolLogMiddleware(lambda name, args, result: seen.append((name, args, result)))],
+        middleware=[
+            ToolLogMiddleware(lambda name, args, result: seen.append((name, args, result)))
+        ],
     )
 
     agent.invoke({"messages": [{"role": "user", "content": "read a.py"}]})

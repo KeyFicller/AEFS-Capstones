@@ -1,7 +1,7 @@
 import json
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -22,10 +22,7 @@ class BudgetLedger:
 
 def summarize_todos(todo_list: Sequence[ToDoItem]) -> list[dict[str, str]]:
     """Serialize todos for traces: [{description, status}, ...]."""
-    return [
-        {"description": item.description, "status": item.status.name}
-        for item in todo_list
-    ]
+    return [{"description": item.description, "status": item.status.name} for item in todo_list]
 
 
 def trace_path(worktree: Path) -> Path:
@@ -83,7 +80,7 @@ def write_trace(
         **asdict(ledger),
         "stop_reason": stop_reason,
         "todo_list": todo_list,
-        "finished_at": datetime.now(timezone.utc).isoformat(),
+        "finished_at": datetime.now(UTC).isoformat(),
     }
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
