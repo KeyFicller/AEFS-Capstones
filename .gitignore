@@ -30,3 +30,5 @@ projects/*/otel.jsonl
 _artifacts/
 # Built indices + rendered pages (Settings.artifacts_dir default)
 projects/*/artifacts/
+
+.DS_Store

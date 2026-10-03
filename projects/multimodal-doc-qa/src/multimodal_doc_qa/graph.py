@@ -5,11 +5,14 @@
 ``stop_reason`` stays empty on a normal finish.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any
 
+from langchain_core.messages import BaseMessage, HumanMessage
 from langgraph.graph import StateGraph, START, END
+from langgraph.graph.message import MessagesState
 
 from multimodal_doc_qa.budget import Budget
 from multimodal_doc_qa.config import Settings
@@ -17,10 +20,9 @@ from multimodal_doc_qa.agent import nodes
 from multimodal_doc_qa.schemas import Answer
 
 
-class AskState(TypedDict):
-    """Loop state. Holds only values that survive a round trip: ids, text, scalars."""
+class AskState(MessagesState):
+    """One ask. ``messages`` is the conversation; the other fields are this loop only."""
 
-    question: str
     subqueries: list[str]
     page_ids: list[str]
     rounds: int
@@ -29,10 +31,14 @@ class AskState(TypedDict):
     stop_reason: str
 
 
-def initial_state(question: str) -> AskState:
-    """The state every ask starts from. Callers must not hand-build it."""
+def initial_state(question: str, history: Sequence[BaseMessage] = ()) -> AskState:
+    """The state every ask starts from. One question, one loop.
+
+    ``history`` is earlier turns as messages. This question is appended as a
+    ``HumanMessage``. Callers must not hand-build the state.
+    """
     return {
-        "question": question,
+        "messages": [*history, HumanMessage(content=question)],
         "subqueries": [],
         "page_ids": [],
         "rounds": 0,
@@ -67,7 +73,7 @@ def build_graph(deps: GraphDeps, settings: Settings):
         if budget.exhausted():
             return {"stop_reason": "budget_exhausted"}
         budget.spend_call()
-        return {"subqueries": nodes.plan(deps.planner_model, state["question"])}
+        return {"subqueries": nodes.plan(deps.planner_model, state["messages"])}
 
     def retrieve_node(state: AskState) -> dict:
         pool = list(dict.fromkeys(state["page_ids"]))
@@ -83,7 +89,7 @@ def build_graph(deps: GraphDeps, settings: Settings):
             return {"stop_reason": "budget_exhausted"}
         budget.spend_call()
         followups = nodes.assess(
-            deps.assessor_model, state["question"], state["page_ids"], deps.render_dir
+            deps.assessor_model, state["messages"], state["page_ids"], deps.render_dir
         )
         return {"subqueries": followups}
 
@@ -91,7 +97,7 @@ def build_graph(deps: GraphDeps, settings: Settings):
         if budget.exhausted():
             return {"stop_reason": "budget_exhausted"}
         budget.spend_call()
-        answer = deps.synth.synthesize(state["question"], state["page_ids"], deps.render_dir)
+        answer = deps.synth.synthesize(state["messages"], state["page_ids"], deps.render_dir)
         return {"answer": answer.model_dump()}
 
     def verify_node(state: AskState) -> dict:
@@ -100,7 +106,7 @@ def build_graph(deps: GraphDeps, settings: Settings):
         budget.spend_call()
         answer = Answer.model_validate(state["answer"])
         unsupported = nodes.verify(
-            deps.verifier_model, state["question"], answer, state["page_ids"], deps.render_dir
+            deps.verifier_model, state["messages"], answer, state["page_ids"], deps.render_dir
         )
         return {"unsupported": unsupported, "subqueries": unsupported}
 
@@ -154,7 +160,6 @@ def build_graph(deps: GraphDeps, settings: Settings):
 
 
 if __name__ == "__main__":
-    import os
     import time
 
     from PIL import Image
@@ -211,13 +216,11 @@ if __name__ == "__main__":
     render_dir = Path(__file__).resolve().parent / "corpus" / "_artifacts"
     png_path = Path(__file__).resolve().parents[2] / "graph.png"
 
-    embedder_model = os.environ.get("MDQ_EMBEDDER_MODEL", settings.embedder_fallback)
-
     _write_graph_png(settings, render_dir, png_path)
     print(f"graph     {png_path}")
     print()
 
-    encoder, index = _build_index(embedder_model, settings, render_dir)
+    encoder, index = _build_index(settings.embedder_model, settings, render_dir)
     total = len(list(render_dir.glob("doc*/p*.png")))
 
     chat = build_chat_model(settings)

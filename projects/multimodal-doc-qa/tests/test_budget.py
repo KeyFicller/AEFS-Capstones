@@ -128,7 +128,7 @@ def test_the_default_call_cap_covers_the_worst_case_ask() -> None:
     """The default has to admit the most expensive legal run, or it silently truncates it.
 
     Worst case is ``plan`` plus, per round, ``assess`` + ``synthesize`` + ``verify``:
-    ``1 + 3 * 3`` = 10 with the default ``max_rounds``.
+    ``1 + 3 * max_rounds``.
     """
     settings = Settings()
 

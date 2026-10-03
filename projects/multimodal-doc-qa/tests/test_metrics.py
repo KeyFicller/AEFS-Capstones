@@ -264,7 +264,9 @@ def test_the_run_line_carries_provenance(tmp_path: Path) -> None:
     assert run_line["mode"] == "ocr"
     assert run_line["commit"] is not None
     assert run_line["date"]
-    assert run_line["answerer_model"] == "deepseek-flash"
+    assert run_line["embedder_model"] == "vidore/colSmol-500M"
+    assert run_line["ocr_embedder_model"] == "BAAI/bge-small-en-v1.5"
+    assert run_line["answerer_model"] == "deepseek:deepseek-flash"
     assert run_line["n_questions"] == 1
     # An IoU number cannot be compared to anything without the threshold behind it.
     assert run_line["iou_threshold"] == 0.5

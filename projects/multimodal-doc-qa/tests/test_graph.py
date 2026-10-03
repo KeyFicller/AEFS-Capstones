@@ -14,7 +14,7 @@ from langchain_core.documents import Document
 
 from multimodal_doc_qa.config import Settings
 from multimodal_doc_qa.budget import Budget
-from multimodal_doc_qa.graph import GraphDeps, build_graph
+from multimodal_doc_qa.graph import GraphDeps, build_graph, initial_state
 from multimodal_doc_qa.schemas import Answer, Citation, page_id
 
 
@@ -56,7 +56,7 @@ class _FakeSynth:
         self.cited = cited
         self.pools: list[list[str]] = []
 
-    def synthesize(self, question: str, page_ids: list[str], render_dir: Path) -> Answer:
+    def synthesize(self, messages: object, page_ids: list[str], render_dir: Path) -> Answer:
         self.pools.append(list(page_ids))
         citations = [Citation(doc_id="doc000", page=0)] if self.cited else []
         return Answer(text="16.8%", citations=citations)
@@ -72,15 +72,7 @@ def _pages(tmp_path: Path, *page_ids: str) -> None:
 
 def _run(tmp_path: Path, deps: GraphDeps, **settings: object) -> dict:
     return build_graph(deps, Settings(**settings)).invoke(
-        {
-            "question": "what was the EMEA margin?",
-            "subqueries": [],
-            "page_ids": [],
-            "rounds": 0,
-            "answer": None,
-            "unsupported": [],
-            "stop_reason": "",
-        }
+        initial_state("what was the EMEA margin?")
     )
 
 

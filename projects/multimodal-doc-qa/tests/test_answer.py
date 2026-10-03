@@ -15,6 +15,8 @@ from PIL import Image
 from pydantic import ValidationError
 
 from multimodal_doc_qa.config import Settings
+from langchain_core.messages import HumanMessage
+
 from multimodal_doc_qa.schemas import Answer, Citation
 from multimodal_doc_qa.synth.answer import AnswerSynthesizer, build_page_blocks
 
@@ -153,7 +155,9 @@ def test_synthesize_returns_the_structured_answer(
     model = _StubModel(structured=_StubStructured(result=wanted))
     _page(tmp_path, "doc000/p002")
 
-    answer = _synthesizer(monkeypatch, model).synthesize("margin?", ["doc000/p002"], tmp_path)
+    answer = _synthesizer(monkeypatch, model).synthesize(
+        [HumanMessage(content="margin?")], ["doc000/p002"], tmp_path
+    )
 
     assert answer == wanted
     assert model.plain_calls == []
@@ -167,7 +171,9 @@ def test_synthesize_accepts_a_page_level_citation_without_a_bbox(
     model = _StubModel(structured=_StubStructured(result=page_level))
     _page(tmp_path, "doc000/p001")
 
-    answer = _synthesizer(monkeypatch, model).synthesize("margin?", ["doc000/p001"], tmp_path)
+    answer = _synthesizer(monkeypatch, model).synthesize(
+        [HumanMessage(content="margin?")], ["doc000/p001"], tmp_path
+    )
 
     assert answer.citations[0].bbox is None
 
@@ -181,12 +187,12 @@ def test_synthesize_sends_the_question_then_each_page_image(
     _page(tmp_path, "doc000/p001")
 
     _synthesizer(monkeypatch, model).synthesize(
-        "which margin?", ["doc000/p000", "doc000/p001"], tmp_path
+        [HumanMessage(content="which margin?")], ["doc000/p000", "doc000/p001"], tmp_path
     )
 
     sent = structured.calls[0]
-    assert [m["role"] for m in sent] == ["system", "user"]
-    parts = sent[1]["content"]
+    assert [m.type for m in sent] == ["system", "human"]
+    parts = sent[1].content
     assert parts[0] == {"type": "text", "text": "which margin?"}
     assert [p["type"] for p in parts] == ["text", "text", "image_url", "text", "image_url"]
     assert [p["text"] for p in parts if p["type"] == "text"] == [
@@ -204,7 +210,9 @@ def test_synthesize_propagates_an_invalid_reply(
     _page(tmp_path, "doc000/p002")
 
     with pytest.raises(ValidationError):
-        _synthesizer(monkeypatch, model).synthesize("margin?", ["doc000/p002"], tmp_path)
+        _synthesizer(monkeypatch, model).synthesize(
+            [HumanMessage(content="margin?")], ["doc000/p002"], tmp_path
+        )
 
     assert model.plain_calls == []
 
@@ -232,10 +240,13 @@ def test_synthesizer_disables_thinking_mode_on_the_chat_model(
     model = _StubModel()
 
     def fake_init(*args: object, **kwargs: object) -> _StubModel:
+        captured["args"] = args
         captured.update(kwargs)
         return model
 
     monkeypatch.setattr("langchain.chat_models.init_chat_model", fake_init)
     AnswerSynthesizer(Settings())
 
+    assert captured["args"] == ("deepseek:deepseek-flash",)
+    assert "model_provider" not in captured
     assert captured["extra_body"] == {"thinking": {"type": "disabled"}}

@@ -13,6 +13,8 @@ langchain-ollama>=1.1.0
 
 # CLI 渲染（TUI / 专用 renderer；库代码禁止 print，见 .cursor/rules/20-python.mdc）
 rich>=14
+# REPL 状态栏与 Shift-Tab（检索路径切换）。ipython 会带上它，这里显式声明。
+prompt-toolkit>=3
 
 # OpenTelemetry（gen_ai spans；本地 TracerProvider / InMemory 测试）
 opentelemetry-api>=1.27.0

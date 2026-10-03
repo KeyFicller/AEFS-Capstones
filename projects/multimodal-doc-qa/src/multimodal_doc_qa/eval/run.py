@@ -62,6 +62,7 @@ def provenance(settings: object, mode: str, k: int, n_questions: int, iou_thresh
         "iou_threshold": iou_threshold,
         "n_questions": n_questions,
         "embedder_model": getattr(settings, "embedder_model", None),
+        "ocr_embedder_model": getattr(settings, "ocr_embedder_model", None),
         "answerer_model": getattr(settings, "answerer_model", None),
         "max_rounds": getattr(settings, "max_rounds", None),
         "max_ask_calls": getattr(settings, "max_ask_calls", None),

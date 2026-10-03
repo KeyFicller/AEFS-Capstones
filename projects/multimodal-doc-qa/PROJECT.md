@@ -5,8 +5,8 @@
 
 ## 目标与范围
 
-**目标**：端到端做出一个 **Agentic RAG** 文档问答系统——把 PDF 页面当图像，用 ColQwen2.5 多向量
-**后期交互（late interaction）**做检索；其上叠一层**有界 agent 循环**（规划 → 多轮检索 → 充分性自省
+**目标**：端到端做出一个 **Agentic RAG** 文档问答系统——把 PDF 页面当图像，用多向量
+**后期交互（late interaction）**做检索（默认 `vidore/colSmol-500M`）；其上叠一层**有界 agent 循环**（规划 → 多轮检索 → 充分性自省
 → 合成 → 引用自检），用托管 VLM 带引用作答，在查看器里把证据区域叠回原页；并配一条 **OCR-first
 文本流水线**跑同一张图做基线。
 
@@ -23,11 +23,11 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
   vision-first 与 OCR-first 要分胜负的地方。
 - **编码预算**：`ColQwen2.5` 处理器 `max_pixels = 602112`（= 768 × 28²）。超过约 0.6 MP 的
   像素在进编码器前即被丢弃，故渲染 DPI 由 OCR 基线 / 查看器需求决定，而非检索质量。
-- **编码**：`ColQwen2.5-v0.2`（MPS / bf16）出多向量（每页 ≤768 patch × 128 维）。
+- **编码**：默认 `vidore/colSmol-500M`（MPS / float16）出多向量。换成 `vidore/colqwen2.5-v0.2` 时设 `MDQ_EMBEDDER_MODEL`；加载失败直接报错，没有第二套 checkpoint。
 - **索引**：torch 张量精确 **MaxSim**（逐查询 token 取每页 patch 最大点积再求和）。
 - **Agentic 循环**：`plan → retrieve → assess ⟲ → synthesize → verify ⟲`；
   `rounds` 只在 `retrieve` 自增（= 检索轮数），超 `MAX_ROUNDS = 3` 或零检索由 `recover` 强制收口。
-- **合成**：`deepseek-flash` 读**页面池**图 + 问题，`with_structured_output(Answer)` 直接产出带
+- **合成**：`deepseek:deepseek-flash` 读**页面池**图 + 问题，`with_structured_output(Answer)` 直接产出带
   `(doc_id, page, bbox?)` 引用的答案——引用与 bbox 在合成时即结构化落地，无独立抽取步骤。
 - **证据区域**：引用的 bbox 叠到源页；模型不给 bbox 即为页级引用。
 - **装配**：LangGraph 装配；检索经 LangChain `BaseRetriever` 注入。
@@ -56,8 +56,8 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
                  PyMuPDF 渲染 (180 DPI)
                      │
               ┌──────┴───────┐
-        ColQwen2.5 多向量     │   OCR-first 分支
-        (MPS/bf16, ≤768 patch)│   PyMuPDF 文本 / Tesseract
+        colSmol 多向量        │   OCR-first 分支
+        (MPS/float16)        │   PyMuPDF 文本 / Tesseract
               │               │        │
         torch MaxSim 索引      │   bge-small 文本编码
               │               │        │
@@ -104,13 +104,13 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 | --- | --- | --- |
 | `src/multimodal_doc_qa/corpus/` | 合成语料生成（PIL + matplotlib 排版）+ ground truth | pillow, matplotlib, pymupdf |
 | `src/multimodal_doc_qa/render/` | PDF → 页面 PNG | pymupdf |
-| `src/multimodal_doc_qa/embed/` | `ColQwen2.5-v0.2` / `ColSmol-500M` 编码器 | colpali-engine, torch |
+| `src/multimodal_doc_qa/embed/` | 默认 `ColSmol-500M`，可选 `ColQwen2.5-v0.2` | colpali-engine, torch |
 | `src/multimodal_doc_qa/index/` | torch 张量多向量存储 + MaxSim | torch |
 | `src/multimodal_doc_qa/retrievers/` | LangChain `BaseRetriever`：`MultiVectorRetriever`（vision）/ `TextRetriever`（OCR） | langchain-core, index |
 | `src/multimodal_doc_qa/agent/` | `plan` / `assess` / `verify` 的 prompt 与结构化 schema | langchain |
 | `src/multimodal_doc_qa/graph.py` | LangGraph 装配，维护页面池与 `rounds` | langgraph, langchain |
 | `src/multimodal_doc_qa/budget.py` | 单次 ask 的调用数 / token / 墙钟三档熔断与用量统计 | langchain-core |
-| `src/multimodal_doc_qa/synth/` | `deepseek-flash` 合成 + 引用/bbox 抽取 | langchain |
+| `src/multimodal_doc_qa/synth/` | `deepseek:deepseek-flash` 合成 + 引用/bbox 抽取 | langchain |
 | `src/multimodal_doc_qa/baseline/` | OCR-first 文本抽取 + 分块（供 `TextRetriever` 建索引） | pymupdf, pytesseract, sentence-transformers |
 | `src/multimodal_doc_qa/eval/` | 指标、runner、结果落盘 | — |
 | `src/multimodal_doc_qa/ui/` | Streamlit 查看器 | streamlit |
@@ -121,12 +121,12 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 - **Python**：共享 venv **3.14.6**；全栈依赖已用 `uv pip install --dry-run` 验证可解析。
 - **编排 / 模型抽象**：**LangGraph** 装配 ask 流水线（`langgraph>=1.2.12`）；**LangChain**
   （`init_chat_model` / `ChatDeepSeek`、`BaseRetriever`，`langchain>=1.4.2` + `langchain-deepseek>=1.1.0`）；
-  回答器 `deepseek-flash`（DeepSeek V4.1-Flash，原生多模态，图 ≤384 tok/张）。
+  回答器 `deepseek:deepseek-flash`（DeepSeek V4.1-Flash，原生多模态，图 ≤384 tok/张）。
 - **Embedder**：`colpali-engine==0.3.18` + `torch==2.13.0`（**MPS**）+ `transformers==5.18.0`；
-  主 `vidore/colqwen2.5-v0.2`（4B / bf16 ≈ 8GB），备 `vidore/colSmol-500M`。
+  默认 `vidore/colSmol-500M`。`vidore/colqwen2.5-v0.2` 用 `MDQ_EMBEDDER_MODEL` 指定，加载失败不降级。
 - **页面渲染**：`pymupdf==1.28.2`。
 - **索引**：`torch==2.13.0`（张量批量 MaxSim；设备 / 精度可配，与 embedder 共用同一 torch）。
-- **基线文本检索**：`sentence-transformers` + `BAAI/bge-small-en-v1.5`。
+- **基线文本检索**：`sentence-transformers` + `BAAI/bge-small-en-v1.5`（`OcrEmbedder` / `MDQ_OCR_EMBEDDER_MODEL`，只编码 OCR 臂的页文本和查询；设备与视觉编码器同一个 `MDQ_DEVICE`）。
 - **OCR**：Tesseract（系统依赖，`brew install tesseract`）+ `pytesseract`。
 - **查看器**：`streamlit`。
 - **可观测性**：OTel `gen_ai.*` → Langfuse（`LANGFUSE_*` 已在 `local.env`）。
@@ -179,14 +179,14 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 
 | 维度 | 上限 | 熔断行为 |
 | --- | --- | --- |
-| 单次 `ask` 模型调用 | **10 次**（`plan` 1 + 每轮 `assess`/`synth`/`verify` 各 1，`max_rounds=3`） | 就地收尾、保留已付费答案、写 `stop_reason=budget_exhausted` |
-| 单次 `ask` 检索轮数 | `MAX_ROUNDS = 3` | `recover` 强制收口并写 `stop_reason` |
-| 单次 `ask` token | 80k tokens（含图，每轮图 ≤384 tok/张 × top-5） | 同调用数：就地收尾 + `budget_exhausted` |
+| 单次 `ask` 模型调用 | **16 次**（`plan` 1 + 每轮 `assess`/`synth`/`verify` 各 1，`max_rounds=5`） | 就地收尾、保留已付费答案、写 `stop_reason=budget_exhausted` |
+| 单次 `ask` 检索轮数 | `MAX_ROUNDS = 5` | `recover` 强制收口并写 `stop_reason` |
+| 单次 `ask` token | 200k tokens（含图；一次两轮视觉问答实测约 30k，三轮曾顶穿旧的 80k） | 同调用数：就地收尾 + `budget_exhausted` |
 | 单次 `ask` 墙钟 | 120 s | 同调用数：就地收尾 + `budget_exhausted` |
 | 单次全量评测 | 120 min / 累计 token 上限（`--max-seconds` / `--max-tokens`） | 中止并落盘已得结果 |
 
-- 调用数上限**已实测回填**：最坏路径（`verify` 每轮打回）实测 **10**，`assess` 每轮要页实测 **6**，
-  单跳下限 **4**。三者均有单测钉住（`tests/test_graph.py`）。旧的「8 次」低估了一轮，
+- 调用数上限跟轮数走：`1 + 3 × max_rounds`。`max_rounds=3` 时最坏路径（`verify` 每轮打回）实测 **10**，
+  `assess` 每轮要页实测 **6**，单跳下限 **4**。三者均有单测钉住（`tests/test_graph.py`）。旧的「8 次」低估了一轮，
   原因是当时用假 synthesizer 测量、每轮漏计一次真实调用；旧公式里的 `bbox 1` 是**幽灵节点**
   （`synthesize` 改为结构化输出后已无独立的 bbox 抽取调用）。
 - 记账来源：`usage_metadata.total_tokens`（由 `BudgetCallback` 累加）。
@@ -198,7 +198,7 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 
 ## 交付物
 
-- **CLI**：`doc-qa ingest <corpus_dir>`、`doc-qa ask "<question>"`、`doc-qa eval [--mode] [--max-tokens] [--max-seconds]`。
+- **CLI**：`doc-qa`（加载 artifacts 后进入 REPL）、`doc-qa chat [--mode]`、`doc-qa ingest <corpus_dir>`、`doc-qa ask "<question>"`、`doc-qa eval [--mode] [--max-tokens] [--max-seconds]`。
 - **查看器**：`streamlit run ...`——证据框叠加 + vision / OCR 并排。
 - **评测**：`eval/results.jsonl` + 一份对照报告（内容类型 × 范式矩阵）。
 - **`outputs/skill-doc-qa.md`**：描述交付物与如何复现。
@@ -239,8 +239,8 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 
 1. **transformers 5.x 兼容性**：`colpali-engine 0.3.18` 的实测上限未知；若 API 断裂，需钉
    `transformers` 到兼容版本或改用 `MultiVectorEncoder` 高层 API。**落代码前先冒烟。**
-2. **MPS bf16 内存**：4B 模型 + 768-patch 前向在 16GB（可 wired ≈10.7GB）下可能 OOM。
-   缓解：batch=1、`torch.mps.empty_cache()`、必要时降 patch 上限或退回 `ColSmol-500M`。
+2. **MPS 上的 4B**：`vidore/colqwen2.5-v0.2` + 768-patch 前向在 16GB（可 wired ≈10.7GB）下可能 OOM。
+   默认已是 `vidore/colSmol-500M`。若显式换上 4B：batch=1、`torch.mps.empty_cache()`，必要时降 patch 上限。
 3. **Tesseract 缺失**：系统未装则 OCR 基线跑不动；备选是「渲染期文本层」当完美 OCR（更保守）。
 
 ### 已知坑
@@ -274,10 +274,9 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
     修法：加载前设 `HF_DEACTIVATE_ASYNC_LOAD=1`（测试由 `tests/conftest.py` 兜，生产在 encoder 的
     `_load` 里按 `device == "mps"` 兜）。**不要**误当成版本兼容问题去 pin `transformers`。
     退路：`device_map="cpu"` 加载后主线程 `.to("mps")`。
-15. **主 checkpoint 在 MPS 上加载极慢**：`vidore/colqwen2.5-v0.2`（4B）本机 MPS + fp16 下，
-    加载 + 编码 6 页**实测 >10 分钟未完成**（主动中断）；`vidore/colSmol-500M` 同条件 7.0s + 9.5s。
-    因此 `graph.py` 的 `__main__` 默认走 fallback，用 `MDQ_EMBEDDER_MODEL=` 覆盖。
-    **跑评测前必须先解决**（降 dtype / `device_map` / 换 checkpoint），否则跑批不可行。
+15. **`vidore/colqwen2.5-v0.2` 在 MPS 上加载极慢**：4B，本机 MPS + fp16 下加载 + 编码 6 页
+    **实测 >10 分钟未完成**（主动中断）；`vidore/colSmol-500M` 同条件 7.0s + 9.5s。
+    因此默认就是 colSmol。要用 4B 必须显式设 `MDQ_EMBEDDER_MODEL=vidore/colqwen2.5-v0.2`。
 16. **小语料上页面池会饱和，使 recall 指标虚高**：各子查询的 top-k 结果并池累积。
     实测 6 页语料 + `top_k=5`：单条子查询即覆盖 83%，2 轮后池子 = 整个语料（6/6）。
     此时「recall@k 按累计页面池算」平凡接近 1。评测语料须足够大（~300 页下 `top_k=5` 仅占 1.7%），
@@ -285,8 +284,6 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 17. **索引与编码器之间没有任何绑定（已接受的已知风险）**：`MultiVectorIndex.save` 只存
     `{page_id: tensor}`，不记录写它的 checkpoint / dim / patch 数；`load` 也不校验。
     维数不同会在 MaxSim 处报 matmul 错（还能发现），维数恰好相同则**静默给出错误分数**（发现不了）。
-    更隐蔽的是 `MultiVectorEncoder.__init__` 内部**会自动降级**到 `settings.embedder_fallback`：
-    于是同一条 `ingest → ask` 链路里，索引可能由 fallback 写出、却按主模型的假定被读回。
     当前对策只有**纪律**：`ingest` 会打印实际加载的 checkpoint 类名，换模型后**必须重新 ingest**。
     若日后要根治，最小修法是在 `save` 里带上 encoder 标识与 `[dim, patches]`，`load` 不匹配即报错。
 18. **`ask` 的 token 预算依赖 callback 被绑上**：调用数在节点边界计（不依赖 callback），但 token

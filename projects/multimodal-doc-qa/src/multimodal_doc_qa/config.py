@@ -4,6 +4,7 @@ Every tunable lives here rather than as a literal in business logic, so the
 device, the models and the budget caps can be overridden per run.
 """
 
+import os
 from pathlib import Path
 
 import torch
@@ -17,6 +18,23 @@ def _device() -> str:
     return "cpu"
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[4]
+ENV_PATH = REPO_ROOT / "local.env"
+
+
+def load_local_env(env_path: Path) -> None:
+    """Load ``local.env`` into ``os.environ``. Existing keys are left alone."""
+    if not env_path.is_file():
+        return
+    for raw in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip("\"'")
+        if key and key not in os.environ:
+            os.environ[key] = value
 
 
 def artifact_paths(root: Path) -> tuple[Path, Path, Path]:
@@ -29,16 +47,15 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="MDQ_", extra="ignore")
 
-    embedder_model: str = "vidore/colqwen2.5-v0.2"
-    embedder_fallback: str = "vidore/colSmol-500M"
-    answerer_provider: str = "deepseek"
-    answerer_model: str = "deepseek-flash"
+    embedder_model: str = "vidore/colSmol-500M"
+    ocr_embedder_model: str = "BAAI/bge-small-en-v1.5"
+    answerer_model: str = "deepseek:deepseek-flash"
     device: str = _device()
     dtype: str = "float16"
     top_k: int = 5
-    max_rounds: int = 3
-    max_ask_calls: int = 10
-    max_ask_tokens: int = 80_000
+    max_rounds: int = 5
+    max_ask_calls: int = 16
+    max_ask_tokens: int = 200_000
     max_ask_seconds: float = 120.0
     artifacts_dir: Path = PROJECT_ROOT / "artifacts"
 

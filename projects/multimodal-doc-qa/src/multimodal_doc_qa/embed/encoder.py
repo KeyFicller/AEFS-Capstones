@@ -1,14 +1,11 @@
 """Multi-vector encoder over a ColBERT-style vision-language checkpoint."""
 
-import logging
 import os
 
 import torch
 from PIL import Image
 
 from multimodal_doc_qa.config import Settings
-
-logger = logging.getLogger(__name__)
 
 _DTYPES = {
     "float16": torch.float16,
@@ -47,13 +44,9 @@ class MultiVectorEncoder:
     """
 
     def __init__(self, model_name: str, settings: Settings) -> None:
-        """Bind ``model_name``, falling back to ``settings.embedder_fallback`` if it fails to load."""
+        """Bind ``model_name``. A load failure propagates; there is no second checkpoint."""
         self.settings = settings
-        try:
-            self.model, self.processor = _load(model_name, settings)
-        except (RuntimeError, OSError) as e:
-            logger.warning("failed to load %s (%s); falling back to %s", model_name, e, settings.embedder_fallback)
-            self.model, self.processor = _load(settings.embedder_fallback, settings)
+        self.model, self.processor = _load(model_name, settings)
 
     def encode_images(self, images: list[Image.Image]) -> list[torch.Tensor]:
         """Encode page images to a list of ``[n_patches, dim]`` matrices."""

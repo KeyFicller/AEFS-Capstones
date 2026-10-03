@@ -3,13 +3,15 @@
 ``assess`` and ``verify`` are shown page images, not page ids.
 """
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, Field
 
 from multimodal_doc_qa.schemas import Answer, page_id
-from multimodal_doc_qa.synth.answer import build_page_blocks
+from multimodal_doc_qa.synth.answer import build_page_blocks, prompt_messages, question_text
 
 _PLAN_SYS = (
     "Decompose the question into the minimal independent sub-queries needed to answer it. "
@@ -44,30 +46,30 @@ class Unsupported(BaseModel):
     unsupported: list[str] = Field(default_factory=list)
 
 
-def plan(model: Any, question: str) -> list[str]:
-    """Sub-queries for ``question``. Falls back to the question itself when the model returns none."""
-    result = model.invoke([
-        {"role": "system", "content": _PLAN_SYS},
-        {"role": "user", "content": question},
-    ])
-    return list(result.subqueries) or [question]
+def plan(model: Any, messages: Sequence[BaseMessage]) -> list[str]:
+    """Sub-queries for the latest human message. Falls back to that message when the model returns none."""
+    result = model.invoke(prompt_messages(_PLAN_SYS, messages))
+    return list(result.subqueries) or [question_text(messages)]
 
 
-def assess(model: Any, question: str, page_ids: list[str], render_dir: Path) -> list[str]:
+def assess(
+    model: Any, messages: Sequence[BaseMessage], page_ids: list[str], render_dir: Path
+) -> list[str]:
     """Return the sub-queries still needed, or ``[]`` when the page pool suffices."""
     content = [
-        {"type": "text", "text": f"question: {question}"},
+        {"type": "text", "text": f"question: {question_text(messages)}"},
         *build_page_blocks(page_ids, render_dir),
     ]
-    result = model.invoke([
-        {"role": "system", "content": _ASSESS_SYS},
-        {"role": "user", "content": content},
-    ])
+    result = model.invoke(prompt_messages(_ASSESS_SYS, messages, content))
     return list(result.followups)
 
 
 def verify(
-    model: Any, question: str, answer: Answer, pool: list[str], render_dir: Path
+    model: Any,
+    messages: Sequence[BaseMessage],
+    answer: Answer,
+    pool: list[str],
+    render_dir: Path,
 ) -> list[str]:
     """Claims the citations do not support.
 
@@ -80,11 +82,15 @@ def verify(
     if not inside:
         return violations
     content = [
-        {"type": "text", "text": f"question: {question}\nanswer: {answer.text}\ncited: {', '.join(inside)}"},
+        {
+            "type": "text",
+            "text": (
+                f"question: {question_text(messages)}\n"
+                f"answer: {answer.text}\n"
+                f"cited: {', '.join(inside)}"
+            ),
+        },
         *build_page_blocks(inside, render_dir),
     ]
-    result = model.invoke([
-        {"role": "system", "content": _VERIFY_SYS},
-        {"role": "user", "content": content},
-    ])
+    result = model.invoke(prompt_messages(_VERIFY_SYS, messages, content))
     return violations + list(result.unsupported)

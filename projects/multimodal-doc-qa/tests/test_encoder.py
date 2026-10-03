@@ -13,14 +13,14 @@ def test_settings_defaults() -> None:
     rather than whatever the developer happens to have exported.
     """
     settings = Settings()
-    assert settings.embedder_model == "vidore/colqwen2.5-v0.2"
-    assert settings.embedder_fallback == "vidore/colSmol-500M"
+    assert settings.embedder_model == "vidore/colSmol-500M"
+    assert settings.ocr_embedder_model == "BAAI/bge-small-en-v1.5"
     assert settings.device == "mps"
     assert settings.dtype == "float16"
     assert settings.top_k == 5
-    assert settings.max_rounds == 3
-    assert settings.max_ask_calls == 10
-    assert settings.max_ask_tokens == 80_000
+    assert settings.max_rounds == 5
+    assert settings.max_ask_calls == 16
+    assert settings.max_ask_tokens == 200_000
     assert settings.max_ask_seconds == 120.0
 
 
@@ -33,23 +33,16 @@ def test_settings_reads_mdq_prefixed_env(monkeypatch: pytest.MonkeyPatch) -> Non
     assert settings.device == "cpu"
 
 
-def test_encoder_falls_back_when_primary_load_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    """MPS OOM and download failures are expected, so the fallback branch must work."""
-    calls: list[str] = []
+def test_encoder_load_failure_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed checkpoint load is an error. There is no second model to switch to."""
 
     def fake_load(model_name: str, settings: Settings) -> tuple[str, str]:
-        calls.append(model_name)
-        if len(calls) == 1:
-            raise OSError("simulated checkpoint download failure")
-        return "model", "processor"
+        raise OSError("simulated checkpoint download failure")
 
     monkeypatch.setattr(encoder_module, "_load", fake_load)
-    settings = Settings(embedder_model="vidore/colqwen2.5-v0.2")
 
-    encoder = MultiVectorEncoder(settings.embedder_model, settings)
-
-    assert calls == [settings.embedder_model, settings.embedder_fallback]
-    assert encoder.model == "model"
+    with pytest.raises(OSError, match="simulated checkpoint download failure"):
+        MultiVectorEncoder(Settings().embedder_model, Settings())
 
 
 @pytest.mark.slow

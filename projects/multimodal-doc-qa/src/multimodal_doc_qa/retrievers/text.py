@@ -11,13 +11,19 @@ from pydantic import ConfigDict
 from multimodal_doc_qa.schemas import page_id
 
 
-class TextEmbedder:
-    """Single-vector text embedder. The model import is deferred so importing this module stays cheap."""
+class OcrEmbedder:
+    """Single-vector embedder for the OCR arm only.
 
-    def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5") -> None:
+    It encodes page text at ingest and the query at ``ask --mode ocr``. Page images and
+    vision-arm queries go through ``MultiVectorEncoder`` and do not use this model.
+    The import is deferred so importing this module stays cheap.
+    """
+
+    def __init__(self, model_name: str, device: str) -> None:
+        """Load ``model_name`` on ``device``. Both come from ``Settings``."""
         from sentence_transformers import SentenceTransformer
 
-        self._model = SentenceTransformer(model_name)
+        self._model = SentenceTransformer(model_name, device=device)
 
     def encode(self, texts: list[str]) -> torch.Tensor:
         """Return L2-normalized ``[len(texts), dim]`` embeddings."""
