@@ -17,6 +17,10 @@ def render_pages(pdf_path: Path, out_dir: Path, dpi: int = 180) -> list[Path]:
     A squashed page is a page the encoder was never trained on.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
+    # A shorter re-render must not leave page PNGs from a longer previous run behind:
+    # downstream code globs this directory.
+    for stale in out_dir.glob("p*.png"):
+        stale.unlink()
     paths: list[Path] = []
 
     with pymupdf.open(pdf_path) as pdf:

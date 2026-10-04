@@ -84,6 +84,12 @@ def test_build_page_blocks_reports_a_missing_render(tmp_path: Path) -> None:
         build_page_blocks(["doc000/p999"], tmp_path)
 
 
+def test_build_page_blocks_rejects_a_malformed_page_id(tmp_path: Path) -> None:
+    """A bad id would otherwise reach ``int("")`` and raise a bare, opaque ``ValueError``."""
+    with pytest.raises(ValueError, match="malformed page id"):
+        build_page_blocks(["doc000"], tmp_path)
+
+
 def test_build_page_blocks_sends_text_for_a_text_document(tmp_path: Path) -> None:
     blocks = build_page_blocks(
         ["note/p000"],

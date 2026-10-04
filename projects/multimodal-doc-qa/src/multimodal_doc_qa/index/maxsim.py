@@ -15,6 +15,10 @@ def maxsim(query: torch.Tensor, doc: torch.Tensor) -> torch.Tensor:
     """``sum_i max_j query[i] · doc[j]``. ``query`` is ``[tokens, dim]``, ``doc`` is ``[patches, dim]``."""
 
     sims = query @ doc.T
+    if sims.shape[1] == 0:
+        # A page with no patches has nothing to match; scoring it 0 keeps one
+        # degenerate page from making ``max(dim=1)`` raise for every query.
+        return sims.new_zeros(())
     return sims.max(dim=1).values.sum()
 
 
@@ -34,8 +38,11 @@ class MultiVectorIndex:
         """Return the ``k`` highest-scoring pages, best first.
 
         Returns fewer than ``k`` when the index holds fewer pages, and ``[]`` when
-        it is empty.
+        it is empty or ``k`` is not positive (Python slicing would otherwise treat a
+        negative ``k`` as "all but the last |k|").
         """
+        if k <= 0:
+            return []
         q = query.to(self.device)
         scored = [
             ScoredPage(page_id=page_id, score=float(maxsim(q, v)))

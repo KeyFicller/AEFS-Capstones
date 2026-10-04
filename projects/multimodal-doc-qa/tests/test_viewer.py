@@ -213,6 +213,48 @@ def test_load_runs_keeps_a_run_whose_summary_never_arrived(tmp_path: Path) -> No
     assert runs[0]["summary"] is None
 
 
+def test_load_runs_skips_a_malformed_line(tmp_path: Path) -> None:
+    """Rows are flushed as they are written, so a truncated line is a real state."""
+    path = tmp_path / "results.jsonl"
+    with path.open("w") as handle:
+        handle.write(json.dumps({"kind": "run", "mode": "vision"}) + "\n")
+        handle.write('{"kind": "question", "qid": "q1"\n')  # truncated JSON
+        handle.write(json.dumps({"kind": "summary", "n_done": 0}) + "\n")
+
+    runs = load_runs(path)
+
+    assert runs[0]["summary"]["n_done"] == 0
+
+
+def test_an_unknown_row_kind_does_not_create_a_phantom_run(tmp_path: Path) -> None:
+    """A stray kind before the first run header must not swallow the questions after it."""
+    path = tmp_path / "results.jsonl"
+    with path.open("w") as handle:
+        handle.write(json.dumps({"kind": "note"}) + "\n")
+        handle.write(
+            json.dumps({"kind": "question", "qid": "q1", "answer": "a", "citations": []}) + "\n"
+        )
+
+    runs = load_runs(path)
+
+    assert runs[0]["questions"]["q1"]["answer"] == "a"
+
+
+def test_page_image_returns_a_detached_copy(tmp_path: Path) -> None:
+    """``Image.open`` is lazy; the caller must not be the one that releases the handle."""
+    from multimodal_doc_qa.ui.viewer import page_image
+
+    render = tmp_path / "render"
+    (render / "d").mkdir(parents=True)
+    Image.new("RGB", (10, 10), "white").save(render / "d" / "p000.png")
+
+    image = page_image(render, "d", 0)
+    assert image is not None
+    (render / "d" / "p000.png").unlink()
+    assert image.getpixel((0, 0)) == (255, 255, 255)
+    assert page_image(render, "d", 1) is None
+
+
 def test_runs_for_question_pairs_the_arms(tmp_path: Path) -> None:
     vision, ocr = tmp_path / "vision.jsonl", tmp_path / "ocr.jsonl"
     _write_results(vision, "vision", "q1", "vision answer")

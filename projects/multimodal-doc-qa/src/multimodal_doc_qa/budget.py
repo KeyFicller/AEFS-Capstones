@@ -62,5 +62,11 @@ class BudgetCallback(BaseCallbackHandler):
         for batch in getattr(response, "generations", []) or []:
             for generation in batch:
                 usage = getattr(getattr(generation, "message", None), "usage_metadata", None)
-                if usage:
-                    self.budget.tokens += int(usage.get("total_tokens", 0) or 0)
+                if not usage:
+                    continue
+                # Some providers report only the split, never `total_tokens`; defaulting
+                # that to 0 would silently defeat the token cap.
+                total = usage.get("total_tokens")
+                if total is None:
+                    total = (usage.get("input_tokens") or 0) + (usage.get("output_tokens") or 0)
+                self.budget.tokens += int(total or 0)

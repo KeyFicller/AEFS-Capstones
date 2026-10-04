@@ -14,6 +14,14 @@ _DTYPES = {
 }
 
 
+def _resolve_dtype(name: str) -> torch.dtype:
+    """Guard the free-form config value: a typo must name the accepted values, not ``KeyError``."""
+    try:
+        return _DTYPES[name]
+    except KeyError as exc:
+        raise ValueError(f"unknown dtype {name!r}; expected one of {sorted(_DTYPES)}") from exc
+
+
 def _load(model_name: str, settings: Settings) -> tuple[object, object]:
     """Load ``(model, processor)``. On MPS, force synchronous weight loads before ``from_pretrained``."""
     from colpali_engine import ColIdefics3, ColIdefics3Processor, ColQwen2_5, ColQwen2_5_Processor
@@ -24,14 +32,14 @@ def _load(model_name: str, settings: Settings) -> tuple[object, object]:
     if "colqwen" in model_name.lower():
         model = ColQwen2_5.from_pretrained(
             model_name,
-            torch_dtype=_DTYPES[settings.dtype],
+            torch_dtype=_resolve_dtype(settings.dtype),
             device_map=settings.device,
         ).eval()
         return model, ColQwen2_5_Processor.from_pretrained(model_name)
 
     model = ColIdefics3.from_pretrained(
         model_name,
-        torch_dtype=_DTYPES[settings.dtype],
+        torch_dtype=_resolve_dtype(settings.dtype),
         device_map=settings.device,
     ).eval()
     return model, ColIdefics3Processor.from_pretrained(model_name)
@@ -81,4 +89,7 @@ class MultiVectorEncoder:
         batch = self.processor.process_queries([text]).to(self.settings.device)
         with torch.no_grad():
             emb = self.model(**batch)
-        return emb[0].to(torch.float32).cpu()
+        out = emb[0].to(torch.float32).cpu()
+        if self.settings.device == "mps":
+            torch.mps.empty_cache()
+        return out

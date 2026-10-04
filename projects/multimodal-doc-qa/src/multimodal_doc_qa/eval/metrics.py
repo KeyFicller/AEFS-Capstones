@@ -22,10 +22,10 @@ def ndcg_at_k(ranked_page_ids: list[str], relevant: set[str], k: int) -> float:
 
 
 def bbox_hit_rate(citations: list[Citation], gold: list[Citation]) -> float:
-    """Fraction of gold boxes strictly contained by a same-page citation.
+    """Fraction of gold boxes contained by a same-page citation.
 
-    Reference only. Containment rewards a box that covers the page and misses one that
-    nearly coincides with the gold box. Lead with ``iou_at_threshold``.
+    Reference only. Containment (inclusive: a shared edge counts) rewards a box that covers
+    the page and misses one that nearly coincides with the gold box. Lead with ``iou_at_threshold``.
     Gold with no bbox is a page-level claim, hit by any citation on that page.
     Returns ``0.0`` when ``gold`` is empty.
     """
@@ -54,6 +54,9 @@ def iou_at_threshold(
     are not comparable. Page-level gold (no bbox) is hit by any citation on that page.
     Returns ``0.0`` when ``gold`` is empty.
     """
+    if not 0.0 < threshold <= 1.0:
+        # A threshold <= 0 makes a zero-overlap box a hit; > 1 can never match.
+        raise ValueError(f"threshold must be in (0.0, 1.0], got {threshold}")
     if not gold:
         return 0.0
     hits = 0

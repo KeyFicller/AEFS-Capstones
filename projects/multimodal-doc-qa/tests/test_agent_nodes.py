@@ -194,6 +194,16 @@ def test_verify_does_not_ask_the_model_when_no_citation_is_inside_the_pool(
     assert model.calls == []
 
 
+def test_verify_reports_an_answer_that_cites_nothing(tmp_path: Path) -> None:
+    """An unverifiable answer is not a supported one; silence here would pass it as verified."""
+    model = _StubModel(Unsupported(unsupported=[]))
+
+    result = verify(model, _ask("margin?"), _answer(), ["doc000/p000"], tmp_path)
+
+    assert result == ["answer cites no page"]
+    assert model.calls == []
+
+
 def test_plan_passes_prior_turns_as_messages() -> None:
     """History stays a message list. Nothing joins it into the question string."""
     model = _StubModel(Subqueries(subqueries=["x"]))

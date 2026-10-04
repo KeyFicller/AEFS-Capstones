@@ -145,6 +145,34 @@ def test_load_local_env_sets_missing_keys_and_keeps_existing_ones(
     assert os.environ["ALREADY"] == "from-shell"
 
 
+def test_load_local_env_reads_export_lines_and_matched_quotes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A shell-style file must parse; a lone trailing quote must survive."""
+    env_file = tmp_path / "local.env"
+    env_file.write_text("export MDQ_TOP_K=9\nMDQ_STRIP=lone\"\n")
+    monkeypatch.delenv("MDQ_TOP_K", raising=False)
+    monkeypatch.delenv("MDQ_STRIP", raising=False)
+
+    load_local_env(env_file)
+
+    assert os.environ["MDQ_TOP_K"] == "9"
+    assert os.environ["MDQ_STRIP"] == 'lone"'
+
+
+def test_load_local_env_tolerates_an_unreadable_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Env loading is best-effort: a non-UTF-8 file must not abort startup."""
+    env_file = tmp_path / "local.env"
+    env_file.write_bytes(b"\xff\xfeMDQ_X=1\n")
+    monkeypatch.delenv("MDQ_X", raising=False)
+
+    load_local_env(env_file)  # no raise
+
+    assert "MDQ_X" not in os.environ
+
+
 def test_the_help_lists_both_commands() -> None:
     result = _invoke("--help")
 
@@ -327,6 +355,13 @@ def test_ingest_refuses_an_empty_corpus(tmp_path: Path, artifacts: Path) -> None
     empty.mkdir()
 
     result = _invoke("ingest", "--corpus", str(empty))
+
+    assert result.exit_code == 1
+
+
+def test_ingest_refuses_a_missing_corpus_directory(tmp_path: Path, artifacts: Path) -> None:
+    """A bad path must hit the friendly error path, not a raw ``FileNotFoundError`` traceback."""
+    result = _invoke("ingest", "--corpus", str(tmp_path / "nope"))
 
     assert result.exit_code == 1
 

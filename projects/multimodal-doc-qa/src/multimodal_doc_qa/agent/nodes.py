@@ -79,9 +79,12 @@ def verify(
     """Claims the citations do not support.
 
     A citation outside ``pool`` is reported without calling the model: that page was never retrieved.
+    An answer that cites nothing is unverifiable, so it is reported rather than passed as supported.
     """
     known = set(pool)
     cited = list(dict.fromkeys(page_id(c.doc_id, c.page) for c in answer.citations))
+    if not cited:
+        return ["answer cites no page"]
     violations = [f"cited page {pid} was never retrieved" for pid in cited if pid not in known]
     inside = [pid for pid in cited if pid in known]
     if not inside:

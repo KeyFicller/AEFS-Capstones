@@ -189,7 +189,10 @@ def ingest(
 
 
 def _checked_sources(corpus: Path) -> list[Path]:
-    """Every document in ``corpus``. An empty directory stops ingest."""
+    """Every document in ``corpus``. A missing or empty directory stops ingest."""
+    if not corpus.is_dir():
+        ui.render_error(f"no such corpus directory: {corpus}")
+        raise typer.Exit(code=1)
     sources = _corpus_sources(corpus)
     if not sources:
         ui.render_error(f"no documents in {corpus}")
@@ -409,7 +412,7 @@ def ask(
 
 @app.command("eval")
 def eval_questions(
-    questions: Path = typer.Option(
+    questions: Path | None = typer.Option(
         None, "--questions", help="Holdout JSON (default: the corpus artifacts)"
     ),
     mode: str = typer.Option("vision", "--mode", help=_MODE_HELP),

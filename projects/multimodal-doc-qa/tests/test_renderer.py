@@ -30,3 +30,17 @@ def test_aspect_ratio_survives_rescaling(tmp_path: Path) -> None:
     for p in paths:
         w, h = Image.open(p).size
         assert abs(w / h - PAGE_W / PAGE_H) < 0.01
+
+
+def test_a_shorter_re_render_clears_the_stale_pages(tmp_path: Path) -> None:
+    """Downstream code globs ``p*.png``; a page left from a longer run must not survive."""
+    manifest, _ = generate_corpus(tmp_path / "corpus", n_docs=1, seed=3)
+    out = tmp_path / "rendered"
+    render_pages(tmp_path / "corpus" / manifest.docs[0].pdf_path, out, dpi=180)
+    stale = out / "p099.png"
+    stale.write_bytes(b"stale")
+
+    render_pages(tmp_path / "corpus" / manifest.docs[0].pdf_path, out, dpi=180)
+
+    assert not stale.exists()
+    assert sorted(p.name for p in out.glob("p*.png")) == ["p000.png", "p001.png", "p002.png"]

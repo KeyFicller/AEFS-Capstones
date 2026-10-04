@@ -64,3 +64,18 @@ def test_question_roundtrips_through_json() -> None:
         hops=2,
     )
     assert Question.model_validate_json(q.model_dump_json()) == q
+
+
+def test_a_negative_page_is_rejected() -> None:
+    """A negative page is a valid Python index that silently reads the wrong page."""
+    with pytest.raises(ValidationError):
+        Citation(doc_id="doc000", page=-1)
+
+
+def test_a_catalog_with_a_duplicate_doc_id_is_rejected(tmp_path) -> None:
+    """``doc_id`` is the lookup key; collapsing a duplicate would drop a document."""
+    path = tmp_path / "documents.json"
+    save_documents([PdfDocument(doc_id="dup"), PdfDocument(doc_id="dup")], path)
+
+    with pytest.raises(ValueError, match="duplicate doc_id"):
+        load_documents(path)

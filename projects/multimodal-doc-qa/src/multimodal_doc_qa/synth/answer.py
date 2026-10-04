@@ -37,7 +37,11 @@ def build_page_blocks(
     blocks: list[dict] = []
     for pid in page_ids:
         doc_id, _, page_token = pid.partition("/p")
-        doc = catalog.get(doc_id, PdfDocument(doc_id=doc_id))
+        # partition splits on the first "/p"; a malformed id would otherwise crash in int().
+        if not page_token.isdigit():
+            raise ValueError(f"malformed page id: {pid!r}")
+        # Build the fallback only on a miss: dict.get would eagerly validate it every loop.
+        doc = catalog.get(doc_id) or PdfDocument(doc_id=doc_id)
         blocks.append({"type": "text", "text": f"page {pid}"})
         blocks.append(doc.evidence_block(int(page_token), render_dir))
     return blocks

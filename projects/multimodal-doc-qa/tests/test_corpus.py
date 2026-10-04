@@ -3,6 +3,7 @@ import random
 from pathlib import Path
 
 import pymupdf
+import pytest
 from multimodal_doc_qa.corpus.generate import _insert_text_layer, generate_corpus
 from multimodal_doc_qa.corpus.pages import (
     PAGE_H,
@@ -31,6 +32,20 @@ def test_table_page_records_every_cell() -> None:
         random.Random(0), "Segment Margin", [["EMEA", "16.8%"], ["APAC", "22.1%"]]
     )
     assert {d[1] for d in drafts} >= {"EMEA", "16.8%", "APAC", "22.1%"}
+
+
+def test_table_page_rejects_no_rows() -> None:
+    """``max()`` on an empty list and ``// n_cols`` divide by zero would both raise obscurely."""
+    with pytest.raises(ValueError, match="at least one non-empty row"):
+        render_table_page(random.Random(0), "Segment Margin", [])
+    with pytest.raises(ValueError, match="at least one non-empty row"):
+        render_table_page(random.Random(0), "Segment Margin", [[]])
+
+
+def test_paragraph_page_rejects_more_facts_than_fit_on_the_page() -> None:
+    """Past 12 rows the page overflows and the normalized bboxes leave 0..1."""
+    with pytest.raises(ValueError, match="at most 12 facts"):
+        render_paragraph_page(random.Random(0), [(f"f{i}", f"fact {i}") for i in range(13)])
 
 
 def test_chart_facts_are_bar_values() -> None:

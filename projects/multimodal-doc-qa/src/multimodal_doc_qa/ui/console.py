@@ -12,6 +12,7 @@ from prompt_toolkit.shortcuts import PromptSession
 from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
+from rich.markup import escape
 from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.text import Text
@@ -68,11 +69,12 @@ def echo(message: str) -> None:
 
 def banner(*, artifacts: str, mode: str, embedder: str, answerer: str) -> None:
     """Opening panel: which artifacts, which arm, which models."""
+    # Paths and model names are interpolated: a `[` in any of them is markup to Rich.
     body = Text.from_markup(
-        f"[bold]artifacts[/] {artifacts}\n"
-        f"[bold]mode[/]      {mode}\n"
-        f"[bold]embedder[/]  {embedder}\n"
-        f"[bold]answerer[/]  {answerer}"
+        f"[bold]artifacts[/] {escape(artifacts)}\n"
+        f"[bold]mode[/]      {escape(mode)}\n"
+        f"[bold]embedder[/]  {escape(embedder)}\n"
+        f"[bold]answerer[/]  {escape(answerer)}"
     )
     CONSOLE.print(Panel(body, title="multimodal-doc-qa", border_style="cyan"))
 
@@ -140,7 +142,8 @@ def render_reply(text: str) -> None:
 
 
 def render_error(message: str) -> None:
-    CONSOLE.print(Panel(message, title="error", border_style="red"))
+    # Exception text routinely contains brackets (`KeyError: 'a[b]'`); raw it is markup.
+    CONSOLE.print(Panel(escape(message), title="error", border_style="red"))
 
 
 def render_sources(materials: list[SourceLine]) -> None:
@@ -150,17 +153,17 @@ def render_sources(materials: list[SourceLine]) -> None:
         return
     blocks: list[str] = []
     for item in materials:
-        lines = [f"[bold]{page_id(item.doc_id, item.page)}[/]"]
+        lines = [f"[bold]{escape(page_id(item.doc_id, item.page))}[/]"]
         if item.pdf is not None:
-            lines.append(f"[bold]pdf[/]   {item.pdf}")
+            lines.append(f"[bold]pdf[/]   {escape(str(item.pdf))}")
         if item.txt is not None:
-            lines.append(f"[bold]txt[/]   {item.txt}")
+            lines.append(f"[bold]txt[/]   {escape(str(item.txt))}")
         if item.png.is_file():
-            lines.append(f"[bold]png[/]   {item.png}")
+            lines.append(f"[bold]png[/]   {escape(str(item.png))}")
         if item.text:
-            lines.append(f"[bold]text[/]  {_clip(item.text)}")
+            lines.append(f"[bold]text[/]  {escape(_clip(item.text))}")
         if item.bbox is not None:
-            lines.append(f"[bold]bbox[/]  {item.bbox}")
+            lines.append(f"[bold]bbox[/]  {escape(str(item.bbox))}")
         blocks.append("\n".join(lines))
     CONSOLE.print(Panel("\n\n".join(blocks), title="sources", border_style="cyan", expand=False))
 

@@ -77,11 +77,15 @@ def build_graph(deps: GraphDeps, settings: Settings):
         return {"subqueries": nodes.plan(deps.planner_model, state["messages"])}
 
     def retrieve_node(state: AskState) -> dict:
+        # The entry hop bypasses the assess/verify guards, so the bound has to hold here too.
+        if state["rounds"] >= settings.max_rounds:
+            return {}
         pool = list(dict.fromkeys(state["page_ids"]))
         for subquery in state["subqueries"]:
             for doc in deps.retriever.invoke(subquery):
-                page = doc.metadata["page_id"]
-                if page not in pool:
+                # The retriever is injected; one that omits page_id must not abort the ask.
+                page = doc.metadata.get("page_id")
+                if page is not None and page not in pool:
                     pool.append(page)
         return {"page_ids": pool, "rounds": state["rounds"] + 1}
 
@@ -105,7 +109,9 @@ def build_graph(deps: GraphDeps, settings: Settings):
         answer = deps.synth.synthesize(
             state["messages"], state["page_ids"], deps.render_dir, deps.documents
         )
-        return {"answer": answer.model_dump()}
+        # A fresh answer invalidates any earlier verification; leaving the old list would
+        # pair this answer with verdicts that belong to a superseded one.
+        return {"answer": answer.model_dump(), "unsupported": []}
 
     def verify_node(state: AskState) -> dict:
         if budget.exhausted():

@@ -28,13 +28,23 @@ def load_local_env(env_path: Path) -> None:
     """Load ``local.env`` into ``os.environ``. Existing keys are left alone."""
     if not env_path.is_file():
         return
-    for raw in env_path.read_text(encoding="utf-8").splitlines():
+    try:
+        content = env_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        # A malformed env file must not abort startup: env loading is best-effort.
+        return
+    for raw in content.splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
         key = key.strip()
-        value = value.strip().strip("\"'")
+        if key.startswith("export "):
+            key = key[len("export ") :].strip()
+        value = value.strip()
+        # Unquote only a matched pair; stripping any quote char would eat a lone one.
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
         if key and key not in os.environ:
             os.environ[key] = value
 

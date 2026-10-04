@@ -77,12 +77,16 @@ def load_runs(path: Path) -> list[dict]:
     for line in path.read_text().splitlines():
         if not line.strip():
             continue
-        row = json.loads(line)
+        # The viewer exists to read aborted runs; a half-written line must not kill the load.
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
         kind = row.get("kind")
         if kind == "run":
             runs.append({"header": row, "questions": {}, "summary": None})
             continue
-        if not runs:
+        if not runs and kind in {"question", "summary"}:
             runs.append({"header": {}, "questions": {}, "summary": None})
         if kind == "question":
             runs[-1]["questions"][row["qid"]] = row
@@ -102,9 +106,16 @@ def question_ids(runs: list[dict]) -> list[str]:
 
 
 def page_image(render_dir: Path, doc_id: str, page: int) -> Image.Image | None:
-    """The rendered page, or ``None`` when it was never rendered."""
+    """The rendered page, or ``None`` when it was never rendered.
+
+    Loads a detached copy: ``Image.open`` is lazy and the handle must not depend on
+    the caller to release it.
+    """
     path = render_dir / doc_id / f"p{page:03d}.png"
-    return Image.open(path) if path.is_file() else None
+    if not path.is_file():
+        return None
+    with Image.open(path) as image:
+        return image.copy()
 
 
 def evidence_pages(citations: list[Citation], gold: list[Citation]) -> list[tuple[str, int]]:

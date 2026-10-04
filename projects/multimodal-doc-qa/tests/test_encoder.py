@@ -74,6 +74,13 @@ def test_encoder_load_failure_propagates(monkeypatch: pytest.MonkeyPatch) -> Non
         MultiVectorEncoder(Settings().embedder_model, Settings())
 
 
+def test_an_unknown_dtype_names_the_accepted_values() -> None:
+    """The dtype is a free-form config string; a typo must not surface as a bare KeyError."""
+    assert encoder_module._resolve_dtype("float32") is torch.float32
+    with pytest.raises(ValueError, match="unknown dtype"):
+        encoder_module._resolve_dtype("fp16")
+
+
 @pytest.mark.slow
 def test_encoder_shapes_and_device() -> None:
     settings = Settings(embedder_model="vidore/colSmol-500M", device="mps", dtype="float16")

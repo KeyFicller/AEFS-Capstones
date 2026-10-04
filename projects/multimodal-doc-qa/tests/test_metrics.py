@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from multimodal_doc_qa.eval.metrics import bbox_hit_rate, iou_at_threshold, ndcg_at_k
-from multimodal_doc_qa.eval.run import RESULTS_PATH, QuestionRun, run_eval
+from multimodal_doc_qa.eval.run import RESULTS_PATH, QuestionRun, _percentile, run_eval
 from multimodal_doc_qa.schemas import Answer, BBox, Citation, Question
 
 
@@ -198,6 +198,27 @@ def test_the_threshold_is_a_real_parameter() -> None:
 
     assert iou_at_threshold(citations, gold, threshold=0.5) == 0.0
     assert iou_at_threshold(citations, gold, threshold=0.1) == 1.0
+
+
+def test_a_threshold_outside_the_unit_interval_is_rejected() -> None:
+    """A threshold <= 0 counts a zero-overlap box as a hit and silently inflates the metric."""
+    gold = [_citation(1, _box(0.0, 0.0, 0.2, 0.2))]
+    citations = [_citation(1, _box(0.8, 0.8, 0.9, 0.9))]
+
+    assert iou_at_threshold(citations, gold, threshold=1.0) == 0.0
+    for bad in (0.0, -0.1, 1.5):
+        with pytest.raises(ValueError):
+            iou_at_threshold(citations, gold, threshold=bad)
+
+
+def test_the_percentile_uses_the_nearest_rank_not_bankers_rounding() -> None:
+    """Nearest rank is ``ceil(fraction * N)``; ``round`` shifts p50/p95 with N's parity."""
+    five = [1.0, 2.0, 3.0, 4.0, 5.0]
+
+    assert _percentile(five, 0.50) == 3.0  # round(2.5) would pick the 2nd value
+    assert _percentile([1.0, 2.0, 3.0, 4.0], 0.50) == 2.0
+    assert _percentile(five, 0.95) == 5.0
+    assert _percentile([], 0.5) == 0.0
 
 
 # ------------------------------------------------------------------ runner

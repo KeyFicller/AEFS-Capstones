@@ -89,6 +89,9 @@ def render_paragraph_page(
     for fid, text in facts:
         prefix = f"{_filler(rng, 3)} "
         rows.append((prefix + text, draw.textlength(prefix, font=font), (fid, text)))
+    if len(rows) > 12:
+        # More than 12 rows run past the page bottom and mint out-of-range bboxes.
+        raise ValueError(f"at most 12 facts fit on a page, got {len(rows)}")
     rows += [(_filler(rng, 9), 0.0, None) for _ in range(12 - len(rows))]
     rng.shuffle(rows)
 
@@ -114,6 +117,9 @@ def render_table_page(
     draw.text((MARGIN, MARGIN), title, fill="black", font=hfont)
     top = MARGIN + 80
     row_h = 64
+    if not rows or not any(rows):
+        # max() on [] and a zero-column width division would both raise obscurely.
+        raise ValueError("rows must contain at least one non-empty row")
     n_cols = max(len(r) for r in rows)
     col_w = (PAGE_W - 2 * MARGIN) // n_cols
     drafts: list[FactDraft] = []
@@ -193,12 +199,16 @@ def render_chart_page(
     # be dropped rather than converted to an out-of-range bbox.
     x_lo, x_hi = ax.get_xlim()
     y_lo, y_hi = ax.get_ylim()
+    # An x-tick label's position is ``(x, 0)`` and a y-tick's is ``(0, y)``: compare each
+    # only against its own axis, or a non-zero baseline wrongly keeps or drops labels.
     visible_ticks = [
         label
-        for label in (*ax.get_xticklabels(), *ax.get_yticklabels())
-        if label.get_text()
-        and x_lo <= label.get_position()[0] <= x_hi
-        and y_lo <= label.get_position()[1] <= y_hi
+        for label in ax.get_xticklabels()
+        if label.get_text() and x_lo <= label.get_position()[0] <= x_hi
+    ] + [
+        label
+        for label in ax.get_yticklabels()
+        if label.get_text() and y_lo <= label.get_position()[1] <= y_hi
     ]
     runs = [
         TextRun(artist.get_text(), _display_to_bbox(artist.get_window_extent(renderer), fig))

@@ -378,3 +378,47 @@ def test_an_uncapped_run_finishes_normally(tmp_path: Path) -> None:
 
     assert out["stop_reason"] == ""
     assert budget.calls == 4
+
+
+# ------------------------------------------------------------ injected retriever shape
+
+
+class _MetadataLessRetriever:
+    """A retriever whose documents carry no ``page_id``. Retriever swapping is a first-class case."""
+
+    def invoke(self, query: str) -> list[Document]:
+        return [Document(page_content="page", metadata={"score": 1.0})]
+
+
+def test_a_document_without_a_page_id_is_skipped_not_fatal(tmp_path: Path) -> None:
+    """The retriever is injected ``Any``; a missing key must degrade, not raise ``KeyError``."""
+    out = _run(tmp_path, _deps(tmp_path, _MetadataLessRetriever(), _StubModel()))
+
+    assert out["page_ids"] == []
+    assert out["stop_reason"] == "recover_empty"
+
+
+def test_a_zero_round_budget_never_retrieves(tmp_path: Path) -> None:
+    """The entry hop bypasses the assess/verify guards, so the bound must hold in ``retrieve``."""
+    _pages(tmp_path, "doc000/p000")
+    retriever = _Retriever("doc000/p000")
+
+    out = _run(tmp_path, _deps(tmp_path, retriever, _StubModel()), max_rounds=0)
+
+    assert out["rounds"] == 0
+    assert retriever.queries == []
+
+
+def test_a_new_answer_invalidates_the_previous_verification(tmp_path: Path) -> None:
+    """If ``verify`` is skipped on budget, the fresh answer must not pair with a stale verdict."""
+    _pages(tmp_path, "doc000/p000")
+    model = _StubModel(unsupported=("nope",))
+
+    out = _run(
+        tmp_path,
+        _deps(tmp_path, _Retriever("doc000/p000"), model, budget=_capped(max_calls=6)),
+        max_rounds=2,
+    )
+
+    assert out["stop_reason"] == "budget_exhausted"
+    assert out["unsupported"] == []

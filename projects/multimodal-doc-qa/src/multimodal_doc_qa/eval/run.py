@@ -4,6 +4,7 @@ Rows are flushed as they are written. A mid-run failure must not drop questions 
 """
 
 import json
+import math
 import platform
 import subprocess
 import time
@@ -104,7 +105,10 @@ def _percentile(values: list[float], fraction: float) -> float:
     if not values:
         return 0.0
     ordered = sorted(values)
-    index = min(len(ordered) - 1, max(0, round(fraction * len(ordered)) - 1))
+    # Nearest rank is ceil(fraction * N), not round(): banker's rounding picks a
+    # different element and makes p50/p95 depend on the sample count's parity.
+    rank = math.ceil(fraction * len(ordered))
+    index = min(len(ordered) - 1, max(0, rank - 1))
     return round(ordered[index], 3)
 
 

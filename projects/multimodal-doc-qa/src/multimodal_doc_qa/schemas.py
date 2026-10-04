@@ -60,7 +60,7 @@ class Citation(BaseModel):
     """One citation in an answer: doc_id + page always present; bbox may be absent."""
 
     doc_id: str
-    page: int
+    page: int = Field(ge=0)
     bbox: BBox | None = None
 
 
@@ -83,7 +83,7 @@ class Fact(BaseModel):
 
     fact_id: str
     text: str
-    page: int
+    page: int = Field(ge=0)
     bbox: BBox
 
 
@@ -91,7 +91,7 @@ class PageSpec(BaseModel):
     """One page: kind selects the renderer, scanned decides whether a text layer exists."""
 
     doc_id: str
-    page: int
+    page: int = Field(ge=0)
     kind: PageKind
     scanned: bool
     facts: list[Fact] = Field(default_factory=list)
@@ -172,7 +172,12 @@ def save_documents(docs: list[ImageDocument | PdfDocument | TextDocument], path:
 def load_documents(path: Path) -> dict[str, ImageDocument | PdfDocument | TextDocument]:
     """Read a catalog written by ``save_documents``, keyed by ``doc_id``."""
     docs = TypeAdapter(list[AnyDocument]).validate_json(path.read_text(encoding="utf-8"))
-    return {doc.doc_id: doc for doc in docs}
+    # doc_id is the primary key for pages and retrieval; collapsing a duplicate would
+    # silently drop a document, so reject the catalog instead.
+    by_id = {doc.doc_id: doc for doc in docs}
+    if len(by_id) != len(docs):
+        raise ValueError(f"duplicate doc_id in catalog {path}")
+    return by_id
 
 
 class CorpusManifest(BaseModel):

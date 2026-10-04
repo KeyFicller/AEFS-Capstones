@@ -117,6 +117,20 @@ def test_the_callback_ignores_generations_without_a_usage_report() -> None:
     assert budget.tokens == 0
 
 
+def test_the_callback_falls_back_to_the_input_output_split() -> None:
+    """Some providers never send ``total_tokens``; defaulting it to 0 would defeat the cap."""
+    budget = _budget(max_tokens=100)
+    usage = {"input_tokens": 60, "output_tokens": 40}
+    result = SimpleNamespace(
+        generations=[[SimpleNamespace(message=SimpleNamespace(usage_metadata=usage))]]
+    )
+
+    BudgetCallback(budget).on_llm_end(result)
+
+    assert budget.tokens == 100
+    assert budget.exhausted()
+
+
 def test_from_settings_reads_all_three_caps() -> None:
     budget = Budget.from_settings(
         Settings(max_ask_calls=7, max_ask_tokens=1234, max_ask_seconds=9.0)

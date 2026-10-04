@@ -81,3 +81,25 @@ def test_search_clamps_to_available_pages() -> None:
 
     idx.add("a", torch.eye(4))
     assert len(idx.search(torch.eye(4)[0:1], k=5)) == 1
+
+
+def test_a_page_with_no_patches_scores_zero_instead_of_crashing() -> None:
+    """One degenerate page must not make ``max(dim=1)`` raise for every query."""
+    idx = MultiVectorIndex(device="cpu")
+    idx.add("empty", torch.zeros(0, 4))
+    idx.add("real", torch.eye(4))
+
+    hits = idx.search(torch.eye(4)[0:1], k=2)
+
+    assert [h.page_id for h in hits] == ["real", "empty"]
+    assert hits[1].score == 0.0
+
+
+def test_a_non_positive_k_returns_nothing() -> None:
+    """Python slicing would read ``k=-1`` as "all but the last page"."""
+    idx = MultiVectorIndex(device="cpu")
+    idx.add("a", torch.eye(4))
+    idx.add("b", torch.eye(4))
+
+    assert idx.search(torch.eye(4)[0:1], k=0) == []
+    assert idx.search(torch.eye(4)[0:1], k=-1) == []
