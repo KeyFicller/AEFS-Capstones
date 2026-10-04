@@ -73,8 +73,14 @@ class TodoPanel:
         self._console = console if console is not None else CONSOLE
         self._live: Live | None = None
         self._panel: Panel | None = None
+        self._summary = ""
         self._working = False
         self._spinner = Spinner("dots", text=Text(WORKING_MESSAGE, style="bold cyan"))
+
+    @property
+    def redraws_in_place(self) -> bool:
+        """True when a Live can overwrite itself in place; the CLI gates summary streaming on this."""
+        return self._console.is_interactive
 
     def __call__(self, text: str, version: int = 0) -> None:
         self._panel = Panel(
@@ -91,10 +97,24 @@ class TodoPanel:
         else:
             self._live.refresh()
 
+    def stream_summary(self, text: str) -> None:
+        """Redraw the summary inside the Live; `text` is the whole summary so far, not a delta.
+
+        Drops the spinner: the growing panel is progress enough.
+        """
+        self._summary = text
+        self._working = False
+        if self._live is None:
+            self._console.print(reply_panel(text))
+        else:
+            self._live.refresh()
+
     def _renderable(self) -> RenderableType:
         body: list[RenderableType] = []
         if self._panel is not None:
             body.append(self._panel)
+        if self._summary:
+            body.append(reply_panel(self._summary))
         if self._working:
             body.append(self._spinner)
         return Group(*body)
@@ -115,6 +135,8 @@ class TodoPanel:
             get_renderable=self._renderable,
             auto_refresh=True,
             refresh_per_second=10,
+            # Let a summary longer than the screen scroll out instead of being ellipsized.
+            vertical_overflow="visible",
             # Live's defaults would swap the process stdout/stderr for proxies,
             # which would capture unrelated logging and pytest output.
             redirect_stdout=False,
@@ -122,6 +144,7 @@ class TodoPanel:
         ) as live:
             self._live = live
             self._panel = None  # this turn starts clean; the old panel stays as scrollback
+            self._summary = ""
             self._working = True
             try:
                 yield
@@ -271,8 +294,13 @@ def ask_question(payload: Mapping[str, Any]) -> dict[str, Any]:
         return {"answer": answer, "cancelled": False}
 
 
+def reply_panel(text: str) -> Panel:
+    """The one agent-reply panel, shared by the one-shot renderer and the live summary."""
+    return Panel(Markdown(text), title="agent", border_style="green")
+
+
 def render_reply(text: str) -> None:
-    CONSOLE.print(Panel(Markdown(text), title="agent", border_style="green"))
+    CONSOLE.print(reply_panel(text))
 
 
 def render_error(message: str) -> None:

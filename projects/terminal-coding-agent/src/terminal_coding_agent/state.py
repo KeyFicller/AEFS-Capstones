@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import MessagesState
@@ -30,6 +30,23 @@ class ToDoItem:
 class Plan(BaseModel):
     task: str = Field(description="The task to complete")
     steps: list[str] = Field(description="The steps to complete the task")
+
+
+class RoutingPlan(BaseModel):
+    """`Plan` plus the answer/work verdict the CLI's answer mode needs."""
+
+    task: str = Field(description="The task to complete")
+    mode: Literal["answer", "work"] = Field(
+        description=(
+            "answer when the deliverable is content for the reply itself "
+            "(write / explain / translate / draft / summarize a passage); work when "
+            "the agent must act in the worktree (read/write files, run commands, "
+            "change code, debug). When unsure, use work."
+        )
+    )
+    steps: list[str] = Field(
+        description="The steps to complete the task; a single step for answer."
+    )
 
 
 _MARKERS: dict[ToDoStatus, str] = {
@@ -72,6 +89,7 @@ class CodingAgentState(MessagesState):
     replan_count: int = 0
     blocked_reason: str | None = None
     blocked_evidence: list[dict[str, Any]] = []
+    mode: str | None = None
 
 
 def usage_tokens(message: BaseMessage) -> int:

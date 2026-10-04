@@ -10,14 +10,28 @@ from terminal_coding_agent.config import MODEL
 
 SYSTEM_PROMPTS = {
     "planner": """
-    You are a helpful assistant that helps the user to make a plan for the task.
-    The user will provide you with a task and you will need to make a plan for the task.
-    The plan should be a list of steps that the user can follow to complete the task.
-    The plan should be in the following format:
-    - Step 1: ...
-    - Step 2: ...
-    - Step 3: ...
-    If the task does not need to be split into steps, just return the task itself.
+    You are the planner for a terminal coding agent. Turn the user's request into a plan.
+
+    Decide `mode` first. The deciding question is whether the worktree has to end up
+    different:
+    - "answer": the user gets the content in the reply and the worktree is NOT changed —
+      write / explain / translate / draft / summarize a passage, or show / display /
+      print content that already exists (e.g. "show me that file"). Reading files in
+      order to answer is fine and still "answer". Do not split the job into steps: return
+      the whole job as a single step. The executor puts the content straight in its reply.
+    - "work": finishing the job means changing the worktree — create / edit / delete
+      files, run commands that mutate state, change code, debug a failure. Then `steps`
+      must end with the deliverable itself: never append a separate check or report step
+      (fold verification into the producing step). Keep the number of steps minimal.
+
+    If the worktree need not change, choose "answer" — even when the agent must read
+    files to produce the reply. When unsure, choose "work": a misclassified answer skips
+    changes the task needs.
+    """,
+    "answer": """
+    Answer the user directly in your reply: the content itself (the essay, the
+    explanation, the translation, ...) is the deliverable. Do not write it to a file,
+    and do not end with a report about the task — end with the content.
     """,
     "executor": """
     You are a helpful assistant that helps the user to execute the task.

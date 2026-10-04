@@ -7,6 +7,7 @@ from terminal_coding_agent import graph as graph_module
 from terminal_coding_agent.graph import (
     _after_end_task,
     _after_make_plan,
+    _after_make_plan_gated,
     _after_recover,
     _after_recover_gated,
     make_graph,
@@ -338,3 +339,35 @@ def test_after_recover_gated_only_diverts_a_live_replan() -> None:
         _after_recover_gated(_state([ToDoItem(status=ToDoStatus.DONE, description="a")]))
         == "summary"
     )
+
+
+def test_answer_mode_routes_to_the_answer_node() -> None:
+    assert _after_make_plan(_state([], mode="answer")) == "answer"
+    assert _after_make_plan_gated(_state([], mode="answer")) == "answer"
+
+
+def test_answer_node_is_wired_only_when_enabled(tmp_path: Path) -> None:
+    os.environ["DEEPSEEK_API_KEY"] = "test"
+    off = make_graph({"configurable": {"worktree": tmp_path}})
+    on = make_graph({"configurable": {"worktree": tmp_path, "enable_answer_mode": True}})
+    os.environ.pop("DEEPSEEK_API_KEY")
+
+    assert "answer" not in off.builder.nodes, "Harbor parity: node set unchanged"
+    assert "answer" in on.builder.nodes
+
+
+def test_make_graph_forwards_the_answer_flag_to_the_planner(tmp_path: Path, monkeypatch) -> None:
+    captured: dict = {}
+    real = graph_module.build_planner
+
+    def spy(models, **kwargs):
+        captured.update(kwargs)
+        return real(models, **kwargs)
+
+    monkeypatch.setattr(graph_module, "build_planner", spy)
+    os.environ["DEEPSEEK_API_KEY"] = "test"
+    make_graph({"configurable": {"worktree": tmp_path}})
+    make_graph({"configurable": {"worktree": tmp_path, "enable_answer_mode": True}})
+    os.environ.pop("DEEPSEEK_API_KEY")
+
+    assert captured["enable_answer"] is True

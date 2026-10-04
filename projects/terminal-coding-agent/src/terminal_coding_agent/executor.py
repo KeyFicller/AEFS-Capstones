@@ -32,7 +32,7 @@ from terminal_coding_agent.middleware import (
 )
 from terminal_coding_agent.models import SYSTEM_PROMPTS, AgentModels
 from terminal_coding_agent.recover import project_evidence
-from terminal_coding_agent.state import CodingAgentState, ToDoStatus
+from terminal_coding_agent.state import CodingAgentState, ToDoStatus, format_todos
 from terminal_coding_agent.telemetry import resolve_model_name
 
 logger = logging.getLogger(__name__)
@@ -116,10 +116,16 @@ def build_execute_nodes(
             # Last = innermost, so a guard that short-circuits the call is not logged as output.
             middleware.append(ToolLogMiddleware(tool_renderer))
 
+        system_prompt = (
+            SYSTEM_PROMPTS["executor"]
+            + "\n\nCurrent plan:\n"
+            + format_todos(todo_list)
+            + f"\n\nYour step: {todo_list[task_index].description}"
+        )
         agent = create_agent(
             model=models.executor,
             tools=tools,
-            system_prompt=SYSTEM_PROMPTS["executor"],
+            system_prompt=system_prompt,
             middleware=middleware,
         )
         try:
@@ -147,6 +153,43 @@ def build_execute_nodes(
             return updates
 
         final = _final_agent_message(list(agent_messages))
+        if final is not None:
+            updates["messages"] = [final]
+        return updates
+
+    def answer(state: CodingAgentState, config: RunnableConfig) -> dict[str, Any]:
+        if state.get("stop_reason"):
+            return {}
+
+        ledger = ledger_from_state(state)
+        middleware = [
+            BudgetMiddleware(ledger),
+            ObservabilityMiddleware(resolve_model_name(models.executor)),
+            SafetyMiddleware(),
+        ]
+        if tool_renderer is not None:
+            # Last = innermost, so a guard that short-circuits the call is not logged as output.
+            middleware.append(ToolLogMiddleware(tool_renderer))
+
+        agent = create_agent(
+            model=models.executor,
+            tools=tools,
+            system_prompt=SYSTEM_PROMPTS["executor"] + "\n\n" + SYSTEM_PROMPTS["answer"],
+            middleware=middleware,
+        )
+        try:
+            result = agent.invoke({"messages": list(state["messages"])}, config=config)
+        except GraphBubbleUp:
+            raise
+        except Exception as exc:  # noqa: BLE001 - an error is an observation, not a crash
+            logger.exception("answer failed")
+            return {
+                **budget_updates(ledger),
+                "stop_reason": f"executor_error:{type(exc).__name__}",
+            }
+
+        updates: dict[str, Any] = {**budget_updates(ledger)}
+        final = _final_agent_message(list(result.get("messages") or []))
         if final is not None:
             updates["messages"] = [final]
         return updates
@@ -184,4 +227,5 @@ def build_execute_nodes(
         "start_task": start_task,
         "run_agent": run_agent,
         "end_task": end_task,
+        "answer": answer,
     }

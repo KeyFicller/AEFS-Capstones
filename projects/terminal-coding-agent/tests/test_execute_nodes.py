@@ -234,6 +234,38 @@ def test_run_agent_installs_the_sequence_logger_only_when_recording(
         assert events[0] == ("task", "fix typo")
 
 
+def test_run_agent_gives_the_executor_the_whole_plan(tmp_path, monkeypatch) -> None:
+    """Step history is isolated, so step 2 must learn step 1's file from the plan itself."""
+    from terminal_coding_agent import executor as executor_module
+
+    captured: dict = {}
+
+    class FakeAgent:
+        def invoke(self, payload, config):
+            return {"messages": []}
+
+    def fake_create_agent(**kwargs):
+        captured["system_prompt"] = kwargs["system_prompt"]
+        return FakeAgent()
+
+    monkeypatch.setattr(executor_module, "create_agent", fake_create_agent)
+    nodes = build_execute_nodes(MagicMock(), tools=[], worktree=tmp_path)
+    state = _base_state(
+        [
+            ToDoItem(status=ToDoStatus.DONE, description="create file notes.md"),
+            ToDoItem(status=ToDoStatus.IN_PROGRESS, description="open the file"),
+        ],
+        current_task_index=1,
+    )
+
+    nodes["run_agent"](state, {})
+
+    prompt = captured["system_prompt"]
+    assert "create file notes.md" in prompt, "an earlier step must reach the prompt"
+    assert "Your step: open the file" in prompt
+    assert "report_blocked" in prompt, "the base executor prompt must be preserved"
+
+
 def test_run_agent_lets_a_graph_interrupt_through(tmp_path, monkeypatch) -> None:
     """The pause must reach the parent graph, not become an executor_error (design §4)."""
     from langgraph.errors import GraphBubbleUp
@@ -284,3 +316,41 @@ def test_run_agent_installs_ask_user_only_when_hitl_is_enabled(
 
     installed = [m for m in captured["middleware"] if isinstance(m, AskUserMiddleware)]
     assert bool(installed) is with_hitl
+
+
+def test_answer_node_carries_the_final_reply(tmp_path, monkeypatch) -> None:
+    """Summary relays the last message, so the answer node must end on its reply."""
+    from terminal_coding_agent import executor as executor_module
+
+    class FakeAgent:
+        def invoke(self, payload, config):
+            return {"messages": [AIMessage(content="the essay")]}
+
+    monkeypatch.setattr(executor_module, "create_agent", lambda **kwargs: FakeAgent())
+    nodes = build_execute_nodes(MagicMock(), tools=[], worktree=tmp_path)
+
+    out = nodes["answer"](_base_state([]), {})
+
+    assert out["messages"][0].content == "the essay"
+
+
+def test_answer_node_runs_on_the_conversation_history(tmp_path, monkeypatch) -> None:
+    """Multi-turn memory: a follow-up must see the earlier turns, not a bare step."""
+    from terminal_coding_agent import executor as executor_module
+
+    captured: dict = {}
+
+    class FakeAgent:
+        def invoke(self, payload, config):
+            captured["payload"] = payload
+            return {"messages": [AIMessage(content="ok")]}
+
+    monkeypatch.setattr(executor_module, "create_agent", lambda **kwargs: FakeAgent())
+    nodes = build_execute_nodes(MagicMock(), tools=[], worktree=tmp_path)
+    state = _base_state(
+        [], messages=[HumanMessage(content="first"), AIMessage(content="reply")]
+    )
+
+    nodes["answer"](state, {})
+
+    assert [m.content for m in captured["payload"]["messages"]] == ["first", "reply"]

@@ -36,11 +36,17 @@
 
 **Recover**：executor 可用 `report_blocked(reason)` 自报失败（`BlockedReportMiddleware.after_model` 拦截并 `jump_to="end"`，工具不执行）；父图 `recover` 节点复用 `make_plan` 重写剩余 todo，已 `DONE` 项保留在列表头部，触发恢复的失败项就地转为 `DEPRECATED`；上界 `MAX_REPLANS = 3` + 无进展检测（新剩余列表与旧相同 → `recover_no_progress`），超限 → `recover_exhausted`。回退由 planner 决策、executor 用现有 `git` / `edit_file` 执行，不引入快照机制。
 
+**每步上下文（2026-10-04）**：每个 task step 的 executor 拿到的输入是 `HumanMessage(该步描述)` 单条，**不带父图 messages 历史**（有界的上下文设计），故 `run_agent` 在 `create_agent` 时把 `SYSTEM_PROMPTS["executor"]` + `format_todos(全量 todo_list)`（当前步 `[+]`）+ `Your step: <当前步>` 拼成该步的 system prompt。**计划是步间唯一共享契约**：执行「打开文件」时靠计划里「创建文件 xxxx」那一步拿到文件名；依赖运行时才产生、计划里没有的字面量则看不到（有意，属另一档设计）。
+
 **Checkpoint**：父图用 `SqliteSaver` 编译，落 `{worktree}/.agent/checkpoints.sqlite`；`thread_id` 从 `configurable` 读、缺省 `"default"`。自定义类型 `ToDoItem` / `ToDoStatus` 经 `JsonPlusSerializer(allowed_msgpack_modules=...)` 显式放行。**恢复语义 = node 级、at-least-once**：已完成节点不重跑，崩溃时正在执行的节点整段重跑，工具副作用（`edit_file` / `git commit` / 模型调用）不去重，故不提供 exactly-once。`replan_count` 随 state 持久化，resume 不会绕过 `MAX_REPLANS`。**每题必须唯一 `thread_id`**，否则重试会变成续跑。
 
 **Hooks**：`PreToolUse`、`PostToolUse`、`SessionStart`、`SessionEnd`、`UserPromptSubmit`、`Notification`、`Stop`、`PreCompact`——可配置扩展点，运营方在此注入策略、遥测、护栏。
 
 **Stop 落点**：`summary` 节点的 `finally`（`summary.py`）。图内所有终止路径——正常完成 / 预算熔断 / `recover_exhausted` / `recover_no_progress` / 空计划 / 模型异常——都必然写 `{worktree}/.agent/trace.json`。**例外**：交互式 REPL 里被 Ctrl-C 取消的那一轮不走此路径（见「完整交付」）。
+
+**Summary 透传（2026-10-04；同日修订）**：`summary` 节点在 `mode=answer` 时把末条消息**原样转达**而非总结（该模式下一次调用就产出了交付内容）。判据是 `state["messages"][-1]` 为内容非空的 `AIMessage`——answer 节点失败或产出为空时降级为 summarize。**原 work 模式的透传判定已删除**（`SummaryDecision` / `_passthrough_candidate` / `step_final` 标记一并去掉）：路由之前靠它处理「把 xxx 给我看看」，有了 answer 模式后该场景归 answer；而它在 work 模式**每轮都要多跑一次结构化判定调用**（`run_agent` 给每步打标，候选恒存在），属净负担。
+
+**answer/work 分流（2026-10-04）**：CLI 注入 `configurable["enable_answer_mode"]=True`；planner 的结构化 schema 换成 `RoutingPlan`（在 `task`/`steps` 之外多一个必填 `mode: answer|work`），并在调用前注入 `SYSTEM_PROMPTS["planner"]`（此前该键是**死代码**——planner 从未带 system prompt）。`mode=answer` 时 `make_plan` 只写 `mode`（无 `todo_list`、无计划消息），父图路由到新节点 `answer`（一次 executor 调用、带工具，system prompt 追加 `SYSTEM_PROMPTS["answer"]` 要求内容进回复而非写文件），其末条 AI 消息写入 `messages`；`summary` 见 `mode=answer` 且末条是内容非空的 AI 消息即**原样转达**，不调用任何模型。`mode=work` 走原管线。**Harbor 平价**：未注入该 flag 时 schema / planner 调用 / 节点集 / 路由与改动前逐字一致（`Plan` 无 `mode`、不注入 planner 提示词、无 `answer` 节点）；`graph.png` 即该默认拓扑，故不含 `answer` 分支。
 
 **控制台输出落点**：`graph.py` 的 `_announce_todos` 包装 `make_plan` / `start_task` / `end_task` / `recover` 四个会重写 `todo_list` 的节点。打印必须在装配层，不能在 reducer 里：`replace_todos` 每次写入会跑两遍（条件边读一次、`apply_writes` 一次），装配层每个更新只看到一次，结构性免疫。计划版本从 `state["replan_count"]` 取，不放 state 之外的附属属性。容器内 stdout 由 Harbor `tee` 到 `<trial>/agent/langgraph-run.log`，是唯一能看到 agent 实时进度的通道。
 
@@ -147,19 +153,15 @@
 **完整交付（MVP 后补齐）**
 
 - CLI：`terminal-coding-agent`（无子命令，直接进多轮 REPL；`--worktree` / `--session`）
-  - 会话语义：单 `thread_id`，`messages` 跨轮累积；`turns/tokens/cost_rmb/todo_list/stop_reason` 等 12 个 per-turn 字段每轮经 `update_state` 重置（预算是 per task）。每轮输入一律作为一个 task 进图，不做 chat/task 路由
+  - 会话语义：单 `thread_id`，`messages` 跨轮累积；`turns/tokens/cost_rmb/todo_list/stop_reason` 等 12 个 per-turn 字段每轮经 `update_state` 重置（预算是 per task）。默认每轮输入作为一个 task 进图；CLI 注入 `enable_answer_mode` 时，planner 判为 `answer` 的请求（写/解释/翻译等「要一段内容作为回复」）走单次 `answer` 调用、由 `summary` 原样转达，不产生 todo、不过闸门（见「answer/work 分流」）
   - `--worktree` 缺省为**临时目录**，会话结束即删，`.agent/` 不会落进你的项目；要真让 agent 改某个仓库必须显式传 `--worktree <repo>`，续跑同 `--session` 也需连同传
-  - `todo_renderer` / `tool_renderer` 经 `configurable` 注入（`make_graph` → executor）；Harbor 不注入 → todo 走 `_print_todos` 进 `langgraph-run.log`，且不装 `ToolLogMiddleware`。交互式终端下一个 turn 内：todo 面板原地覆盖刷新，与 `working…` 指示器共用一块 `Live`；工具调用一行摘要（`edit_file` 附着色 diff），追加在面板上方，单块原地刷新
+  - `todo_renderer` / `tool_renderer` / `summary_renderer` 经 `configurable` 注入（`make_graph`）；Harbor 不注入 → todo 走 `_print_todos` 进 `langgraph-run.log`、不装 `ToolLogMiddleware`，summary 走一次性 `invoke()` + `render_reply` 面板。交互式终端下（`TodoPanel.redraws_in_place` 为真）CLI 才注入 `summary_renderer = 同一个 TodoPanel.stream_summary`：一个 turn 内 todo 面板原地覆盖刷新，与 `working…` 指示器共用一块 `Live`；summary 节点改用 `planner.stream(...)`，把累计全文喂进同一 `Live` 的绿色 `agent` 面板原地增量渲染，收尾后不再重复打印（`_render_task_result(show_reply=False)`）。**`stream_usage=True` 必须显式传**——`ChatDeepSeek` 自定义 base URL 下默认关 `include_usage`，漏了会把 summary 那次调用的 token / 成本记成 0（实测流式带 `usage_metadata`）；`ChatOllama` 无该开关，按 `hasattr` 判断后不传。工具调用一行摘要（`edit_file` 附着色 diff），追加在面板上方，单块原地刷新
   - 每轮页脚只显示 `turns` 与 `stop`。token / cost 明知不准故不展示（provider `usage_metadata` 常缺字段）；记账本身保留，硬闸门仍依赖它
   - **用户可见用法**：`approve? [y/n] ›` 处 `y` 放行 / `n` 否决（否决即本轮结束并写 trace）；闸门需要显式 `--worktree`，只有落盘 worktree 才能做到「进程被杀后重启、重建审批」。执行途中 agent 可能弹 `agent asks` 面板，在 `answer ›` 输入**编号**选一项，或**直接打一句自己的话**作答；`Ctrl-C` 表示「你自己决定」，agent 按自己判断跑完、本轮不终止（与闸门处 `Ctrl-C` 的含义相反）。提问发生在任何工具执行**之前**，批准后不会重跑上一步工具
-<<<<<<< HEAD
   - **计划闸门（HITL，2026-10-02）**：`configurable["enable_hitl"]` 为真时（只由 CLI 注入），父图插入 `await_plan_approval` 节点，用 LangGraph 动态 `interrupt()` 暂停并把计划摆给用户；`Command(resume="approve")` 继续，`"reject"` → 走 `summary` 写 trace。**两条入口**：`make_plan`（初计划）与 `recover`（replan，`_after_recover_gated`）；replan 那条必须显式接线——`recover` 把 `make_plan` 当**普通函数**调用（`recover.py`），不经图上的边，闸门不在其路径上。**拒绝标签区分两类失败**（评测报告要分类计数）：初计划被否 → `stop_reason="plan_rejected"`；replan 被否 → `"replan_rejected"`，判据是闸门处的 `replan_count`（`recover` 返回前已 +1，先于闸门落地）。**暂停态落 checkpoint**：显式 `--worktree` + 同 `--session` 可在进程被杀后重启重建审批（`pending_interrupts` 读 `get_state().tasks[].interrupts`）。恢复**不**经 `run_task_turn`（不 `update_state`，否则铲平暂停点）。未注入该 flag（Harbor）时节点集与路由与改动前逐字一致
     - **agent 提问（HITL，2026-10-02）**：`enable_hitl` 为真时 executor 多一个 `ask_user` 工具（`middleware/ask_user.py`），模型可在执行途中给人 1–4 个选项并接受自由文本作答。**中断落在 `after_model` 中间件里，即 ToolNode 之前**：LangGraph 的 resume 重放粒度是整个节点，若把 `interrupt()` 放进工具体内，ToolNode 会把同批调用再执行一遍（实测副作用工具执行 **2** 次）；停在 ToolNode 之前则无东西可重放（实测 **1** 次）。这与框架自带的 `HumanInTheLoopMiddleware` 落点一致。`ask_user` 是**信号工具**：`after_model` 就地答掉该调用、把答案注入为带匹配 `tool_call_id` 的 `ToolMessage`，工具 body 永不执行（同 `report_blocked` 先例）。**该调用必须保留在 `tool_calls` 里**——`create_agent` 的 model→边在 `len(tool_calls) == 0` 时直接结束循环，摘掉它会让 resume 后模型再不被调用、答案无人使用（实现期实测抓到的 bug）；保留则路由落到「有调用但无 pending」一支回到模型。契约：选项数不在 1–4 时不中断、回 error `ToolMessage`；一批多个只问第一个；未作答（Ctrl-C / EOF）→ `{"answer": None, "cancelled": True}`，本轮**不终止**，agent 自行判断继续。**不新增 state 字段**（答案走消息流）。未注入该 flag 时工具表与中间件表逐字一致（Harbor 平价）
   - **`executor.py` 必须放行 `GraphBubbleUp`**：`interrupt()` 无论落在工具体内还是中间件里，都会从 `agent.invoke` 抛出；`run_agent` 原有的 `except Exception` 会把它吞成 `stop_reason="executor_error:GraphInterrupt"`，父图**根本不暂停**（实测）。`except GraphBubbleUp: raise` 必须排在 `except Exception` 之前。这是两条 HITL 路径共用的前置条件
 - **Ctrl-C 取消（已知降级）**：只中断当前轮并回到提示符，会话继续。`KeyboardInterrupt` 在 REPL 层被捕获，`summary` 不执行 → 该轮不写 `trace.json` / `patch.diff`，checkpoint 停在中途，续跑即从该节点 at-least-once 重放。Harbor 跑批非交互，不受影响。rule `30-agent-architecture` 要求的「取消也要走 Stop hook」**未做**。**两个例外**：审批提示上的 Ctrl-C / EOF 被映射为 `reject`，因此走到 `summary` 并写 trace；提问提示上的 Ctrl-C / EOF 返回「未作答」哨兵，agent 自行判断继续、本轮不终止——是不降级的两处分支
-=======
-  - **Ctrl-C 取消（已知降级）**：只中断当前轮并回到提示符，会话继续。`KeyboardInterrupt` 在 REPL 层被捕获，`summary` 不执行 → 该轮不写 `trace.json` / `patch.diff`，checkpoint 停在中途，续跑即从该节点 at-least-once 重放。Harbor 跑批非交互，不受影响。rule `30-agent` 要求的「取消也要走 Stop hook」**未做**
->>>>>>> f19ae78 (DEMO - MultiModal Doc QA)
 - ≥5 次完整运行的 OTel trace 归档；100% 工具调用带 span
 - 报告：任务集的失败分类计数（harness 崩溃 / 预算耗尽 / recover 耗尽 / 模型放弃 / 真改错）；结尾写前三大失败模式与对应 hook 改动
 - PR 发布（正文含 plan 与 diff 摘要；**禁止直推 main**）

@@ -75,6 +75,42 @@ def test_session_config_injects_the_renderers(tmp_path: Path, monkeypatch) -> No
     assert isinstance(config["configurable"]["tool_renderer"], ui.ToolLog)
 
 
+def test_session_config_streams_the_summary_only_on_a_terminal(tmp_path: Path, monkeypatch) -> None:
+    """Harbor logs and pipes have no Live to redraw: they keep the one-shot reply panel."""
+    _capture(monkeypatch)
+
+    config = cli._session_config(worktree=tmp_path, session="s1")
+
+    assert "summary_renderer" not in config["configurable"]
+
+
+def test_session_config_shares_the_panel_between_todos_and_the_summary(tmp_path, monkeypatch) -> None:
+    """One instance for both, or two redrawers fight over the cursor."""
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setattr(ui, "CONSOLE", Console(file=io.StringIO(), width=80, force_terminal=True))
+
+    configurable = cli._session_config(worktree=tmp_path, session="s1")["configurable"]
+
+    assert configurable["summary_renderer"] == configurable["todo_renderer"].stream_summary
+
+
+def test_render_task_result_skips_a_streamed_reply_but_keeps_the_footer(monkeypatch) -> None:
+    stream = _capture(monkeypatch)
+
+    cli._render_task_result(
+        {
+            "messages": [SimpleNamespace(content="already on screen")],
+            "turns": 2,
+            "stop_reason": "completed",
+        },
+        show_reply=False,
+    )
+
+    out = stream.getvalue()
+    assert "already on screen" not in out
+    assert "turns" in out and "completed" in out
+
+
 def test_repl_opens_a_todo_region_around_each_turn(tmp_path: Path, monkeypatch) -> None:
     """The renderer must be live for the whole turn, or panels append instead of refresh."""
     _capture(monkeypatch)
@@ -398,3 +434,9 @@ def test_repl_keeps_rejecting_a_declined_plan_prompt(tmp_path, monkeypatch) -> N
     )
 
     assert graph.payloads[-1].resume == "reject"
+
+
+def test_session_config_enables_answer_mode(tmp_path: Path) -> None:
+    config = cli._session_config(worktree=tmp_path, session="s1")
+
+    assert config["configurable"]["enable_answer_mode"] is True

@@ -124,21 +124,22 @@ class BudgetSession:
 
     def __init__(self, state: dict[str, Any]) -> None:
         self.ledger = ledger_from_state(state)
-        self._message: Any | None = None
+        self._messages: list[Any] = []
 
     def __enter__(self) -> BudgetSession:
         return self
 
     def observe(self, message: Any) -> None:
-        """Queue a model message so exit can call apply_usage."""
-        self._message = message
+        """Queue a model message so exit can call apply_usage. One per model call."""
+        if message is not None:
+            self._messages.append(message)
 
     def updates(self) -> dict[str, Any]:
         return budget_updates(self.ledger)
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
-        if self._message is not None:
-            input_tokens, output_tokens, cache_read = usage_from_message(self._message)
+        for message in self._messages:
+            input_tokens, output_tokens, cache_read = usage_from_message(message)
             apply_usage(
                 self.ledger,
                 input_tokens=input_tokens,

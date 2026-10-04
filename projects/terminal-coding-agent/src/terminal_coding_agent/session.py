@@ -29,6 +29,7 @@ def reset_updates() -> dict[str, Any]:
         "replan_count": 0,
         "blocked_reason": None,
         "blocked_evidence": [],
+        "mode": None,
     }
 
 

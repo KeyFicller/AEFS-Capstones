@@ -41,13 +41,21 @@ logger = logging.getLogger(__name__)
 
 
 def _after_make_plan(state: CodingAgentState) -> str:
-    if state.get("stop_reason") or not state.get("todo_list"):
+    if state.get("stop_reason"):
+        return "summary"
+    if state.get("mode") == "answer":
+        return "answer"
+    if not state.get("todo_list"):
         return "summary"
     return "start_task"
 
 
 def _after_make_plan_gated(state: CodingAgentState) -> str:
-    if state.get("stop_reason") or not state.get("todo_list"):
+    if state.get("stop_reason"):
+        return "summary"
+    if state.get("mode") == "answer":
+        return "answer"
+    if not state.get("todo_list"):
         return "summary"
     return "await_plan_approval"
 
@@ -177,8 +185,10 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
     setup_tracing(worktree=worktree)
 
     # Plain function node (not a nested StateGraph) so replace_todos does not fire twice.
-    make_plan = build_planner(models)
+    enable_answer = bool(configurable.get("enable_answer_mode"))
+    make_plan = build_planner(models, enable_answer=enable_answer)
     tool_renderer = configurable.get("tool_renderer")
+    summary_renderer = configurable.get("summary_renderer")
     execute = build_execute_nodes(
         models,
         make_tools(worktree),
@@ -196,6 +206,7 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
         worktree=worktree,
         sequence_events=sequence_events,
         sequence_path=sequence_path,
+        summary_renderer=summary_renderer if callable(summary_renderer) else None,
     )
 
     coding_agent.add_node("make_plan", _announce_todos(make_plan))
@@ -205,13 +216,19 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
     coding_agent.add_node("recover", _announce_todos(recover))
     coding_agent.add_node("summary", summary)
 
+    plan_targets = {"start_task": "start_task", "summary": "summary"}
+    if enable_answer:
+        coding_agent.add_node("answer", execute["answer"])
+        coding_agent.add_edge("answer", "summary")
+        plan_targets["answer"] = "answer"
+
     coding_agent.add_edge(START, "make_plan")
     if configurable.get("enable_hitl"):
         coding_agent.add_node("await_plan_approval", _await_plan_approval)
         coding_agent.add_conditional_edges(
             "make_plan",
             _after_make_plan_gated,
-            {"await_plan_approval": "await_plan_approval", "summary": "summary"},
+            {**plan_targets, "await_plan_approval": "await_plan_approval"},
         )
         coding_agent.add_conditional_edges(
             "await_plan_approval",
@@ -219,11 +236,7 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
             {"start_task": "start_task", "summary": "summary"},
         )
     else:
-        coding_agent.add_conditional_edges(
-            "make_plan",
-            _after_make_plan,
-            {"start_task": "start_task", "summary": "summary"},
-        )
+        coding_agent.add_conditional_edges("make_plan", _after_make_plan, plan_targets)
     coding_agent.add_conditional_edges(
         "start_task",
         _after_start,
