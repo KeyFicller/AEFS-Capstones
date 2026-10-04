@@ -32,6 +32,7 @@ from terminal_coding_agent.middleware import (
 )
 from terminal_coding_agent.models import SYSTEM_PROMPTS, AgentModels
 from terminal_coding_agent.recover import project_evidence
+from terminal_coding_agent.shorthands import attached_images
 from terminal_coding_agent.state import CodingAgentState, ToDoStatus, format_todos
 from terminal_coding_agent.telemetry import resolve_model_name
 
@@ -128,9 +129,12 @@ def build_execute_nodes(
             system_prompt=system_prompt,
             middleware=middleware,
         )
+        images = attached_images(list(state["messages"]))
+        step = todo_list[task_index].description
+        step_content: Any = step if not images else [{"type": "text", "text": step}, *images]
         try:
             result = agent.invoke(
-                {"messages": [HumanMessage(content=todo_list[task_index].description)]},
+                {"messages": [HumanMessage(content=step_content)]},
                 config=config,
             )
         except GraphBubbleUp:

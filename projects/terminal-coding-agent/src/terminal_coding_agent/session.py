@@ -33,10 +33,10 @@ def reset_updates() -> dict[str, Any]:
     }
 
 
-def run_task_turn(*, graph: Any, config: dict, text: str) -> dict[str, Any]:
+def run_task_turn(*, graph: Any, config: dict, message: HumanMessage) -> dict[str, Any]:
     """Reset per-turn state, then run one full plan->act->observe->recover pass."""
     graph.update_state(config, reset_updates())
-    return graph.invoke({"messages": [HumanMessage(content=text)]}, config)
+    return graph.invoke({"messages": [message]}, config)
 
 
 def resume_turn(*, graph: Any, config: dict, decision: str | Mapping[str, Any]) -> dict[str, Any]:

@@ -354,3 +354,31 @@ def test_answer_node_runs_on_the_conversation_history(tmp_path, monkeypatch) -> 
     nodes["answer"](state, {})
 
     assert [m.content for m in captured["payload"]["messages"]] == ["first", "reply"]
+
+
+def test_run_agent_injects_attached_images_into_the_step_message(tmp_path, monkeypatch) -> None:
+    """Steps are isolated, so the turn's image must ride along on the step message."""
+    from terminal_coding_agent import executor as executor_module
+
+    captured: dict = {}
+    image = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
+
+    class FakeAgent:
+        def invoke(self, payload, config):
+            captured["payload"] = payload
+            return {"messages": [AIMessage(content="a cat")]}
+
+    monkeypatch.setattr(executor_module, "create_agent", lambda **kwargs: FakeAgent())
+    nodes = build_execute_nodes(MagicMock(), tools=[], worktree=tmp_path)
+    state = _base_state(
+        [ToDoItem(status=ToDoStatus.IN_PROGRESS, description="describe the image")],
+        current_task_index=0,
+        messages=[HumanMessage(content=[{"type": "text", "text": "look"}, image])],
+    )
+
+    nodes["run_agent"](state, {})
+
+    assert captured["payload"]["messages"][0].content == [
+        {"type": "text", "text": "describe the image"},
+        image,
+    ]

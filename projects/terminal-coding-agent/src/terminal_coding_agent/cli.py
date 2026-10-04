@@ -8,12 +8,24 @@ from contextlib import AbstractContextManager, ExitStack, nullcontext
 from pathlib import Path
 from typing import Any
 
-from terminal_coding_agent import ui
-from terminal_coding_agent.config import ENV_PATH, load_local_env
+from langchain_core.messages import HumanMessage
+
+from terminal_coding_agent import commands, shorthands, ui
+from terminal_coding_agent.config import ENV_PATH, SHELL_TIMEOUT_SECONDS, load_local_env
 from terminal_coding_agent.graph import make_graph
 from terminal_coding_agent.models import build_models
 from terminal_coding_agent.session import pending_interrupts, resume_turn, run_task_turn
 from terminal_coding_agent.telemetry import resolve_model_name
+from terminal_coding_agent.tools.shell import _run
+
+
+def _run_shell_in_worktree(command: str, worktree: Path) -> tuple[int | None, str]:
+    """Run one `!` command in the worktree. `None` exit code means it timed out."""
+    result = _run(command, worktree, SHELL_TIMEOUT_SECONDS)
+    if result is None:
+        return None, f"timed out after {SHELL_TIMEOUT_SECONDS}s"
+    exit_code, stdout, stderr = result
+    return exit_code, stdout + stderr
 
 
 def _session_config(*, worktree: Path, session: str) -> dict[str, Any]:
@@ -96,6 +108,8 @@ def _drive_approvals(
 def repl(*, graph: Any, config: dict[str, Any], model_name: str) -> None:
     """Read-eval-print loop. Every turn runs one full task; Ctrl-C at the prompt exits."""
     configurable = config["configurable"]
+    worktree = Path(configurable["worktree"])
+    session = ui.make_session(worktree=worktree, command_names=tuple(commands.COMMANDS))
     # Same instance the graph nodes call, so its in-place region covers their updates.
     todos: ui.TodoPanel = configurable["todo_renderer"]
     streamed_reply = callable(configurable.get("summary_renderer"))
@@ -119,14 +133,39 @@ def repl(*, graph: Any, config: dict[str, Any], model_name: str) -> None:
             ui.render_error(str(exc))
     while True:
         try:
-            text = ui.ask().strip()
+            text = ui.ask(session=session).strip()
         except (EOFError, KeyboardInterrupt):
             return
         if not text:
             continue
         try:
+            parsed = shorthands.parse(text)
+            if parsed.kind == "shell":
+                exit_code, output = _run_shell_in_worktree(parsed.text, worktree)
+                ui.render_shell(exit_code=exit_code, output=output)
+                continue
+            if parsed.kind == "command":
+                outcome = commands.dispatch(
+                    parsed.command, parsed.text, commands.CommandContext(worktree=worktree)
+                )
+                if outcome is None:
+                    ui.render_error(f"unknown command: /{parsed.command}")
+                    continue
+                if outcome.message is not None:
+                    ui.render_local(outcome.message)
+                if outcome.quit:
+                    return
+                if outcome.prompt is None:
+                    continue
+                message = HumanMessage(content=outcome.prompt)
+            else:
+                message = shorthands.build_task_message(parsed, worktree)
+        except shorthands.AttachmentError as exc:
+            ui.render_error(str(exc))
+            continue
+        try:
             with todos.region():
-                result = run_task_turn(graph=graph, config=config, text=text)
+                result = run_task_turn(graph=graph, config=config, message=message)
             if pending := result.get("__interrupt__"):
                 result = _drive_approvals(
                     graph=graph,
@@ -169,6 +208,8 @@ def main(argv: list[str] | None = None) -> int:
         else:
             worktree = Path(args.worktree).resolve()
         config = _session_config(worktree=worktree, session=session)
+        for command in commands.builtin_commands():
+            commands.register(command)
 
         repl(
             graph=make_graph(config),

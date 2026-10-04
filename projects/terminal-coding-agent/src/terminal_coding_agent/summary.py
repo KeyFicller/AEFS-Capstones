@@ -8,6 +8,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, message_chunk_to_message
 from langchain_core.runnables import RunnableConfig
 
+from terminal_coding_agent import shorthands
 from terminal_coding_agent.artifacts import publish_patch
 from terminal_coding_agent.budget import (
     BudgetSession,
@@ -25,9 +26,17 @@ logger = logging.getLogger(__name__)
 
 
 def _text_of(message: Any) -> str:
-    """Plain text of a chat message; the summary is text, so non-str content is ""."""
+    """Text of a chat message; multimodal content contributes only its text blocks."""
     content = getattr(message, "content", "")
-    return content if isinstance(content, str) else ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            part.get("text", "")
+            for part in content
+            if isinstance(part, dict) and part.get("type") == "text"
+        )
+    return ""
 
 
 def _answer_reply(messages: list) -> AIMessage | None:
@@ -80,7 +89,7 @@ def build_summary(
 
     def summary(state: CodingAgentState, config: RunnableConfig) -> dict[str, Any]:
         summary_message = HumanMessage(content="Summarize the task.")
-        summary_input = state["messages"] + [summary_message]
+        summary_input = shorthands.strip_images(list(state["messages"])) + [summary_message]
         model_name = resolve_model_name(models.planner)
         ledger = ledger_from_state(state)
         try:
@@ -92,7 +101,7 @@ def build_summary(
                 )
                 if reply is not None:
                     if summary_renderer is not None:
-                        summary_renderer(reply.content)
+                        summary_renderer(_text_of(reply))
                     domain = {"messages": [AIMessage(content=reply.content)]}
                 else:
                     with chat_span(model_name) as span:

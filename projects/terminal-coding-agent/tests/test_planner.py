@@ -113,3 +113,39 @@ def test_work_plan_keeps_the_plain_schema_when_the_flag_is_off() -> None:
     assert planner.schema is Plan, "Harbor parity: no mode field without the flag"
     assert out["mode"] == "work"
     assert [item.description for item in out["todo_list"]] == ["locate it", "edit it"]
+
+
+def test_the_planner_never_sees_image_blocks() -> None:
+    """Structured output needs no pixels; feeding them risks a provider 400."""
+    from langchain_core.messages import HumanMessage
+    from terminal_coding_agent.state import Plan
+
+    class _CapturingPlanner:
+        def __init__(self) -> None:
+            self.seen: list = []
+
+        def with_structured_output(self, schema, include_raw=False):  # noqa: ARG002
+            outer = self
+
+            class _Structured:
+                def invoke(self, messages, config=None):  # noqa: ARG002
+                    outer.seen = list(messages)
+                    raw = AIMessage(
+                        content="",
+                        usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+                    )
+                    return {"raw": raw, "parsed": Plan(task="t", steps=["s"]), "parsing_error": None}
+
+            return _Structured()
+
+    planner = _CapturingPlanner()
+    node = build_planner(AgentModels(planner=planner, executor=planner))
+    image = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
+
+    node(
+        {"messages": [HumanMessage(content=[{"type": "text", "text": "look"}, image])]},
+        RunnableConfig(),
+    )
+
+    assert all(isinstance(message.content, str) for message in planner.seen)
+    assert "look" in planner.seen[0].content

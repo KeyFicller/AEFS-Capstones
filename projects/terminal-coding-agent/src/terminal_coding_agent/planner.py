@@ -7,6 +7,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 
+from terminal_coding_agent import shorthands
 from terminal_coding_agent.budget import BudgetSession
 from terminal_coding_agent.models import SYSTEM_PROMPTS, AgentModels
 from terminal_coding_agent.state import (
@@ -39,7 +40,7 @@ def build_planner(
         with BudgetSession(state) as budget:
             try:
                 with chat_span(model_name) as span:
-                    messages = list(state["messages"])
+                    messages = shorthands.strip_images(list(state["messages"]))
                     if enable_answer:
                         messages = [SystemMessage(content=SYSTEM_PROMPTS["planner"]), *messages]
                     response = planner_model.invoke(messages, config=config)

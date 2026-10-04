@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from terminal_coding_agent import graph as graph_module
 from terminal_coding_agent.graph import make_graph
 from terminal_coding_agent.models import AgentModels
@@ -63,7 +63,7 @@ class _OrderGraph:
 def test_run_task_turn_resets_before_invoking() -> None:
     graph = _OrderGraph({"turns": 4})
 
-    run_task_turn(graph=graph, config={}, text="fix the typo")
+    run_task_turn(graph=graph, config={}, message=HumanMessage(content="fix the typo"))
 
     assert graph.log == ["reset", "invoke"]
 
@@ -71,7 +71,7 @@ def test_run_task_turn_resets_before_invoking() -> None:
 def test_run_task_turn_sends_the_text_as_a_human_message() -> None:
     graph = _OrderGraph()
 
-    run_task_turn(graph=graph, config={}, text="fix the typo")
+    run_task_turn(graph=graph, config={}, message=HumanMessage(content="fix the typo"))
 
     sent = graph.payloads[0]["messages"]
     assert len(sent) == 1
@@ -81,7 +81,7 @@ def test_run_task_turn_sends_the_text_as_a_human_message() -> None:
 def test_run_task_turn_returns_the_graph_state() -> None:
     graph = _OrderGraph({"turns": 7, "stop_reason": "max_turns"})
 
-    result = run_task_turn(graph=graph, config={}, text="t")
+    result = run_task_turn(graph=graph, config={}, message=HumanMessage(content="t"))
 
     assert result["stop_reason"] == "max_turns"
 

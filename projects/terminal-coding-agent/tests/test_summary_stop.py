@@ -200,3 +200,25 @@ def test_summary_summarizes_a_work_task(tmp_path: Path) -> None:
     updates = node(state, RunnableConfig())
 
     assert updates["messages"][-1].content == "SUMMARY"
+
+
+def test_text_of_extracts_text_blocks_from_multimodal_content() -> None:
+    from terminal_coding_agent.summary import _text_of
+
+    message = HumanMessage(
+        content=[
+            {"type": "text", "text": "what is this"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+        ]
+    )
+    assert _text_of(message) == "what is this"
+
+
+def test_answer_reply_survives_a_multimodal_user_message() -> None:
+    from terminal_coding_agent.summary import _answer_reply
+
+    messages = [
+        HumanMessage(content=[{"type": "text", "text": "hi"}]),
+        AIMessage(content="the answer"),
+    ]
+    assert _answer_reply(messages).content == "the answer"

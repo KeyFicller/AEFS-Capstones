@@ -515,3 +515,68 @@ def test_ask_question_escapes_a_bracketed_option(monkeypatch) -> None:
 
     assert out == {"answer": "use [bold]a[/bold]", "cancelled": False}
     assert "which[?]" in stream.getvalue()
+
+
+def test_render_shell_shows_output_and_exit_code(monkeypatch) -> None:
+    stream = _capture(monkeypatch)
+    ui.render_shell(exit_code=0, output="hello\n")
+    assert "hello" in stream.getvalue()
+    assert "exit 0" in stream.getvalue()
+
+
+def test_render_shell_survives_rich_markup_in_output(monkeypatch) -> None:
+    """A command printing `[red]x[/red]` is markup to rich: it must not raise."""
+    stream = _capture(monkeypatch)
+    ui.render_shell(exit_code=0, output="[red]boom[/red]")
+    assert "[red]boom[/red]" in stream.getvalue()
+
+
+def test_render_local_prints_plain_text(monkeypatch) -> None:
+    stream = _capture(monkeypatch)
+    ui.render_local("/help  list the registered commands")
+    assert "/help" in stream.getvalue()
+
+
+def test_render_reply_handles_multimodal_content(monkeypatch) -> None:
+    stream = _capture(monkeypatch)
+    ui.render_reply(
+        [{"type": "text", "text": "# title"}, {"type": "image_url", "image_url": {"url": "x"}}]
+    )
+    assert "title" in stream.getvalue()
+
+
+def test_ask_falls_back_to_input_when_ptk_is_unavailable(monkeypatch) -> None:
+    monkeypatch.setattr(ui, "_HAVE_PTK", False)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "hello")
+    assert ui.ask() == "hello"
+
+
+def test_ptk_completer_completes_a_slash_command(tmp_path) -> None:
+    """The wiring (completer -> candidate list) without a real terminal."""
+    pytest.importorskip("prompt_toolkit")
+    from prompt_toolkit.completion import CompleteEvent
+    from prompt_toolkit.document import Document
+
+    completer = ui._ShorthandCompleter(tmp_path, ("help", "quit"))
+    document = Document("/he", 3)
+    completions = [
+        completion.text for completion in completer.get_completions(document, CompleteEvent())
+    ]
+    assert completions == ["/help"]
+
+
+def test_a_prompt_session_returns_the_typed_line(tmp_path) -> None:
+    """ptk's own pipe input: proves the session type reads a line and runs the completer."""
+    pytest.importorskip("prompt_toolkit")
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    with create_pipe_input() as pipe:
+        session = PromptSession(
+            input=pipe,
+            output=DummyOutput(),
+            completer=ui._ShorthandCompleter(tmp_path, ("help",)),
+        )
+        pipe.send_text("/he\t\r")
+        assert session.prompt("you > ") == "/he"

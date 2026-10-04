@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from rich.console import Console
-from terminal_coding_agent import cli, ui
+from terminal_coding_agent import cli, commands, ui
 
 
 def _capture(monkeypatch) -> io.StringIO:
@@ -19,7 +19,7 @@ def _capture(monkeypatch) -> io.StringIO:
 def _asker(lines: list[str]):
     pending = iter(lines)
 
-    def ask() -> str:
+    def ask(*args, **kwargs) -> str:
         try:
             return next(pending)
         except StopIteration as exc:  # a real prompt raises EOFError on Ctrl-D
@@ -440,3 +440,100 @@ def test_session_config_enables_answer_mode(tmp_path: Path) -> None:
     config = cli._session_config(worktree=tmp_path, session="s1")
 
     assert config["configurable"]["enable_answer_mode"] is True
+
+
+def test_run_shell_in_worktree_captures_output(tmp_path) -> None:
+    exit_code, output = cli._run_shell_in_worktree("echo hi", tmp_path)
+    assert exit_code == 0
+    assert "hi" in output
+
+
+def test_run_shell_in_worktree_reports_a_nonzero_exit(tmp_path) -> None:
+    exit_code, output = cli._run_shell_in_worktree("exit 3", tmp_path)
+    assert exit_code == 3
+
+
+class _CapturingGraph(_FakeGraph):
+    def __init__(self) -> None:
+        super().__init__()
+        self.payloads: list[dict] = []
+
+    def invoke(self, payload, config):
+        self.payloads.append(payload)
+        return super().invoke(payload, config)
+
+
+def _drive(monkeypatch, tmp_path, lines, extra_commands=()):
+    _capture(monkeypatch)
+    monkeypatch.setattr(commands, "COMMANDS", {})
+    for command in (*commands.builtin_commands(), *extra_commands):
+        commands.register(command)
+    monkeypatch.setattr(ui, "ask", _asker(lines))
+    graph = _CapturingGraph()
+    cli.repl(
+        graph=graph,
+        config=cli._session_config(worktree=tmp_path, session="s1"),
+        model_name="m",
+    )
+    return graph
+
+
+def test_a_bang_line_never_reaches_the_graph(tmp_path, monkeypatch) -> None:
+    graph = _drive(monkeypatch, tmp_path, ["!echo hi"])
+    assert graph.payloads == []
+
+
+def test_an_unknown_slash_command_never_reaches_the_graph(tmp_path, monkeypatch) -> None:
+    graph = _drive(monkeypatch, tmp_path, ["/nope"])
+    assert graph.payloads == []
+
+
+def test_slash_quit_ends_the_session_without_calling_the_graph(tmp_path, monkeypatch) -> None:
+    graph = _drive(monkeypatch, tmp_path, ["/quit"])
+    assert graph.payloads == []
+
+
+def test_a_task_goes_to_the_graph_with_its_attachment(tmp_path, monkeypatch) -> None:
+    (tmp_path / "NOTES.md").write_text("hello", encoding="utf-8")
+    graph = _drive(monkeypatch, tmp_path, ["summarize @NOTES.md"])
+    assert "[NOTES.md]\nhello" in graph.payloads[0]["messages"][0].content
+
+
+def test_a_prompt_command_goes_to_the_graph_as_a_task(tmp_path, monkeypatch) -> None:
+    class _Review(commands.PromptCommand):
+        name = "review"
+        summary = "review a file"
+
+        def run(self, ctx, args):
+            return commands.CommandOutcome(prompt=f"Review {args}.")
+
+    graph = _drive(monkeypatch, tmp_path, ["/review src/a.py"], extra_commands=[_Review()])
+    assert graph.payloads[0]["messages"][0].content == "Review src/a.py."
+
+
+def test_an_attachment_error_keeps_the_session_alive(tmp_path, monkeypatch) -> None:
+    graph = _drive(monkeypatch, tmp_path, ["look at @nope.txt", "!echo still here"])
+    assert graph.payloads == []
+
+
+def test_scripted_session_mixes_shorthands_and_tasks(tmp_path, monkeypatch) -> None:
+    """`!` and `/help` never call the graph; a task does; `/quit` ends the loop."""
+    (tmp_path / "NOTES.md").write_text("hello", encoding="utf-8")
+    rendered: list[str] = []
+    _capture(monkeypatch)
+    monkeypatch.setattr(commands, "COMMANDS", {})
+    for command in commands.builtin_commands():
+        commands.register(command)
+    monkeypatch.setattr(ui, "render_local", rendered.append)
+    monkeypatch.setattr(ui, "ask", _asker(["!echo hi", "/help", "summarize @NOTES.md", "/quit"]))
+    graph = _CapturingGraph()
+
+    cli.repl(
+        graph=graph,
+        config=cli._session_config(worktree=tmp_path, session="s1"),
+        model_name="m",
+    )
+
+    assert len(graph.payloads) == 1
+    assert "[NOTES.md]\nhello" in graph.payloads[0]["messages"][0].content
+    assert any("/help" in line for line in rendered)
