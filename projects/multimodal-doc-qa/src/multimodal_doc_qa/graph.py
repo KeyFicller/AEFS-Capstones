@@ -60,6 +60,7 @@ class GraphDeps:
     render_dir: Path
     documents: dict[str, Document] | None = None
     budget: Budget | None = None
+    rerank: Any = None
 
 
 def build_graph(deps: GraphDeps, settings: Settings):
@@ -82,7 +83,11 @@ def build_graph(deps: GraphDeps, settings: Settings):
             return {}
         pool = list(dict.fromkeys(state["page_ids"]))
         for subquery in state["subqueries"]:
-            for doc in deps.retriever.invoke(subquery):
+            docs = list(deps.retriever.invoke(subquery))
+            if deps.rerank is not None and len(docs) > 1 and not budget.exhausted():
+                budget.spend_call()
+                docs = deps.rerank(subquery, docs)
+            for doc in docs:
                 # The retriever is injected; one that omits page_id must not abort the ask.
                 page = doc.metadata.get("page_id")
                 if page is not None and page not in pool:
@@ -184,92 +189,15 @@ def build_graph(deps: GraphDeps, settings: Settings):
 
 
 if __name__ == "__main__":
-    import time
-
-    from PIL import Image
-
-    from multimodal_doc_qa.agent.nodes import Followups, Subqueries, Unsupported
-    from multimodal_doc_qa.embed.encoder import MultiVectorEncoder
-    from multimodal_doc_qa.index.maxsim import MultiVectorIndex
-    from multimodal_doc_qa.retrievers.multivector import MultiVectorRetriever
-    from multimodal_doc_qa.schemas import page_id
-    from multimodal_doc_qa.synth.answer import AnswerSynthesizer, build_chat_model
-
-    _DEMO_QUESTION = "In doc000 page 0, what is stated about EMEA?"
-    _DEMO_EXPECTED = "EMEA margin was 16.8%"
-
-    def _write_graph_png(settings: Settings, render_dir: Path, path: Path) -> None:
-        """Write the compiled graph's diagram before any weights are loaded."""
-        structure = GraphDeps(
-            retriever=None,
-            planner_model=None,
-            assessor_model=None,
-            verifier_model=None,
-            synth=None,
-            render_dir=render_dir,
-        )
-        compiled = build_graph(structure, settings)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(compiled.get_graph(xray=True).draw_mermaid_png())
-
-    def _build_index(
-        model_name: str, settings: Settings, render_dir: Path
-    ) -> tuple[MultiVectorEncoder, MultiVectorIndex]:
-        """Encode every rendered page. Demo only; production persists the index in ``ingest``."""
-        pages = sorted(render_dir.glob("doc*/p*.png"))
-        started = time.perf_counter()
-        encoder = MultiVectorEncoder(model_name, settings)
-        print(
-            f"encoder   {type(encoder.model).__name__} "
-            f"({model_name}, {settings.device}/{settings.dtype}) "
-            f"in {time.perf_counter() - started:.1f}s"
-        )
-
-        started = time.perf_counter()
-        index = MultiVectorIndex(device="cpu")
-        for page in pages:
-            vectors = encoder.encode_images([Image.open(page).convert("RGB")])[0]
-            index.add(page_id(page.parent.name, int(page.stem[1:])), vectors)
-        print(
-            f"index     {len(pages)} pages, {index.nbytes() / 1e6:.1f} MB "
-            f"in {time.perf_counter() - started:.1f}s"
-        )
-        return encoder, index
-
     settings = Settings()
-    render_dir = Path(__file__).resolve().parent / "corpus" / "_artifacts"
     png_path = Path(__file__).resolve().parents[2] / "graph.png"
-
-    _write_graph_png(settings, render_dir, png_path)
-    print(f"graph     {png_path}")
-    print()
-
-    encoder, index = _build_index(settings.embedder_model, settings, render_dir)
-    total = len(list(render_dir.glob("doc*/p*.png")))
-
-    chat = build_chat_model(settings)
-    deps = GraphDeps(
-        retriever=MultiVectorRetriever(encoder=encoder, index=index, k=settings.top_k),
-        planner_model=chat.with_structured_output(Subqueries),
-        assessor_model=chat.with_structured_output(Followups),
-        verifier_model=chat.with_structured_output(Unsupported),
-        synth=AnswerSynthesizer(settings),
-        render_dir=render_dir,
+    structure = GraphDeps(
+        retriever=None,
+        planner_model=None,
+        assessor_model=None,
+        verifier_model=None,
+        synth=None,
+        render_dir=png_path.parent,
     )
-
-    print()
-    started = time.perf_counter()
-    out = build_graph(deps, settings).invoke(initial_state(_DEMO_QUESTION))
-    elapsed = time.perf_counter() - started
-
-    answer = Answer.model_validate(out["answer"]) if out["answer"] else None
-    print(f"question  {_DEMO_QUESTION}")
-    print(f"expected  {_DEMO_EXPECTED}")
-    print(f"answer    {answer.text if answer else '<none>'}")
-    for citation in answer.citations if answer else []:
-        print(f"cite      {page_id(citation.doc_id, citation.page)}  bbox={citation.bbox}")
-    print(f"pages     {len(out['page_ids'])}/{total} retrieved  {out['page_ids']}")
-    print(f"rounds    {out['rounds']} (max {settings.max_rounds})")
-    print(f"unsupported  {out['unsupported']}")
-    print(f"stop_reason  {out['stop_reason'] or '<none: finished normally>'}")
-    print(f"elapsed   {elapsed:.1f}s")
+    png_path.write_bytes(build_graph(structure, settings).get_graph(xray=True).draw_mermaid_png())
+    print(f"graph     {png_path}")

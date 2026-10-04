@@ -18,6 +18,7 @@ from multimodal_doc_qa.config import (
     artifact_paths,
     documents_path,
     load_local_env,
+    summary_paths,
 )
 from multimodal_doc_qa.graph import GraphDeps, build_graph, initial_state
 from multimodal_doc_qa.schemas import (
@@ -36,9 +37,13 @@ from multimodal_doc_qa.ui import console as ui
 app = typer.Typer(help="Agentic RAG over document images", add_completion=False)
 
 _MODE_HELP = (
-    "vision: encode page images and retrieve by late interaction. "
-    "ocr: extract page text, embed it, and retrieve by similarity."
+    "vision: late-interaction over page images. "
+    "pool: one vector per page, the mean of those patches. "
+    "ocr: page text embedded with the text encoder. "
+    "summary: a VLM description of each page, embedded as text. "
+    "Set MDQ_MODE to change the default."
 )
+_MODES = ("vision", "ocr", "pool", "summary")
 
 
 @dataclass(frozen=True)
@@ -115,12 +120,27 @@ def _render_turn(
     settings: Settings,
     artifacts: Path,
     page_texts: dict[tuple[str, int], str],
+    *,
+    question: str,
+    mode: str,
 ) -> None:
+    from multimodal_doc_qa.ui.viewer import append_turn
+
     if answer is None:
         ui.render_error(f"no answer (stop_reason={out['stop_reason']})")
     else:
         ui.render_reply(answer.text)
         ui.render_sources(cited_materials(answer.citations, artifacts, page_texts))
+    append_turn(
+        artifacts / "turns.jsonl",
+        mode=mode,
+        question=question,
+        answer=answer,
+        rounds=out["rounds"],
+        calls=budget.calls,
+        tokens=budget.tokens,
+        stop_reason=out["stop_reason"],
+    )
     ui.render_budget(
         rounds=out["rounds"],
         max_rounds=settings.max_rounds,
@@ -182,10 +202,45 @@ def ingest(
     ocr_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(ocr_docs, ocr_path)
     save_documents(documents, documents_path(artifacts))
+    if settings.mode == "summary" or settings.summaries:
+        _write_summaries(settings, artifacts, render_dir, documents, ocr_embedder.encode)
 
     ui.echo(f"vision    {vision_path}  ({vision.nbytes() / 1e6:.1f} MB)")
     ui.echo(f"ocr       {ocr_path}")
     ui.echo(f"[green]ingested[/] {len(sources)} docs -> {artifacts}")
+
+
+def _write_summaries(settings, artifacts, render_dir, documents, encode) -> None:
+    """Bind one description to each page. The cache means a repeated ingest does not call the VLM again."""
+    from multimodal_doc_qa.summarize import index_summaries, load_cache
+
+    cache_path, summary_path = summary_paths(artifacts)
+    cache = load_cache(cache_path)
+    payload = index_summaries(
+        documents, render_dir, encode, cache, cache_path, _page_describer(settings)
+    )
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    import torch
+
+    torch.save(payload, summary_path)
+    ui.echo(f"summary   {summary_path}  ({len(cache)} cached pages)")
+
+
+def _page_describer(settings: Settings):
+    """A ``png -> text`` callable. The chat model is loaded on the first uncached page."""
+    model = None
+
+    def describe(png: Path) -> str:
+        nonlocal model
+        if model is None:
+            from multimodal_doc_qa.synth.answer import build_chat_model
+
+            model = build_chat_model(settings)
+        from multimodal_doc_qa.summarize import describe_page
+
+        return describe_page(model, png)
+
+    return describe
 
 
 def _checked_sources(corpus: Path) -> list[Path]:
@@ -313,17 +368,31 @@ class IndexNotFoundError(Exception):
     """The selected retrieval path has no index on disk."""
 
 
-def _load_retriever(settings: Settings, mode: str):
-    """Build the vision or OCR retriever. Raises ``BadParameter`` for any other mode."""
+def _resolve_mode(mode: str | None, settings: Settings) -> str:
+    """CLI ``--mode`` wins. Otherwise ``MDQ_MODE`` (default ``vision``)."""
+    chosen = mode or settings.mode
+    if chosen not in _MODES:
+        raise typer.BadParameter(f"mode must be one of {', '.join(_MODES)}, got {chosen!r}")
+    return chosen
+
+
+def _load_retriever(settings: Settings, mode: str, *, encoder: object = None, text_embedder: object = None):
+    """Build the retriever for ``mode``. Pass an encoder to share it across arms."""
     _, vision_path, ocr_path = artifact_paths(settings.artifacts_dir)
     if mode == "vision":
-        return _load_vision(settings, vision_path)
+        return _load_vision(settings, vision_path, encoder)
+    if mode == "pool":
+        return _load_pool(settings, vision_path, encoder)
     if mode == "ocr":
-        return _load_ocr(settings, ocr_path)
-    raise typer.BadParameter(f"mode must be vision or ocr, got {mode!r}")
+        return _load_text_index(settings, ocr_path, "OCR", text_embedder)
+    if mode == "summary":
+        return _load_text_index(
+            settings, summary_paths(settings.artifacts_dir)[1], "summary", text_embedder
+        )
+    raise typer.BadParameter(f"mode must be one of {', '.join(_MODES)}, got {mode!r}")
 
 
-def _load_vision(settings: Settings, vision_path: Path):
+def _load_vision(settings: Settings, vision_path: Path, encoder: object = None):
     from multimodal_doc_qa.embed.encoder import MultiVectorEncoder
     from multimodal_doc_qa.index.maxsim import MultiVectorIndex
     from multimodal_doc_qa.retrievers.multivector import MultiVectorRetriever
@@ -331,21 +400,41 @@ def _load_vision(settings: Settings, vision_path: Path):
     if not vision_path.is_file():
         raise IndexNotFoundError(f"no vision index at {vision_path} -- run `doc-qa ingest` first")
     return MultiVectorRetriever(
-        encoder=MultiVectorEncoder(settings.embedder_model, settings),
+        encoder=encoder or MultiVectorEncoder(settings.embedder_model, settings),
         index=MultiVectorIndex.load(vision_path),
         k=settings.top_k,
         min_score_ratio=settings.min_score_ratio,
     )
 
 
-def _load_ocr(settings: Settings, ocr_path: Path):
+def _load_pool(settings: Settings, vision_path: Path, encoder: object = None):
+    from multimodal_doc_qa.embed.encoder import MultiVectorEncoder
+    from multimodal_doc_qa.index.maxsim import MultiVectorIndex
+    from multimodal_doc_qa.retrievers.pool import PooledRetriever, mean_vector
+
+    if not vision_path.is_file():
+        raise IndexNotFoundError(f"no vision index at {vision_path} -- run `doc-qa ingest` first")
+    index = MultiVectorIndex.load(vision_path)
+    return PooledRetriever(
+        encoder=encoder or MultiVectorEncoder(settings.embedder_model, settings),
+        pages={page_id: mean_vector(matrix) for page_id, matrix in index.matrices().items()},
+        k=settings.top_k,
+        min_score_ratio=settings.min_score_ratio,
+    )
+
+
+def _load_text_index(settings: Settings, path: Path, label: str, embedder: object = None):
     import torch
 
     from multimodal_doc_qa.retrievers.text import MultiDocTextRetriever, OcrEmbedder, TextRetriever
 
-    if not ocr_path.is_file():
-        raise IndexNotFoundError(f"no OCR index at {ocr_path} -- run `doc-qa ingest` first")
-    embedder = OcrEmbedder(settings.ocr_embedder_model, settings.device)
+    if not path.is_file():
+        hint = " -- run `doc-qa ingest` first"
+        if label == "summary":
+            hint = " -- re-run ingest with MDQ_SUMMARIES=1 or MDQ_MODE=summary"
+        raise IndexNotFoundError(f"no {label} index at {path}{hint}")
+    if embedder is None:
+        embedder = OcrEmbedder(settings.ocr_embedder_model, settings.device)
     return MultiDocTextRetriever(
         retrievers=[
             TextRetriever(
@@ -355,7 +444,7 @@ def _load_ocr(settings: Settings, ocr_path: Path):
                 chunks=payload["chunks"],
                 k=settings.top_k,
             )
-            for doc_id, payload in torch.load(ocr_path, weights_only=True).items()
+            for doc_id, payload in torch.load(path, weights_only=True).items()
         ],
         k=settings.top_k,
         min_score_ratio=settings.min_score_ratio,
@@ -378,25 +467,38 @@ def _load_deps(settings: Settings, retriever: object, budget: Budget) -> GraphDe
 
     chat = build_chat_model(settings)
     catalog = documents_path(settings.artifacts_dir)
+    documents = load_documents(catalog) if catalog.is_file() else None
+    render_dir = artifact_paths(settings.artifacts_dir)[0]
+    rerank = None
+    if settings.rerank:
+        from multimodal_doc_qa.retrievers.rerank import PageRank, rerank_pages
+
+        ranker = chat.with_structured_output(PageRank)
+
+        def rerank(query, docs, _ranker=ranker, _render=render_dir, _docs=documents):
+            return rerank_pages(_ranker, query, docs, _render, _docs)
+
     return GraphDeps(
         retriever=retriever,
         planner_model=chat.with_structured_output(Subqueries),
         assessor_model=chat.with_structured_output(Followups),
         verifier_model=chat.with_structured_output(Unsupported),
         synth=AnswerSynthesizer(settings),
-        render_dir=artifact_paths(settings.artifacts_dir)[0],
-        documents=load_documents(catalog) if catalog.is_file() else None,
+        render_dir=render_dir,
+        documents=documents,
         budget=budget,
+        rerank=rerank,
     )
 
 
 @app.command()
 def ask(
     question: str = typer.Argument(..., help="Question to answer from the ingested corpus"),
-    mode: str = typer.Option("vision", "--mode", help=_MODE_HELP),
+    mode: str | None = typer.Option(None, "--mode", help=_MODE_HELP),
 ) -> None:
     """Answer one question through the agentic graph."""
     settings = Settings()
+    mode = _resolve_mode(mode, settings)
 
     retriever = _open_retriever(settings, mode)
     budget = Budget.from_settings(settings)
@@ -405,17 +507,24 @@ def ask(
     with ui.working():
         out = build_graph(deps, settings).invoke(initial_state(question))
     answer = Answer.model_validate(out["answer"]) if out["answer"] else None
-    _render_turn(answer, out, budget, settings, settings.artifacts_dir, _ocr_page_texts(settings))
+    _render_turn(
+        answer,
+        out,
+        budget,
+        settings,
+        settings.artifacts_dir,
+        _ocr_page_texts(settings),
+        question=question,
+        mode=mode,
+    )
     if answer is None:
         raise typer.Exit(code=1)
 
 
 @app.command("eval")
 def eval_questions(
-    questions: Path | None = typer.Option(
-        None, "--questions", help="Holdout JSON (default: the corpus artifacts)"
-    ),
-    mode: str = typer.Option("vision", "--mode", help=_MODE_HELP),
+    questions: Path = typer.Option(..., "--questions", help="Questions JSON: gold answer and evidence"),
+    mode: str | None = typer.Option(None, "--mode", help=_MODE_HELP),
     out: Path | None = typer.Option(None, "--out", help="results.jsonl to append to"),
     iou_threshold: float = typer.Option(
         0.5, "--iou-threshold", help="IoU above which a citation matches a gold box"
@@ -431,6 +540,7 @@ def eval_questions(
     from multimodal_doc_qa.eval.run import RESULTS_PATH, run_eval
 
     settings = Settings()
+    mode = _resolve_mode(mode, settings)
     items = _load_questions(questions)
     retriever = _open_retriever(settings, mode)
     written = out or RESULTS_PATH
@@ -448,18 +558,15 @@ def eval_questions(
     _print_eval(summary, settings, mode, iou_threshold, written)
 
 
-def _load_questions(questions: Path | None):
+def _load_questions(questions: Path):
     import json
 
     from multimodal_doc_qa.schemas import Question
 
-    source = questions or (
-        Path(__file__).resolve().parent / "corpus" / "_artifacts" / "questions.json"
-    )
-    if not source.is_file():
-        ui.render_error(f"no questions at {source}")
+    if not questions.is_file():
+        ui.render_error(f"no questions at {questions}")
         raise typer.Exit(code=1)
-    return [Question.model_validate(item) for item in json.loads(source.read_text())]
+    return [Question.model_validate(item) for item in json.loads(questions.read_text())]
 
 
 def _eval_one(question, settings: Settings, retriever):
@@ -498,36 +605,66 @@ def _print_eval(
     ui.echo(f"written  {written}")
 
 
-def _embedder_name(settings: Settings, mode: str) -> str:
-    return settings.embedder_model if mode == "vision" else settings.ocr_embedder_model
+def _mode_models(settings: Settings, mode: str) -> str:
+    return ui.mode_models(
+        mode,
+        vision=settings.embedder_model,
+        ocr=settings.ocr_embedder_model,
+        describer=settings.answerer_model,
+    )
+
+
+def _preload_retrievers(settings: Settings) -> tuple[dict[str, object], dict[str, str]]:
+    """Load each encoder once, then every arm whose index is on disk.
+
+    Shift-Tab only swaps the already-built retriever. A missing index is recorded
+    and skipped; the models stay loaded.
+    """
+    from multimodal_doc_qa.embed.encoder import MultiVectorEncoder
+    from multimodal_doc_qa.retrievers.text import OcrEmbedder
+
+    encoder = MultiVectorEncoder(settings.embedder_model, settings)
+    text_embedder = OcrEmbedder(settings.ocr_embedder_model, settings.device)
+    loaded: dict[str, object] = {}
+    missing: dict[str, str] = {}
+    for name in _MODES:
+        try:
+            loaded[name] = _load_retriever(
+                settings, name, encoder=encoder, text_embedder=text_embedder
+            )
+        except IndexNotFoundError as exc:
+            missing[name] = str(exc)
+    return loaded, missing
 
 
 def _repl(mode: str) -> None:
-    """Load both retrieval paths, then answer questions until the user stops.
+    """Load every retrieval arm up front, then answer questions until the user stops.
 
     A blank line is ignored. ``:q`` exits. Ctrl-C during a turn cancels that turn only.
-    Shift-Tab switches the retrieval path; the status bar shows the one in force.
+    Shift-Tab switches the retrieval path; the status bar names that path's models.
     Each question compiles its own graph. Earlier turns are messages, not a joined string.
     """
     settings = Settings()
     artifacts = settings.artifacts_dir
-    loaded = {path: _open_retriever(settings, path) for path in (mode, ui.other_mode(mode))}
+    loaded, missing = _preload_retrievers(settings)
+    if mode not in loaded:
+        ui.render_error(missing[mode])
+        raise typer.Exit(code=1)
     page_texts = _ocr_page_texts(settings)
-    ui.banner(
-        artifacts=str(artifacts),
-        mode=mode,
-        embedder=_embedder_name(settings, mode),
-        answerer=settings.answerer_model,
-    )
+    ui.banner(artifacts=str(artifacts), mode=mode, models=_mode_models(settings, mode))
 
     active = {"mode": mode}
 
     def switch() -> None:
-        active["mode"] = ui.other_mode(active["mode"])
+        nxt = ui.other_mode(active["mode"])
+        if nxt not in loaded:
+            ui.render_error(missing[nxt])
+            return
+        active["mode"] = nxt
 
     prompt = ui.Prompt(
         on_switch=switch,
-        status=lambda: ui.status_bar(active["mode"], _embedder_name(settings, active["mode"])),
+        status=lambda: ui.status_bar(active["mode"], _mode_models(settings, active["mode"])),
     )
     history: list[BaseMessage] = []
     while True:
@@ -536,7 +673,9 @@ def _repl(mode: str) -> None:
             return
         if not question:
             continue
-        _run_turn(settings, loaded[active["mode"]], question, history, artifacts, page_texts)
+        _run_turn(
+            settings, loaded[active["mode"]], question, history, artifacts, page_texts, active["mode"]
+        )
 
 
 def _read_question(prompt: ui.Prompt) -> str | None:
@@ -551,7 +690,7 @@ def _read_question(prompt: ui.Prompt) -> str | None:
 
 
 def _run_turn(
-    settings, retriever, question: str, history: list[BaseMessage], artifacts, page_texts
+    settings, retriever, question: str, history: list[BaseMessage], artifacts, page_texts, mode: str
 ) -> None:
     """One ask. A failure is printed and the session stays up."""
     try:
@@ -567,32 +706,34 @@ def _run_turn(
         return
 
     answer = Answer.model_validate(out["answer"]) if out["answer"] else None
-    _render_turn(answer, out, budget, settings, artifacts, page_texts)
+    _render_turn(
+        answer, out, budget, settings, artifacts, page_texts, question=question, mode=mode
+    )
     if answer is not None:
         history.extend([HumanMessage(content=question), AIMessage(content=answer.text)])
 
 
 @app.command()
 def chat(
-    mode: str = typer.Option("vision", "--mode", help=_MODE_HELP),
+    mode: str | None = typer.Option(None, "--mode", help=_MODE_HELP),
 ) -> None:
     """Load the artifacts once and answer questions until :q, Ctrl-C, or Ctrl-D."""
-    _repl(mode)
+    settings = Settings()
+    _repl(_resolve_mode(mode, settings))
 
 
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
-    mode: str = typer.Option("vision", "--mode", help=_MODE_HELP),
+    mode: str | None = typer.Option(None, "--mode", help=_MODE_HELP),
 ) -> None:
     """Load ``local.env``, then start the REPL when no subcommand is given.
 
-    ``--mode vision`` retrieves encoded page images. ``--mode ocr`` retrieves
-    embedded page text. A subcommand uses its own ``--mode``.
+    ``--mode`` selects vision, pool, ocr, or summary. Omit it to use ``MDQ_MODE``.
     """
     load_local_env(ENV_PATH)
     if ctx.invoked_subcommand is None:
-        _repl(mode)
+        _repl(_resolve_mode(mode, Settings()))
 
 
 if __name__ == "__main__":

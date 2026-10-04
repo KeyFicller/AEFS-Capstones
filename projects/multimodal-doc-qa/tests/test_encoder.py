@@ -23,15 +23,22 @@ def test_settings_defaults() -> None:
     assert settings.max_ask_calls == 16
     assert settings.max_ask_tokens == 200_000
     assert settings.max_ask_seconds == 120.0
+    assert settings.mode == "vision"
+    assert settings.summaries is False
+    assert settings.rerank is False
 
 
 def test_settings_reads_mdq_prefixed_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """No tunable may be hardcoded: the budget and device must be overridable per run."""
     monkeypatch.setenv("MDQ_TOP_K", "9")
     monkeypatch.setenv("MDQ_DEVICE", "cpu")
+    monkeypatch.setenv("MDQ_MODE", "pool")
+    monkeypatch.setenv("MDQ_RERANK", "true")
     settings = Settings()
     assert settings.top_k == 9
     assert settings.device == "cpu"
+    assert settings.mode == "pool"
+    assert settings.rerank is True
 
 
 def test_encode_texts_calls_process_texts(monkeypatch: pytest.MonkeyPatch) -> None:

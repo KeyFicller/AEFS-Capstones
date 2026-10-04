@@ -173,6 +173,34 @@ def test_load_local_env_tolerates_an_unreadable_file(
     assert "MDQ_X" not in os.environ
 
 
+def test_ingest_writes_a_summary_once_per_distinct_page(
+    corpus: Path, artifacts: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The VLM runs at ingest, and a second ingest of the same bytes does not call it again."""
+    calls: list[str] = []
+
+    def describer(settings: object):
+        def describe(png: Path) -> str:
+            calls.append(png.name)
+            return "margin 16.8%"
+
+        return describe
+
+    monkeypatch.setenv("MDQ_SUMMARIES", "1")
+    monkeypatch.setattr("multimodal_doc_qa.cli._page_describer", describer)
+
+    first = _invoke("ingest", "--corpus", str(corpus))
+    second = _invoke("ingest", "--corpus", str(corpus))
+
+    assert first.exit_code == 0, first.stdout
+    assert second.exit_code == 0, second.stdout
+    assert calls == ["p000.png"]
+    from multimodal_doc_qa.config import summary_paths
+
+    cache_path, summary_path = summary_paths(artifacts)
+    assert cache_path.is_file() and summary_path.is_file()
+
+
 def test_the_help_lists_both_commands() -> None:
     result = _invoke("--help")
 
@@ -589,6 +617,34 @@ def test_no_command_can_select_the_ocr_path(artifacts: Path) -> None:
 
     assert result.exit_code == 1
     assert "OCR" in result.stdout
+
+
+def test_repl_loads_each_encoder_once(
+    corpus: Path, artifacts: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Shift-Tab must not be the moment a checkpoint loads. Each encoder is built once."""
+    _invoke("ingest", "--corpus", str(corpus))
+    vision_inits: list[int] = []
+    ocr_inits: list[int] = []
+
+    class _CountingVision(_StubVisionEncoder):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            vision_inits.append(1)
+            super().__init__(*args, **kwargs)
+
+    class _CountingOcr(_StubOcrEmbedder):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            ocr_inits.append(1)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr("multimodal_doc_qa.embed.encoder.MultiVectorEncoder", _CountingVision)
+    monkeypatch.setattr("multimodal_doc_qa.retrievers.text.OcrEmbedder", _CountingOcr)
+
+    result = _invoke(stdin=":q\n")
+
+    assert result.exit_code == 0, result.stdout
+    assert vision_inits == [1]
+    assert ocr_inits == [1]
 
 
 def test_shift_tab_switches_the_retrieval_path_on_the_status_bar() -> None:

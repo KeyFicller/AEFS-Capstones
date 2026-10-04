@@ -3,11 +3,12 @@
 import json
 from pathlib import Path
 
-from multimodal_doc_qa.schemas import BBox, Citation
+from multimodal_doc_qa.schemas import Answer, BBox, Citation
 from multimodal_doc_qa.ui.viewer import (
     CITED,
     GOLD,
     PAGE_LEVEL,
+    append_turn,
     draw_citations,
     load_runs,
     runs_for_question,
@@ -192,6 +193,27 @@ def test_load_runs_ignores_the_summary_as_a_question(tmp_path: Path) -> None:
     assert run["summary"]["n_done"] == 1
 
 
+def test_append_turn_loads_without_gold_metrics(tmp_path: Path) -> None:
+    """A REPL turn has citations and no gold, and that is enough to draw."""
+    path = tmp_path / "turns.jsonl"
+    append_turn(
+        path,
+        mode="vision",
+        question="目标是什么",
+        answer=Answer(text="四条", citations=[_citation(bbox=_box(0.1, 0.2, 0.3, 0.4))]),
+        rounds=1,
+        calls=4,
+        tokens=10,
+        stop_reason="",
+    )
+
+    row = load_runs(path)[0]["questions"]["目标是什么"]
+
+    assert row["answer"] == "四条"
+    assert "ndcg_at_k" not in row
+    assert row["citations"][0]["bbox"]["x0"] == 0.1
+
+
 def test_load_runs_on_a_missing_file_is_empty(tmp_path: Path) -> None:
     """An absent results file is a state the viewer must survive, not crash on."""
     assert load_runs(tmp_path / "nope.jsonl") == []
@@ -322,13 +344,51 @@ def test_the_app_renders_a_real_result_without_raising(tmp_path: Path) -> None:
     assert not app.warning
 
 
-def test_the_app_says_what_to_do_before_it_has_inputs() -> None:
+def test_the_app_draws_a_turn_that_has_no_gold(tmp_path: Path) -> None:
+    """turns.jsonl from ask / the REPL has no questions.json and still paints the box."""
+    from multimodal_doc_qa.ui import viewer
+    from streamlit.testing.v1 import AppTest
+
+    artifacts = tmp_path / "artifacts"
+    (artifacts / "render" / "d").mkdir(parents=True)
+    Image.new("RGB", (200, 300), "white").save(artifacts / "render" / "d" / "p000.png")
+    append_turn(
+        artifacts / "turns.jsonl",
+        mode="vision",
+        question="what is on the page?",
+        answer=Answer(
+            text="a box", citations=[_citation(doc_id="d", bbox=_box(0.1, 0.2, 0.3, 0.4))]
+        ),
+        rounds=1,
+        calls=2,
+        tokens=3,
+        stop_reason="",
+    )
+
+    app = AppTest.from_file(viewer.__file__)
+    app.run()
+    app.text_input[0].set_value(str(artifacts))
+    app.text_input[1].set_value("")
+    app.text_input[2].set_value("")
+    app.run()
+
+    assert not app.exception
+    assert app.selectbox[0].value == "what is on the page?"
+    assert len(app.checkbox) == 0
+    assert not app.warning
+
+
+def test_the_app_says_what_to_do_before_it_has_inputs(tmp_path: Path) -> None:
     """No results file is the first state a reader meets; it must not look like a crash."""
     from multimodal_doc_qa.ui import viewer
     from streamlit.testing.v1 import AppTest
 
     app = AppTest.from_file(viewer.__file__)
     app.run()
+    app.text_input[0].set_value(str(tmp_path))
+    app.text_input[1].set_value("")
+    app.text_input[2].set_value("")
+    app.run()
 
     assert not app.exception
-    assert app.info[0].value.startswith("Point the sidebar")
+    assert app.info[0].value.startswith("No turns yet")

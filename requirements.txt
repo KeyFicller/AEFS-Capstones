@@ -41,10 +41,9 @@ pyte>=0.8
 colpali-engine==0.3.18
 torch==2.13.0
 transformers==5.18.0
-# 页面渲染 + 合成语料
+# 页面渲染
 pymupdf==1.28.2
 pillow>=12
-matplotlib>=3.11
 # OCR-first 基线
 sentence-transformers>=5
 pytesseract>=0.3

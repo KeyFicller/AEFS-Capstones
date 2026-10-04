@@ -62,6 +62,10 @@ class MultiVectorIndex:
         obj._vectors = {pid: v for pid, v in torch.load(path, weights_only=True).items()}
         return obj
 
+    def matrices(self) -> dict[str, torch.Tensor]:
+        """The stored ``[n_patches, dim]`` matrix for every page."""
+        return self._vectors
+
     def nbytes(self) -> int:
         """Bytes held by the stored vectors -- the ``bytes/page`` metric denominator."""
         return sum(v.numel() * v.element_size() for v in self._vectors.values())

@@ -1,12 +1,10 @@
-"""Corpus and QA schemas. Page ids are ``{doc_id}/p{page:03d}``."""
+"""QA schemas. Page ids are ``{doc_id}/p{page:03d}``."""
 
 import base64
 from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, TypeAdapter, model_validator
-
-PageKind = Literal["paragraph", "table", "chart", "handwriting", "formula"]
 
 
 def page_id(doc_id: str, page: int) -> str:
@@ -18,7 +16,7 @@ def page_id(doc_id: str, page: int) -> str:
 
 
 class BBox(BaseModel):
-    """Leaf of the corpus tree: normalized (0..1) rectangle."""
+    """Normalized (0..1) rectangle."""
 
     x0: float = Field(ge=0.0, le=1.0)
     y0: float = Field(ge=0.0, le=1.0)
@@ -76,36 +74,6 @@ class ScoredPage(BaseModel):
 
     page_id: str
     score: float
-
-
-class Fact(BaseModel):
-    """One answerable fact on a page, carrying its own bbox: the ground-truth unit."""
-
-    fact_id: str
-    text: str
-    page: int = Field(ge=0)
-    bbox: BBox
-
-
-class PageSpec(BaseModel):
-    """One page: kind selects the renderer, scanned decides whether a text layer exists."""
-
-    doc_id: str
-    page: int = Field(ge=0)
-    kind: PageKind
-    scanned: bool
-    facts: list[Fact] = Field(default_factory=list)
-
-
-class DocSpec(BaseModel):
-    """One synthetic PDF in the generated corpus, plus the facts on its pages.
-
-    Ingested documents are ``ImageDocument``, ``PdfDocument``, and ``TextDocument``.
-    """
-
-    doc_id: str
-    pdf_path: str
-    pages: list[PageSpec]
 
 
 class Document(BaseModel):
@@ -178,13 +146,6 @@ def load_documents(path: Path) -> dict[str, ImageDocument | PdfDocument | TextDo
     if len(by_id) != len(docs):
         raise ValueError(f"duplicate doc_id in catalog {path}")
     return by_id
-
-
-class CorpusManifest(BaseModel):
-    """Corpus tree root: generation seed plus every document (seed reproduces the corpus)."""
-
-    seed: int
-    docs: list[DocSpec]
 
 
 class Question(BaseModel):

@@ -53,7 +53,16 @@ def test_render_sources_escapes_paths_and_text(monkeypatch, tmp_path: Path) -> N
 def test_banner_shows_bracketed_names_literally(monkeypatch) -> None:
     sink = _sink(monkeypatch)
 
-    banner(artifacts="/tmp/[a]", mode="vision", embedder="m[b]", answerer="v[c]")
+    banner(artifacts="/tmp/[a]", mode="vision", models="m[b]")
 
     text = sink.export_text()
-    assert "/tmp/[a]" in text and "m[b]" in text and "v[c]" in text
+    assert "/tmp/[a]" in text and "m[b]" in text
+
+
+def test_mode_models_names_only_that_arms_models() -> None:
+    from multimodal_doc_qa.ui.console import mode_models
+
+    assert mode_models("vision", vision="col", ocr="bge", describer="vlm") == "col"
+    assert mode_models("pool", vision="col", ocr="bge", describer="vlm") == "col"
+    assert mode_models("ocr", vision="col", ocr="bge", describer="vlm") == "bge"
+    assert mode_models("summary", vision="col", ocr="bge", describer="vlm") == "vlm  bge"

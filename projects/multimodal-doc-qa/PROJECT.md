@@ -14,13 +14,8 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 
 **MVP（第一版只做这些）**
 
-- **自建合成语料**：程序化生成多页 PDF，五类内容各成页——`paragraph` / `table` / `chart` /
-  `handwriting` / `formula`；部分页栅格化为「扫描件」。生成期即产出 ground truth（页号 + 归一化 bbox，0..1）。
-- **渲染**：PyMuPDF → 页面 PNG（180 DPI，长边归一化）。PDF 页尺寸由 `PAGE_W/PAGE_H` 反推以
-  保持画布长宽比——编码器等比缩放，长宽比变形会被学进去。
-- **文本层**：非扫描页在 PDF 中写入**不可见文本层**（`render_mode=3`），等价于数字版页面原生
-  自带的可提取文本；扫描页不给。图表页只暴露标签与坐标刻度，**不暴露柱值**——这正是
-  vision-first 与 OCR-first 要分胜负的地方。
+- **文档**：已有 PDF（以及图片 / `txt` / `md`）。`ingest` 读一个目录，不生成语料，不写 ground truth。
+- **渲染**：PyMuPDF → 页面 PNG（180 DPI，长边归一化）。等比缩放，长宽比保持 PDF 原页。
 - **编码预算**：`ColQwen2.5` 处理器 `max_pixels = 602112`（= 768 × 28²）。超过约 0.6 MP 的
   像素在进编码器前即被丢弃，故渲染 DPI 由 OCR 基线 / 查看器需求决定，而非检索质量。
 - **编码**：默认 `vidore/colSmol-500M`（MPS / float16）出多向量。换成 `vidore/colqwen2.5-v0.2` 时设 `MDQ_EMBEDDER_MODEL`；加载失败直接报错，没有第二套 checkpoint。
@@ -41,7 +36,8 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 
 - Vespa / 托管多向量服务；自托管 `Qwen3-VL-30B` / `InternVL3`；Next.js 15 查看器。
 - Nougat / dots.ocr OCR 兜底通道；手写 OCR 流水线横向对比；多租户 / 鉴权 / MCP。
-- ViDoRe v3 / M3DocVQA 公开榜对比——用自建语料，不声称与任何公开榜可比。
+- ViDoRe v3 / M3DocVQA 公开榜对比——文档用已有 PDF，不声称与任何公开榜可比。
+- 程序化合成语料、按内容类型造页、生成期 ground truth。
 - 训练 / 微调任何模型（只用现成 checkpoint）。
 - single-shot（非 agentic）形态及其消融——只交 agentic 一种形态。代价：answer p95 无同语料基线，
   agency 的边际收益不可量化。
@@ -51,9 +47,7 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 ### 数据流
 
 ```
-语料生成器 ──> 多页 PDF + ground_truth.json
-                     │
-                 PyMuPDF 渲染 (180 DPI)
+已有 PDF ──> PyMuPDF 渲染 (180 DPI)
                      │
               ┌──────┴───────┐
         colSmol 多向量        │   OCR-first 分支
@@ -102,7 +96,6 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 
 | 路径 | 职责 | 依赖 |
 | --- | --- | --- |
-| `src/multimodal_doc_qa/corpus/` | 合成语料生成（PIL + matplotlib 排版）+ ground truth | pillow, matplotlib, pymupdf |
 | `src/multimodal_doc_qa/render/` | PDF → 页面 PNG | pymupdf |
 | `src/multimodal_doc_qa/embed/` | 默认 `ColSmol-500M`，可选 `ColQwen2.5-v0.2` | colpali-engine, torch |
 | `src/multimodal_doc_qa/index/` | torch 张量多向量存储 + MaxSim | torch |
@@ -116,7 +109,7 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 | `src/multimodal_doc_qa/ui/` | Streamlit 查看器 | streamlit |
 | `src/multimodal_doc_qa/cli.py` | `ingest` / `ask` / `eval` 入口 | typer |
 
-**图产物**：`graph.png` 由 `python -m multimodal_doc_qa.graph` 生成（这条命令会先写图，再加载编码器、把语料页建进内存索引、真的问一题），拓扑改了重跑；`example.png` 为手工截图。README 只放这两张图。
+**图产物**：`graph.png` 由 `python -m multimodal_doc_qa.graph` 生成，拓扑改了重跑；`example.png` 为手工截图。README 只放这两张图。
 
 ## 技术栈
 
@@ -136,14 +129,14 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 
 ## 指标与基线
 
-- **主指标**（逐内容类型 × 逐范式报告，不报单一平均值）：
+- **主指标**（vision 与 OCR 各报一份，不报两臂混在一起的平均值）：
   - **检索质量**：nDCG@5（vision-first vs OCR-first），另记 recall@k（按逐轮累计的页面池算）。
     **实现状态**：`ndcg_at_k` 已实现并接入 `eval`；**`recall@k` 未实现**。
     nDCG 的输入**必须是检索器自己的排序**（`retriever.invoke(question)`），**不能**用图 state 的
     `page_ids`——那是按子查询顺序 append 的、非分数序，对它算 rank 类指标没有意义。
     且输入**必须先按页去重**：OCR 臂会返回同一页的多个 chunk，同一页被计多次而 IDCG 只算一次，
     实测曾得出 **nDCG@5 = 1.1632**（>1，不可能）。`ndcg_at_k` 内部已去重（在 k 截断之前）。
-  - **答案准确率**：自建 **100 问多页 holdout**（每题需 ≥2 页证据）的准确率。
+  - **答案准确率**：调用方提供的 `questions.json` 上的准确率。
     **实现状态**：未实现。**判对错的口径已定：确定性包含匹配**（归一化后 gold 答案的数值/词元
     出现在回答文本里），指标名为 `answer_containment` 而**不叫 accuracy**——它宽容（模型啰嗦也能过），
     名字必须体现这一点。不用 LLM-as-judge（成本 + 方差，且需要先校准）。
@@ -156,18 +149,14 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
     每问检索轮数与模型调用数分布。
     **实现状态**：answer 延迟 p50/p95、rounds / calls / tokens 分布**已随逐题行落盘**；
     bytes/page 与 index p95 **未实现**。
-  - **评测集状态**：声明的 ~300 页 + 100 问多页 holdout **尚未生成**。当前语料为
-    **6 页 / 8 问**（对应 `generate_corpus(n_docs=2, seed=42)`），其中 6 问为单页证据、
-    2 问才满足「≥2 页证据」。故现有 `results.jsonl` 里的数字**只能证明流水线通、不能引用为结论**。
-    另：`_build_questions` 的「每页 1 个单跳题」本身就不满足「每题需 ≥2 页证据」，放大语料时需一并修。
+  - **评测集**：文档是 `ingest` 读入的已有 PDF。题目、gold 答案和证据由调用方的
+    `questions.json` 给出，本仓库不生成。没有这份文件时 `eval` 不跑。
 - **基线**：OCR-first 文本流水线——**同一张 agentic 图**，只把 retriever 换成 `TextRetriever`；
   语料、问题、循环、回答器、top-k 全相同。
-- **数据集**：自建 ~300 页（五类 × 各若干页）+ 100 问多页 holdout；holdout 生成后冻结，
-  调参只看 dev 集。
+- **数据集**：已有 PDF。评测只在调用方给出的 `questions.json` 上跑。
 - **可证伪假设**（写成测试门槛，不达标即失败）：
-  - H1：表格 / 图表 / 手写三类上，vision-first nDCG@5 比 OCR-first **高 ≥ 0.10**；
-    纯段落类上两者差异 **< 0.05**。
-  - H2：~300 页下 index p95 **< 100 ms**。
+  - H1：同一批 PDF、同一份 `questions.json`、同一次 run 的两臂，报 vision-first 与 OCR-first 的 nDCG@5。
+  - H2：已入库页上 index p95 **< 100 ms**。
   - H3：holdout 上 `rounds` 分布可解释（单跳题多为 1 轮、多跳题 >1 轮），且被 `recover`
     强制收口的比例 **< 10%**。
 - **落盘**：`eval/results.jsonl` —— 每次 run 由**一行 `kind="run"` 头**（commit / 模型 / 日期 / 配置）开头、
@@ -200,14 +189,16 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 
 ## 交付物
 
-- **CLI**：`doc-qa`（加载 artifacts 后进入 REPL）、`doc-qa chat [--mode]`、`doc-qa ingest <corpus_dir>`、`doc-qa ask "<question>"`、`doc-qa eval [--mode] [--max-tokens] [--max-seconds]`。
+- **CLI**：`doc-qa`（加载 artifacts 后进入 REPL）、`doc-qa chat [--mode]`、`doc-qa ingest <corpus_dir>`、`doc-qa ask "<question>"`、`doc-qa eval --questions <questions.json> [--mode] [--max-tokens] [--max-seconds]`。
 - **CLI 细节**：
-  - REPL（不带子命令）：两条索引启动时都加载，`--mode` 只决定开场停在哪条；提示符 `you ›`，下面状态栏是当前路径与编码器；`Shift-Tab` 切 vision / ocr，不重新加载模型；空行忽略；`:q` / Ctrl-C / Ctrl-D 退出，一轮还在跑时 Ctrl-C 只取消这一轮。
+  - REPL（不带子命令）：启动时加载视觉编码器和文本编码器各一次，四条臂里索引在的都建好。`--mode` 或 `MDQ_MODE` 选 `vision` / `pool` / `ocr` / `summary`，默认 `vision`。`vision` 是多向量后期交互；`pool` 把同一份多向量按 patch 做平均池化；`ocr` 是页文本；`summary` 是入库时视觉模型写的页描述，再用文本编码器检索。状态栏只显示当前臂的模型：`vision` / `pool` 是视觉编码器，`ocr` 是文本编码器，`summary` 是写描述的模型加文本编码器。`Shift-Tab` 按 `vision → ocr → pool → summary` 切换，不再加载模型；缺索引的那一档停在当前档。空行忽略；`:q` / Ctrl-C / Ctrl-D 退出，一轮还在跑时 Ctrl-C 只取消这一轮。
+  - `summary` 只在 `MDQ_MODE=summary` 或 `MDQ_SUMMARIES=1` 时随 `ingest` 写入。缓存是图片字节的 sha256，同一张图只调用一次视觉模型。
+  - `MDQ_RERANK=1` 时，检索之后用视觉模型把本轮命中的页重排一次。默认关闭。
   - `ingest --corpus` 接受 `pdf` / 图片（`png` / `jpg` / `jpeg` / `webp`）/ `txt` / `md`：PDF 与图片走 `encode_images`；纯文本按块切、用同一视觉编码器的 `encode_texts` 进视觉索引，不光栅化。字节相同的后一份文件跳过。只有一份文件时 `doc_id` 是词干，同词干有两份则用完整文件名、两份都入库。
   - 检索在 top-k 之后还过分数线：低于本轮最高分 `MDQ_MIN_SCORE_RATIO`（默认 `0.5`）的页不进结果。引用面板只打印这份材料真正有的文件类型（文本页不出现 pdf / png）。
   - CLI 自己读仓库根 `local.env`（环境里已有的同名变量不会被盖掉）；`ask` / REPL / `eval` 调 DeepSeek，需要 `DEEPSEEK_API_KEY`。
-- **查看器**：`streamlit run ...`——证据框叠加 + vision / OCR 并排。
-- **评测**：`eval/results.jsonl` + 一份对照报告（内容类型 × 范式矩阵）。
+- **查看器**：`streamlit run .../ui/viewer.py`——证据框叠加 + vision / OCR 并排。`ask` / REPL 把每一轮写到 `artifacts/turns.jsonl`，没有 `questions.json` 也能打开看红框；蓝框只在那份金标文件存在、且题目 id 对得上时画。
+- **评测**：`eval/results.jsonl` + 一份 vision / OCR 对照。题目来自 `--questions`。
 - **`outputs/skill-doc-qa.md`**：描述交付物与如何复现。
 - **README.md**：一条命令端到端跑通 + 已知限制。
 
@@ -215,13 +206,13 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 
 | 权重 | 标准 | 本项目度量方式 |
 | --- | --- | --- |
-| 25 | 检索 / 问答准确率 | 自建语料上 nDCG@5 与多页问准确率，**对照 OCR-first 基线**（不对比公开榜） |
+| 25 | 检索 / 问答准确率 | 已有 PDF 上 nDCG@5 与问答准确率，**对照 OCR-first 基线**（不对比公开榜） |
 | 20 | 证据区域落地 | bbox 命中率（引用区域含答案区间的占比） |
 | 20 | 存储与延迟工程 | bytes/page、index p95、answer p95（agentic） |
 | 20 | 多页推理 | 100 问多页 holdout 准确率 |
 | 15 | 来源核查体验 | Streamlit 叠加保真度、并排对比可用性 |
 
-> 与 spec 的差异：spec 的 25 分项写「ViDoRe v3 / M3DocVQA + 公开榜对比」，本项目改用自建语料 +
+> 与 spec 的差异：spec 的 25 分项写「ViDoRe v3 / M3DocVQA + 公开榜对比」，本项目用已有 PDF +
 > OCR 基线，**不声称公开可比**。
 
 **硬拒绝项**
@@ -233,12 +224,11 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 ## 测试与验证
 
 - **单测**：`pytest` —— 索引 MaxSim 正确性（对照朴素实现）、
-  语料生成器 ground-truth 一致性、引用解析、bbox 命中判定、预算熔断；LangGraph 图
+  引用解析、bbox 命中判定、预算熔断；LangGraph 图
   （retriever 注入切换 vision/OCR、`MAX_ROUNDS` 有界性——用反复要页的假 retriever 断言不超界、
   `stop_reason` 必写、state 往返不丢标量）。
 - **冒烟**：`transformers 5.18` × `colpali-engine 0.3.18` 在 MPS 上跑通一次前向（**第一件事**）。
 - **端到端**：`doc-qa ingest` → `doc-qa eval` 跑出非空 `results.jsonl`。
-- **双向可证伪**：每类内容都有一条「vision 赢」和一条「段落类打平」的断言，任一不成立即暴露构造问题。
 
 ## 风险
 
@@ -257,8 +247,6 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 5. **`colpali-engine` prompt 漂移**：0.3.9 / 0.3.11 / 0.3.13 改过 query / document prompt；
    checkpoint 与引擎版本必须配套，否则 embedding 分布偏移。
 6. **MaxSim 设备选择**：纯内积，MPS 未必快过 CPU；设备写进配置，实测后再定（也影响 fp16 累加精度）。
-7. **合成语料不能太容易**：页面若都是干净印刷体，OCR 会打平甚至取胜，H1 证伪。表格要有合并单元格、
-   图表无文本层、手写用真实手写字体、公式用 mathtext。
 8. **`deepseek-flash` 引用格式**：模型不保证稳定吐 bbox；需结构化输出 + 校验，抽不到就退化为页级，
    并如实计入 bbox 命中率。**且必须关思考模式**（`extra_body={"thinking": {"type": "disabled"}}`）：
    思考模式拒绝一切强制 `tool_choice`，而 `with_structured_output` 默认设 `tool_choice="any"`，
@@ -267,7 +255,7 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 8b. **`doc_id` 会编造**：不给页面标签时模型自造 `doc_id`（实测出现 `'image'` / `'test'` / `'unknown'`），
    而 `Citation.doc_id` 只是 `str`，编造值能通过 schema 校验、静默污染引用准确率。
    `page_ids` 必须在图前带标签；引用与检索结果的一致性校验留给 `verify` 节点。
-9. **结果可复现**：合成语料带随机种子；评测记录 seed / commit / 模型版本。
+9. **结果可复现**：评测记录 commit / 模型版本。文档是调用方给的 PDF。
 10. **`BaseRetriever.invoke` 是同步接口**：torch / MPS 逻辑须在同一线程内，节点里不要跨线程复用
     MPS 上下文。
 11. **graph state 只放可安全往返的值**：PIL / torch 对象经 state 往返会丢类型；页图与索引张量只以
@@ -286,8 +274,7 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
     因此默认就是 colSmol。要用 4B 必须显式设 `MDQ_EMBEDDER_MODEL=vidore/colqwen2.5-v0.2`。
 16. **小语料上页面池会饱和，使 recall 指标虚高**：各子查询的 top-k 结果并池累积。
     实测 6 页语料 + `top_k=5`：单条子查询即覆盖 83%，2 轮后池子 = 整个语料（6/6）。
-    此时「recall@k 按累计页面池算」平凡接近 1。评测语料须足够大（~300 页下 `top_k=5` 仅占 1.7%），
-    且**不要把 demo 的池子大小当检索质量读**。
+    此时「recall@k 按累计页面池算」平凡接近 1。页数接近 `top_k` 时不要把池子大小当检索质量。
 17. **索引与编码器之间没有任何绑定（已接受的已知风险）**：`MultiVectorIndex.save` 只存
     `{page_id: tensor}`，不记录写它的 checkpoint / dim / patch 数；`load` 也不校验。
     维数不同会在 MaxSim 处报 matmul 错（还能发现），维数恰好相同则**静默给出错误分数**（发现不了）。
@@ -318,9 +305,8 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
     严格包含指标 vision `0.375 → 0.4375`、ocr `0.25 → 0.50`——**排序反转**；
     同时 `recover_exhausted` 计数从 vision `3` / ocr `1` 变成 vision `1` / ocr `3`，**正好互换**。
     原因：循环里有 3 处 LLM 决策（`plan` / `assess` / `verify`），温度 > 0，且 8 题的分母太小。
-    结论：**现有语料上的任何指标都不能用来排序两条手臂**，与用哪个指标无关。
-    要下 H1 结论必须先放大语料（~300 页 / 100 问），并比较**同一次 run** 的两臂
-    （或每题重复采样后报区间），而不是拿两次 run 的数字对拼。
+    结论：题量这么小时，任何指标都不能用来排序两条手臂。
+    两臂必须来自同一次 run（或每题重复采样后报区间），不要拿两次 run 的数字对拼。
 23. **`eval` 每问多做一次检索**：逐题行里的 `ranked` 需要**检索器自己的排序**，
     而图 state 的 `page_ids` 是子查询顺序、非分数序，取不到分数。故 `cli.run_question`
     额外调一次 `retriever.invoke(question.text)`，代价是每问多一遍查询编码。

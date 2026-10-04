@@ -36,12 +36,3 @@ def render_pages(pdf_path: Path, out_dir: Path, dpi: int = 180) -> list[Path]:
 
     logger.info("rendered %d pages from %s to %s", len(paths), pdf_path, out_dir)
     return paths
-
-
-if __name__ == "__main__":
-    artifacts = Path(__file__).resolve().parent.parent / "corpus" / "_artifacts"
-
-    for pdf_path in sorted(artifacts.glob("*.pdf")):
-        out_dir = artifacts / pdf_path.stem
-        paths = render_pages(pdf_path, out_dir)
-        print(f"{pdf_path.name} -> {out_dir.name}/  ({len(paths)} pages)")

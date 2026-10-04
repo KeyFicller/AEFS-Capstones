@@ -67,25 +67,41 @@ def echo(message: str) -> None:
     CONSOLE.print(message)
 
 
-def banner(*, artifacts: str, mode: str, embedder: str, answerer: str) -> None:
-    """Opening panel: which artifacts, which arm, which models."""
+def banner(*, artifacts: str, mode: str, models: str) -> None:
+    """Opening panel: which artifacts, which arm, and that arm's models."""
     # Paths and model names are interpolated: a `[` in any of them is markup to Rich.
     body = Text.from_markup(
         f"[bold]artifacts[/] {escape(artifacts)}\n"
         f"[bold]mode[/]      {escape(mode)}\n"
-        f"[bold]embedder[/]  {escape(embedder)}\n"
-        f"[bold]answerer[/]  {escape(answerer)}"
+        f"[bold]models[/]    {escape(models)}"
     )
     CONSOLE.print(Panel(body, title="multimodal-doc-qa", border_style="cyan"))
 
 
-def other_mode(mode: str) -> str:
-    """The retrieval path Shift-Tab switches to."""
-    if mode == "vision":
-        return "ocr"
+def mode_models(mode: str, *, vision: str, ocr: str, describer: str) -> str:
+    """The model names the status bar shows for ``mode``, and no others.
+
+    ``summary`` is the describe arm: the VLM that wrote the page text, then the
+    text embedder that retrieves it.
+    """
+    if mode in {"vision", "pool"}:
+        return vision
     if mode == "ocr":
-        return "vision"
-    raise ValueError(f"mode must be vision or ocr, got {mode!r}")
+        return ocr
+    if mode == "summary":
+        return f"{describer}  {ocr}"
+    raise ValueError(f"mode must be one of {', '.join(_MODES)}, got {mode!r}")
+
+
+_MODES = ("vision", "ocr", "pool", "summary")
+
+
+def other_mode(mode: str) -> str:
+    """The retrieval path Shift-Tab switches to. One step along ``vision → ocr → pool → summary``."""
+    try:
+        return _MODES[(_MODES.index(mode) + 1) % len(_MODES)]
+    except ValueError as exc:
+        raise ValueError(f"mode must be one of {', '.join(_MODES)}, got {mode!r}") from exc
 
 
 def status_bar(mode: str, embedder: str) -> FormattedText:

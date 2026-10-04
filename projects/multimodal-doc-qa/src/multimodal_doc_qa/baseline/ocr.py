@@ -2,8 +2,7 @@
 
 The baseline is the control condition of the whole capstone: whatever the visual
 path scores has to be read against this. It therefore prefers the PDF's own text
-layer when the page has one, and only pays for Tesseract when it does not -- which
-is exactly the ``scanned`` flag in the corpus manifest.
+layer when the page has one, and only pays for Tesseract when it does not.
 """
 
 import logging

@@ -105,6 +105,21 @@ def test_a_single_hop_ask_retrieves_once_and_stops(tmp_path: Path) -> None:
     assert out["page_ids"] == ["doc000/p000"]
 
 
+def test_rerank_reorders_the_pages_the_retriever_returned(tmp_path: Path) -> None:
+    """Rerank runs after retrieval and replaces the pool order. It is off unless attached."""
+    _pages(tmp_path, "doc000/p000", "doc000/p001")
+
+    def rerank(query: str, docs: list[Document]) -> list[Document]:
+        assert query
+        return list(reversed(docs))
+
+    deps = _deps(tmp_path, _Retriever("doc000/p000", "doc000/p001"), _StubModel())
+    deps.rerank = rerank
+    out = _run(tmp_path, deps)
+
+    assert out["page_ids"] == ["doc000/p001", "doc000/p000"]
+
+
 def test_a_normal_finish_leaves_stop_reason_unset(tmp_path: Path) -> None:
     """``stop_reason`` says why a run was cut short; a completed run has nothing to say."""
     _pages(tmp_path, "doc000/p000")

@@ -59,6 +59,11 @@ def documents_path(root: Path) -> Path:
     return root / "documents.json"
 
 
+def summary_paths(root: Path) -> tuple[Path, Path]:
+    """``(summary_cache, summary_index)`` under ``root``. The cache skips a second VLM call."""
+    return root / "summary_cache.json", root / "summary_index.pt"
+
+
 class Settings(BaseSettings):
     """Settings from the environment, prefix ``MDQ_``."""
 
@@ -69,6 +74,9 @@ class Settings(BaseSettings):
     answerer_model: str = "deepseek:deepseek-flash"
     device: str = _device()
     dtype: str = "float16"
+    mode: str = "vision"
+    summaries: bool = False
+    rerank: bool = False
     top_k: int = 5
     min_score_ratio: float = 0.5
     max_rounds: int = 5

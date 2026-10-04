@@ -1,7 +1,8 @@
-"""Evidence overlay and the Streamlit viewer over an evaluation run.
+"""Evidence overlay and the Streamlit viewer.
 
-Only citations for the page being drawn are painted. A citation with no bbox is a
-border, not a box: no region was located.
+Reads ``doc-qa eval`` results, or ``turns.jsonl`` written by ``ask`` / the REPL.
+Gold boxes are drawn only when ``questions.json`` is there. A citation with no
+bbox is a border, not a box: no region was located.
 """
 
 import json
@@ -10,7 +11,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from multimodal_doc_qa.schemas import Citation
+from multimodal_doc_qa.schemas import Answer, Citation
 
 GOLD = (30, 110, 220)
 CITED = (215, 40, 40)
@@ -63,6 +64,42 @@ def draw_citations(
             width=outline,
         )
     return canvas
+
+
+def append_turn(
+    path: Path,
+    *,
+    mode: str,
+    question: str,
+    answer: Answer | None,
+    rounds: int,
+    calls: int,
+    tokens: int,
+    stop_reason: str,
+) -> None:
+    """One REPL / ``ask`` turn, in the same JSONL shape ``load_runs`` already reads.
+
+    No gold, no metrics. Each turn is its own run so a repeated question does not
+    overwrite the previous one inside a single header.
+    """
+    citations = [] if answer is None else [c.model_dump() for c in answer.citations]
+    rows = (
+        {"kind": "run", "mode": mode},
+        {
+            "kind": "question",
+            "qid": question,
+            "answer": None if answer is None else answer.text,
+            "citations": citations,
+            "rounds": rounds,
+            "calls": calls,
+            "tokens": tokens,
+            "stop_reason": stop_reason,
+        },
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
 def load_runs(path: Path) -> list[dict]:
@@ -147,11 +184,19 @@ def render_app() -> None:
             )
             if path
         ]
-        show_gold = st.checkbox("Show gold evidence", value=True)
+        questions_path = artifacts / "questions.json"
+        show_gold = (
+            st.checkbox("Show gold evidence", value=True) if questions_path.is_file() else False
+        )
+
+    if not results and (artifacts / "turns.jsonl").is_file():
+        results = [str(artifacts / "turns.jsonl")]
 
     runs = [run for path in results for run in load_runs(Path(path))]
     if not runs:
-        st.info("Point the sidebar at one or two `results.jsonl` files produced by `doc-qa eval`.")
+        st.info(
+            "No turns yet. Ask in `doc-qa`, or point the sidebar at a `results.jsonl` from `doc-qa eval`."
+        )
         return
 
     render_dir = artifact_paths(artifacts)[0]
@@ -159,7 +204,6 @@ def render_app() -> None:
     qid = st.selectbox("Question", qids)
 
     gold: list[Citation] = []
-    questions_path = artifacts / "questions.json"
     if questions_path.is_file():
         raw = json.loads(questions_path.read_text())
         gold = [
@@ -177,14 +221,26 @@ def render_app() -> None:
             mode = run["header"].get("mode", "?")
             st.subheader(mode)
             st.write(row.get("answer") or "_no answer_")
-            st.caption(
-                f"nDCG@k {row.get('ndcg_at_k')}"
-                f"  IoU@τ {row.get('iou_at_threshold')}"
-                f"  strict {row.get('bbox_hit_rate')}"
-                f"  rounds {row.get('rounds')}"
-                f"  calls {row.get('calls')}"
-                f"  stop_reason {row.get('stop_reason') or '-'}"
-            )
+            bits = [
+                f"{label} {row[key]}"
+                for label, key in (
+                    ("nDCG@k", "ndcg_at_k"),
+                    ("IoU@τ", "iou_at_threshold"),
+                    ("strict", "bbox_hit_rate"),
+                )
+                if row.get(key) is not None
+            ]
+            bits += [
+                f"{label} {row.get(key) or '-'}"
+                for label, key in (
+                    ("rounds", "rounds"),
+                    ("calls", "calls"),
+                    ("stop_reason", "stop_reason"),
+                )
+                if key in row
+            ]
+            if bits:
+                st.caption("  ".join(bits))
 
     citations = [Citation.model_validate(c) for _, row in paired for c in row.get("citations", [])]
     for doc_id, page in evidence_pages(citations, gold):
