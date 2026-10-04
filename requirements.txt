@@ -31,6 +31,7 @@ ipython>=9.17.1
 -e ./examples/hello-agent
 -e ./projects/terminal-coding-agent
 -e ./projects/multimodal-doc-qa
+-e ./projects/tiny-llm-pipeline
 
 # 测试用终端模拟器：把 pty 字节流还原成屏幕，断言 TUI 布局（工具输出在 ToDo 面板之上）
 pyte>=0.8
