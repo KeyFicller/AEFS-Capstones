@@ -4,6 +4,8 @@ Each query token takes its best page patch; those maxima are summed. A single
 matching patch cannot carry the page.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
 
 import torch

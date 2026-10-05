@@ -1,7 +1,7 @@
 [project]
 name = "tiny-llm-pipeline"
 version = "0.1.0"
-description = "Template project for ./start.sh new"
+description = "From-scratch Chinese tiny LM: pretrain, SFT, then DPO."
 requires-python = ">=3.11"
 
 [project.scripts]

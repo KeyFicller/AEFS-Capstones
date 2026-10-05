@@ -1,1 +1,1 @@
-"""Template package: the content is irrelevant, the layout is what matters."""
+"""From-scratch Chinese tiny language model: pretrain, SFT, then DPO."""

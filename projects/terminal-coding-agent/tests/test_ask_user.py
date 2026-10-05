@@ -1,7 +1,5 @@
 """ask_user: the model asks, and the harness pauses before any tool runs."""
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import Any
 

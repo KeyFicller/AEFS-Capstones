@@ -7,6 +7,8 @@ the counter bumped in both ``assess`` and ``verify``, a run that always asks for
 reaches ``max_rounds + 1`` before anyone notices.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
 
 from langchain_core.documents import Document

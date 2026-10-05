@@ -3,8 +3,6 @@
 `parse` is pure so the dispatch rules can be tested without a terminal.
 """
 
-from __future__ import annotations
-
 import base64
 import re
 from collections.abc import Sequence

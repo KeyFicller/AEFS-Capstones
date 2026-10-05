@@ -6,8 +6,6 @@ every sibling tool with side effects (`edit_file`, `run_shell`, `git`) twice. St
 the ToolNode means nothing has run yet, so a resume replays nothing.
 """
 
-from __future__ import annotations
-
 from collections.abc import Mapping
 from typing import Any
 
