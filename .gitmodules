@@ -10,3 +10,6 @@
 [submodule ".cursor/skills/open-code-review"]
 	path = .cursor/skills/open-code-review
 	url = https://github.com/alibaba/open-code-review
+[submodule ".cursor/skills/answer-me-with-html"]
+	path = .cursor/skills/answer-me-with-html
+	url = https://github.com/QingYunA/answer-me-with-html.git
