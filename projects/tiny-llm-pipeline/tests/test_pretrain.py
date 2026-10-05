@@ -90,6 +90,18 @@ def _use_cpu(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pretrain_mod, "_device", lambda: torch.device("cpu"))
 
 
+def test_device_prefers_cuda_then_mps_then_cpu(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: True)
+    assert pretrain_mod._device().type == "cuda"
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    assert pretrain_mod._device().type == "mps"
+
+    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: False)
+    assert pretrain_mod._device().type == "cpu"
+
+
 def _log_rows(path: Path) -> list[dict[str, float | int]]:
     return [
         json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()

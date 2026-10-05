@@ -9,6 +9,7 @@ import hashlib
 import json
 import logging
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict
@@ -27,6 +28,15 @@ _EOS = "<|eos|>"
 _PAD_ID = 0
 _IGNORE_INDEX = -100
 _CHAT_MARKERS = re.compile(r"<\|im_start\|>|<\|im_end\|>")
+
+# Corpus files in `jingyaogong/minimind_dataset`. `prepare` fetches these.
+PRETRAIN_FILE = "pretrain_hq.jsonl"
+SFT_FILE = "sft_mini_512.jsonl"
+
+# The dataset `main` no longer carries either file (it now holds
+# `pretrain_t2t.jsonl` / `sft_t2t.jsonl` and friends), so pin the commit that
+# still does. Without this the download 404s on a fresh machine.
+DATASET_REVISION = "6b952cc50427c84eac543d0b38a8066208433847"
 
 
 class ConversationTurn(TypedDict):
@@ -89,16 +99,67 @@ def fetch_minimind(
 ) -> Path:
     """Download one file with `huggingface_hub.hf_hub_download`.
 
-    On any failure raise `FileNotFoundError` naming `repo` and `filename`.
+    The corpus is a **dataset** repo pinned at `DATASET_REVISION`, so both
+    `repo_type="dataset"` and `revision` are required: without the former the
+    Hub answers 401 on the model path (which reads like a bad token), and the
+    files only exist on that older commit. On any failure raise
+    `FileNotFoundError` naming `repo` and `filename`.
     Do not switch mirrors or datasets.
     """
     dest = Path(out_dir)
     dest.mkdir(parents=True, exist_ok=True)
     try:
-        downloaded = hf_hub_download(repo_id=repo, filename=filename, local_dir=dest)
+        downloaded = hf_hub_download(
+            repo_id=repo,
+            filename=filename,
+            repo_type="dataset",
+            revision=DATASET_REVISION,
+            local_dir=dest,
+        )
     except Exception as exc:
         raise FileNotFoundError(f"failed to download {filename} from {repo}") from exc
     return Path(downloaded)
+
+
+def write_tokenizer_sample(
+    raw_jsonl: Path | str,
+    out_path: Path | str,
+    *,
+    max_bytes: int,
+    min_chars: int = 50,
+) -> Path:
+    """Stream `text` fields into a sample of at most `max_bytes` bytes.
+
+    Drop passages shorter than `min_chars`, skip repeats by sha1, and stop on a
+    utf-8 boundary. The tokenizer is trained on this file, not on raw jsonl, so
+    the JSON scaffolding never reaches the vocabulary.
+    """
+    dest = Path(out_path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    seen: set[str] = set()
+    used = 0
+    with Path(raw_jsonl).open(encoding="utf-8") as source, dest.open("w", encoding="utf-8") as sink:
+        for line in source:
+            if used >= max_bytes:
+                break
+            if not line.strip():
+                continue
+            text = str(json.loads(line).get("text", "")).strip()
+            if len(text) < min_chars:
+                continue
+            digest = hashlib.sha1(text.encode()).hexdigest()
+            if digest in seen:
+                continue
+            seen.add(digest)
+            blob = (text + "\n").encode("utf-8")
+            if used + len(blob) > max_bytes:
+                text = blob[: max_bytes - used].decode("utf-8", errors="ignore")
+                if text:
+                    sink.write(text)
+                break
+            sink.write(text + "\n")
+            used += len(blob)
+    return dest
 
 
 def prepare_pretrain(
@@ -169,6 +230,10 @@ def prepare_sft(
     Drop rows whose `encode_chat` length exceeds `ModelConfig.max_seq_len`.
     Then `holdout` is the first `holdout_n` rows, `dpo_prompts` is the first
     user turn of the next `dpo_prompt_n` rows, and `train` is the rest.
+
+    The corpus repeats user turns, so index slicing alone would let one split
+    share a user text with another. A row is claimed only when none of its user
+    turns is already `blocked`, and claiming it blocks all of its user turns.
     """
     rows = [
         row
@@ -176,9 +241,46 @@ def prepare_sft(
         if len(encode_chat(list(row["conversations"]), tok)[0]) <= DEFAULT_MODEL.max_seq_len
     ]
     holdout = rows[:holdout_n]
-    rest = rows[holdout_n:]
-    prompts = [_first_user(row) for row in rest[:dpo_prompt_n]]
-    return SFTBundle(train=rest[dpo_prompt_n:], holdout=holdout, dpo_prompts=prompts)
+    blocked: set[str] = set()
+    for row in holdout:
+        blocked.update(_user_texts(row))
+    prompts: list[str] = []
+    train: list[SFTExample] = []
+    for row in rows[holdout_n:]:
+        texts = _user_texts(row)
+        if blocked.intersection(texts):
+            continue
+        if len(prompts) < dpo_prompt_n:
+            prompts.append(_first_user(row))
+            blocked.update(texts)
+        else:
+            train.append(row)
+    return SFTBundle(train=train, holdout=holdout, dpo_prompts=prompts)
+
+
+def write_sft_splits(bundle: SFTBundle, out_dir: Path | str) -> dict[str, Path]:
+    """Write the three disjoint SFT splits next to the bins.
+
+    Keys are `train`, `holdout`, and `dpo_prompts`. The prompt file keeps the
+    `{"prompt": ...}` row shape of `prefs.jsonl`.
+    """
+    dest = Path(out_dir)
+    dest.mkdir(parents=True, exist_ok=True)
+    paths = {
+        "train": dest / "sft_train.jsonl",
+        "holdout": dest / "sft_holdout.jsonl",
+        "dpo_prompts": dest / "dpo_prompts.jsonl",
+    }
+    _dump_jsonl(bundle.train, paths["train"])
+    _dump_jsonl(bundle.holdout, paths["holdout"])
+    _dump_jsonl([{"prompt": prompt} for prompt in bundle.dpo_prompts], paths["dpo_prompts"])
+    return paths
+
+
+def _dump_jsonl(rows: Iterable[object], path: Path) -> None:
+    with path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
 class PackedDataset:
@@ -273,10 +375,24 @@ def _dump_bin(docs: list[np.ndarray], path: Path) -> Path:
 
 
 def _load_sft(path: Path) -> list[SFTExample]:
+    """Read every conversation, in file order.
+
+    `sft_mini_512.jsonl` is not strict jsonl: a few records hold unescaped
+    newlines inside `content`, so a line-oriented split truncates them.
+    `strict=False` accepts those control characters, and `raw_decode` finds the
+    record boundary without mistaking a newline inside a string for one.
+    """
+    text = path.read_text(encoding="utf-8")
+    decoder = json.JSONDecoder(strict=False)
     rows: list[SFTExample] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if line.strip():
-            rows.append(json.loads(line))
+    index = 0
+    while index < len(text):
+        while index < len(text) and text[index].isspace():
+            index += 1
+        if index >= len(text):
+            break
+        row, index = decoder.raw_decode(text, index)
+        rows.append(row)
     return rows
 
 
@@ -285,6 +401,15 @@ def _first_user(row: SFTExample) -> str:
         if message["role"] == "user":
             return message["content"]
     raise ValueError("SFT row has no user turn")
+
+
+def _user_texts(row: SFTExample) -> list[str]:
+    """Every user turn in `row`, stripped, for the disjointness check."""
+    return [
+        message["content"].strip()
+        for message in row["conversations"]
+        if message["role"] == "user"
+    ]
 
 
 def _preference_side(
