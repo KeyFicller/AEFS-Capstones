@@ -16,7 +16,7 @@ REPL 里一行可以带三种前缀（行首 `\` 转义可让整行当普通任�
 | --- | --- | --- |
 | `@path` | `把 @NOTES.md 的内容给我看看` | 把文件内容附到该轮消息；`png/jpg/jpeg/webp/gif`（≤5 MB）转成图片块交给模型，其余按 UTF-8 文本读入并截断至 4k tokens。路径须在 worktree 内。 |
 | `!cmd` | `!pytest -q` | 在 worktree 里直接跑 shell，输出就地显示；**不进对话上下文、不计预算**，也不走破坏性命令守卫。 |
-| `/cmd` | `/help`、`/quit` | 调用注册表里的命令：`LocalCommand` 只在 REPL 本地动作，`PromptCommand` 展开成 prompt 再进图。新命令 = 派生 + `register`（见 `src/terminal_coding_agent/commands.py`）。 |
+| `/cmd` | `/help`、`/quit` | 该次 REPL 的命令表（`repl-console`）：`LocalCommand` 只在本地动作，`PromptCommand` 展开成 prompt 再进图。同名后传入的命令替换内置。 |
 
 在真实终端下主提示用 `prompt_toolkit`，输入 `@` 补文件路径、行首 `/` 补命令名；管道/无 tty 时自动回退到 `input()`（补全关闭），Harbor 侧不装 `prompt_toolkit`。
 

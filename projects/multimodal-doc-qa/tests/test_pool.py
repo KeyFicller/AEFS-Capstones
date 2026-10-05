@@ -1,5 +1,4 @@
 import torch
-from langchain_core.documents import Document
 from multimodal_doc_qa.index.maxsim import MultiVectorIndex
 from multimodal_doc_qa.retrievers.pool import PooledRetriever, mean_vector
 

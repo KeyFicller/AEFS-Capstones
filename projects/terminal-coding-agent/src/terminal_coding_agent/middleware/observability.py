@@ -3,9 +3,8 @@ from typing import Any
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import AIMessage, ToolMessage
-
-from terminal_coding_agent.telemetry import get_tracer
-from terminal_coding_agent.telemetry.attrs import (
+from telemetry import get_tracer
+from telemetry.attrs import (
     ATTR_ERROR_TYPE,
     ATTR_OPERATION,
     set_chat_attributes,

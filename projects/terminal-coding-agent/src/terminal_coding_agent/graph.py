@@ -18,6 +18,11 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command, interrupt
 from opentelemetry import trace
+from telemetry import otel_jsonl_path, setup_tracing
+from telemetry.langfuse_callback import (
+    flush_langfuse,
+    langfuse_callback_handler,
+)
 
 from terminal_coding_agent.checkpoint import build_checkpointer
 from terminal_coding_agent.config import ENV_PATH, load_local_env
@@ -28,11 +33,6 @@ from terminal_coding_agent.planner import build_planner
 from terminal_coding_agent.recover import build_recover
 from terminal_coding_agent.state import CodingAgentState, ToDoStatus, format_todos
 from terminal_coding_agent.summary import build_summary
-from terminal_coding_agent.telemetry import otel_jsonl_path, setup_tracing
-from terminal_coding_agent.telemetry.langfuse_callback import (
-    flush_langfuse,
-    langfuse_callback_handler,
-)
 from terminal_coding_agent.tools import make_tools
 
 # projects/terminal-coding-agent (not the monorepo root)
@@ -116,10 +116,15 @@ def _after_recover_gated(state: CodingAgentState) -> str:
     return "await_plan_approval"
 
 
+def _stdout(text: str) -> None:
+    """Harbor and the module entry point read these lines from stdout."""
+    print(text)  # noqa: T201
+
+
 def _print_todos(text: str, version: int = 0) -> None:
     """Harbor's fallback renderer: plain text, no chrome, straight into the log."""
-    print(f"replan v{version}")
-    print(text)
+    _stdout(f"replan v{version}")
+    _stdout(text)
 
 
 def todos_renderer(config: RunnableConfig | None) -> Callable[[str, int], None]:
@@ -312,17 +317,17 @@ if __name__ == "__main__":
 
         for message in response["messages"]:
             message.pretty_print()
-        print("------ Budget --------")
-        print(f"turns:             {response.get('turns', 0)}")
-        print(f"tokens:            {response.get('tokens', 0)}")
-        print(f"input_tokens:      {response.get('input_tokens', 0)}")
-        print(f"output_tokens:     {response.get('output_tokens', 0)}")
-        print(f"cache_read_tokens: {response.get('cache_read_tokens', 0)}")
-        print(f"cost_rmb:          {response.get('cost_rmb', 0.0):.6f}")
-        print(f"stop_reason:       {response.get('stop_reason')}")
-        print(f"replan_count:      {response.get('replan_count', 0)}")
-        print("----------------------")
-        print(format_todos(response.get("todo_list") or []))
+        _stdout("------ Budget --------")
+        _stdout(f"turns:             {response.get('turns', 0)}")
+        _stdout(f"tokens:            {response.get('tokens', 0)}")
+        _stdout(f"input_tokens:      {response.get('input_tokens', 0)}")
+        _stdout(f"output_tokens:     {response.get('output_tokens', 0)}")
+        _stdout(f"cache_read_tokens: {response.get('cache_read_tokens', 0)}")
+        _stdout(f"cost_rmb:          {response.get('cost_rmb', 0.0):.6f}")
+        _stdout(f"stop_reason:       {response.get('stop_reason')}")
+        _stdout(f"replan_count:      {response.get('replan_count', 0)}")
+        _stdout("----------------------")
+        _stdout(format_todos(response.get("todo_list") or []))
 
         provider = trace.get_tracer_provider()
         if hasattr(provider, "force_flush"):
@@ -335,6 +340,6 @@ if __name__ == "__main__":
         dst = Path(str(_AGENT_PROJECT_DIR).rstrip("/") + "/otel.jsonl")
         if src.is_file():
             shutil.copy2(src, dst)
-            print(f"otel spans copied to {dst}")
+            _stdout(f"otel spans copied to {dst}")
         else:
-            print(f"otel span file missing: {src}")
+            _stdout(f"otel span file missing: {src}")

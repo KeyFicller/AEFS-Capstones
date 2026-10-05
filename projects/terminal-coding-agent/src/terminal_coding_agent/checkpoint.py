@@ -52,7 +52,7 @@ class AsyncCapableSqliteSaver(SqliteSaver):
         self,
         config: RunnableConfig | None,
         *,
-        filter: dict[str, Any] | None = None,
+        filter: dict[str, Any] | None = None,  # noqa: A002  matches BaseCheckpointSaver.alist
         before: RunnableConfig | None = None,
         limit: int | None = None,
     ) -> AsyncIterator[CheckpointTuple]:

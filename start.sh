@@ -18,7 +18,7 @@ Usage: ./start.sh <command> [args]
 
   setup              Create the shared .venv and install requirements.txt
   new <name>         Scaffold projects/<name> from the template and register it in requirements.txt
-  test [path]        Run pytest (defaults to examples/ and projects/)
+  test [path]        Run pytest (defaults to examples/, projects/, and components/)
   run <cmd...>       Run any command inside the shared environment
   clean              Remove caches (__pycache__ / .pytest_cache / .ruff_cache)
   help               Show this help
@@ -68,7 +68,7 @@ cmd_test() {
     targets=("$1")
   else
     local d
-    for d in examples projects; do
+    for d in examples projects components; do
       [ -d "$d" ] && targets+=("$d")
     done
   fi

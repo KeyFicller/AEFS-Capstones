@@ -4,8 +4,8 @@ from typing import Any
 
 from opentelemetry.trace import Span
 
-from terminal_coding_agent.telemetry.attrs import set_chat_attributes
-from terminal_coding_agent.telemetry.setup import get_tracer
+from telemetry.attrs import set_chat_attributes
+from telemetry.setup import get_tracer
 
 
 def resolve_model_name(model: Any) -> str:

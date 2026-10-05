@@ -25,6 +25,8 @@ from multimodal_doc_qa.config import Settings, artifact_paths, load_local_env
 from multimodal_doc_qa.index.maxsim import MultiVectorIndex
 from multimodal_doc_qa.schemas import Citation
 from multimodal_doc_qa.ui import console as ui
+from repl_console import repl as _repl_mod
+from repl_console.repl import WORKING_MESSAGE
 from rich.console import Console
 from typer.testing import CliRunner
 
@@ -510,7 +512,7 @@ def test_working_prints_nothing_off_a_terminal(capsys: pytest.CaptureFixture[str
 
     out = capsys.readouterr().out
     assert "ran" in out
-    assert ui.WORKING_MESSAGE not in out
+    assert WORKING_MESSAGE not in out
 
 
 def test_working_shows_the_spinner_on_a_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -535,7 +537,7 @@ def test_working_shows_the_spinner_on_a_terminal(monkeypatch: pytest.MonkeyPatch
 
     reader = threading.Thread(target=drain, daemon=True)
     reader.start()
-    monkeypatch.setattr(ui, "CONSOLE", Console(file=stream, force_terminal=True, width=40))
+    monkeypatch.setattr(_repl_mod, "CONSOLE", Console(file=stream, force_terminal=True, width=40))
     with ui.working():
         time.sleep(0.4)
         stream.flush()
@@ -543,7 +545,7 @@ def test_working_shows_the_spinner_on_a_terminal(monkeypatch: pytest.MonkeyPatch
     reader.join(timeout=5)
     os.close(master)
 
-    assert ui.WORKING_MESSAGE in b"".join(chunks).decode("utf-8", "replace")
+    assert WORKING_MESSAGE in b"".join(chunks).decode("utf-8", "replace")
 
 
 def test_render_sources_skips_files_the_citation_does_not_have(
@@ -595,7 +597,7 @@ def test_repl_prints_the_answer_and_the_cited_files(
     monkeypatch.setattr("multimodal_doc_qa.synth.answer.AnswerSynthesizer", _StubSynth)
     _invoke("ingest", "--corpus", str(corpus))
 
-    result = _invoke("chat", stdin="what was the EMEA margin?\nand the other page?\n:q\n")
+    result = _invoke("chat", stdin="what was the EMEA margin?\nand the other page?\n/quit\n")
 
     assert result.exit_code == 0, result.stdout
     assert result.stdout.count(DOC_TEXT) >= 2
@@ -605,7 +607,7 @@ def test_repl_prints_the_answer_and_the_cited_files(
 
 def test_no_command_opens_the_repl(artifacts: Path) -> None:
     """Startup with no subcommand reads artifacts and refuses a missing index."""
-    result = _invoke(stdin=":q\n")
+    result = _invoke(stdin="/quit\n")
 
     assert result.exit_code == 1
     assert "ingest" in result.stdout
@@ -613,7 +615,7 @@ def test_no_command_opens_the_repl(artifacts: Path) -> None:
 
 def test_no_command_can_select_the_ocr_path(artifacts: Path) -> None:
     """The bare CLI takes the same two retrieval paths as ask and chat."""
-    result = _invoke("--mode", "ocr", stdin=":q\n")
+    result = _invoke("--mode", "ocr", stdin="/quit\n")
 
     assert result.exit_code == 1
     assert "OCR" in result.stdout
@@ -640,34 +642,44 @@ def test_repl_loads_each_encoder_once(
     monkeypatch.setattr("multimodal_doc_qa.embed.encoder.MultiVectorEncoder", _CountingVision)
     monkeypatch.setattr("multimodal_doc_qa.retrievers.text.OcrEmbedder", _CountingOcr)
 
-    result = _invoke(stdin=":q\n")
+    result = _invoke(stdin="/quit\n")
 
     assert result.exit_code == 0, result.stdout
     assert vision_inits == [1]
     assert ocr_inits == [1]
 
 
-def test_shift_tab_switches_the_retrieval_path_on_the_status_bar() -> None:
+def test_shift_tab_switches_the_retrieval_path_on_the_status_bar(tmp_path) -> None:
     """Shift-Tab flips the path the status bar is showing, before the line is submitted."""
-    from multimodal_doc_qa.ui.console import Prompt, other_mode, status_bar
+    from multimodal_doc_qa.ui.console import other_mode, status_bar
     from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.output import DummyOutput
+    from repl_console import Repl
 
     mode = {"value": "vision"}
+    seen: list[str] = []
+    bindings = KeyBindings()
 
-    def switch() -> None:
+    @bindings.add("s-tab")
+    def _switch(event) -> None:
         mode["value"] = other_mode(mode["value"])
+        event.app.invalidate()
 
     with create_pipe_input() as pipe:
-        prompt = Prompt(
-            on_switch=switch,
-            status=lambda: status_bar(mode["value"], "BAAI/bge-small-en-v1.5"),
-            input=pipe,
+        pipe.send_text("\x1b[Zhi\r/quit\r")
+        Repl(
+            title="t",
+            info={},
+            root=tmp_path,
+            on_task=lambda message: seen.append(str(message.content)),
+            toolbar=lambda: status_bar(mode["value"], "BAAI/bge-small-en-v1.5"),
+            key_bindings=bindings,
+            stdin=pipe,
             output=DummyOutput(),
-        )
-        pipe.send_text("\x1b[Zhi\r")
-        assert prompt.ask() == "hi"
+        ).run()
 
+    assert seen == ["hi"]
     assert mode["value"] == "ocr"
     shown = "".join(piece for _, piece in status_bar(mode["value"], "BAAI/bge-small-en-v1.5"))
     assert "ocr" in shown and "shift-tab" in shown

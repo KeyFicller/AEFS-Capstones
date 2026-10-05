@@ -2,6 +2,7 @@
 
 import json
 import math
+from contextlib import suppress
 from pathlib import Path
 
 import pytest
@@ -374,10 +375,8 @@ def test_the_run_line_is_written_before_any_question_is_answered(tmp_path: Path)
     def explode(question: Question):
         raise RuntimeError("model died")
 
-    try:
+    with suppress(RuntimeError):
         run_eval([_question()], explode, out_path=out, settings=_settings(), k=5)
-    except RuntimeError:
-        pass
 
     rows = _read(out)
     assert [row["kind"] for row in rows] == ["run"]

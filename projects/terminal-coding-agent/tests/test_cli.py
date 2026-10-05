@@ -4,8 +4,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
+from langgraph.types import Command
+from repl_console.commands import CommandOutcome, PromptCommand
 from rich.console import Console
-from terminal_coding_agent import cli, commands, ui
+from terminal_coding_agent import cli, ui
 
 
 def _capture(monkeypatch) -> io.StringIO:
@@ -16,16 +18,17 @@ def _capture(monkeypatch) -> io.StringIO:
     return stream
 
 
-def _asker(lines: list[str]):
+def _script(monkeypatch, lines: list[str]) -> None:
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     pending = iter(lines)
 
-    def ask(*args, **kwargs) -> str:
+    def _read(prompt: str = "") -> str:
         try:
             return next(pending)
         except StopIteration as exc:  # a real prompt raises EOFError on Ctrl-D
             raise EOFError from exc
 
-    return ask
+    monkeypatch.setattr("builtins.input", _read)
 
 
 class _FakeGraph:
@@ -118,7 +121,7 @@ def test_repl_opens_a_todo_region_around_each_turn(tmp_path: Path, monkeypatch) 
     config = cli._session_config(worktree=tmp_path, session="s1")
     todos = _RecordingTodos()
     config["configurable"]["todo_renderer"] = todos
-    monkeypatch.setattr(ui, "ask", _asker(["fix the typo"]))
+    _script(monkeypatch, ["fix the typo"])
 
     cli.repl(graph=graph, config=config, model_name="deepseek:deepseek-v4-flash")
 
@@ -129,7 +132,7 @@ def test_repl_opens_a_todo_region_around_each_turn(tmp_path: Path, monkeypatch) 
 def test_repl_runs_every_turn_through_the_graph(tmp_path: Path, monkeypatch) -> None:
     _capture(monkeypatch)
     graph = _FakeGraph()
-    monkeypatch.setattr(ui, "ask", _asker(["fix the typo"]))
+    _script(monkeypatch, ["fix the typo"])
 
     cli.repl(
         graph=graph,
@@ -142,7 +145,7 @@ def test_repl_runs_every_turn_through_the_graph(tmp_path: Path, monkeypatch) -> 
 
 def test_repl_answers_eof_by_returning(tmp_path: Path, monkeypatch) -> None:
     _capture(monkeypatch)
-    monkeypatch.setattr(ui, "ask", _asker([]))
+    _script(monkeypatch, [])
 
     cli.repl(
         graph=_FakeGraph(),
@@ -194,9 +197,6 @@ def test_main_defaults_to_a_throwaway_worktree(monkeypatch) -> None:
     assert not worktree.exists(), "a throwaway worktree must not outlive the session"
 
 
-from langgraph.types import Command
-
-
 class _EmptySnapshot:
     tasks: tuple = ()
 
@@ -232,7 +232,7 @@ def test_session_config_enables_hitl(tmp_path: Path) -> None:
 def test_repl_drains_a_paused_plan_through_approval(tmp_path, monkeypatch) -> None:
     _capture(monkeypatch)
     graph = _PausingGraph()
-    monkeypatch.setattr(ui, "ask", _asker(["fix the typo"]))
+    _script(monkeypatch, ["fix the typo"])
     monkeypatch.setattr(ui, "ask_approval", lambda payload, **kwargs: "approve")
 
     cli.repl(
@@ -249,7 +249,7 @@ def test_repl_does_not_reprint_the_plan_the_turn_already_rendered(tmp_path, monk
     """`_announce_todos` printed this plan as the turn's Tasks panel; printing it again doubles it."""
     _capture(monkeypatch)
     seen: list[dict] = []
-    monkeypatch.setattr(ui, "ask", _asker(["fix the typo"]))
+    _script(monkeypatch, ["fix the typo"])
     monkeypatch.setattr(
         ui, "ask_approval", lambda payload, **kwargs: seen.append(kwargs) or "approve"
     )
@@ -275,7 +275,7 @@ def test_repl_prompts_for_approval_outside_the_live_region(tmp_path, monkeypatch
         return "approve"
 
     monkeypatch.setattr(ui, "ask_approval", spy_approval)
-    monkeypatch.setattr(ui, "ask", _asker(["fix the typo"]))
+    _script(monkeypatch, ["fix the typo"])
     config = cli._session_config(worktree=tmp_path, session="s1")
     config["configurable"]["todo_renderer"] = panel
 
@@ -305,7 +305,7 @@ def test_repl_resumes_inside_the_live_region_so_the_panel_refreshes(tmp_path, mo
     panel = ui.TodoPanel(console)
     graph = _LiveSpyGraph(panel)
     monkeypatch.setattr(ui, "ask_approval", lambda payload, **kwargs: "approve")
-    monkeypatch.setattr(ui, "ask", _asker(["fix the typo"]))
+    _script(monkeypatch, ["fix the typo"])
     config = cli._session_config(worktree=tmp_path, session="s1")
     config["configurable"]["todo_renderer"] = panel
 
@@ -330,7 +330,7 @@ def test_repl_rebuilds_a_pending_approval_at_startup(tmp_path, monkeypatch) -> N
     _capture(monkeypatch)
     graph = _PendingAtStartupGraph()
     seen: list[dict] = []
-    monkeypatch.setattr(ui, "ask", _asker([]))  # EOF: no user turn at all
+    _script(monkeypatch, [])  # EOF: no user turn at all
     monkeypatch.setattr(
         ui, "ask_approval", lambda payload, **kwargs: seen.append(kwargs) or "approve"
     )
@@ -374,7 +374,7 @@ class _QuestionGraph(_PausingGraph):
 def test_repl_answers_a_question_with_the_selection(tmp_path, monkeypatch) -> None:
     _capture(monkeypatch)
     graph = _QuestionGraph()
-    monkeypatch.setattr(ui, "ask", _asker(["fix the typo"]))
+    _script(monkeypatch, ["fix the typo"])
     monkeypatch.setattr(ui, "ask_question", lambda payload: {"answer": "b", "cancelled": False})
     monkeypatch.setattr(ui, "ask_approval", _unexpected)
 
@@ -391,7 +391,7 @@ def test_repl_maps_a_dismissed_question_to_the_cancelled_sentinel(tmp_path, monk
     """A question is not a plan gate: Ctrl-C lets the agent carry on, it does not reject."""
     _capture(monkeypatch)
     graph = _QuestionGraph()
-    monkeypatch.setattr(ui, "ask", _asker(["fix the typo"]))
+    _script(monkeypatch, ["fix the typo"])
     monkeypatch.setattr(ui, "ask_question", _interrupt)
 
     cli.repl(
@@ -407,7 +407,7 @@ def test_repl_ends_the_turn_on_eof_at_a_question(tmp_path, monkeypatch) -> None:
     """EOF closes the answer channel for good: resuming would ask again forever."""
     _capture(monkeypatch)
     graph = _QuestionGraph()
-    monkeypatch.setattr(ui, "ask", _asker(["fix the typo"]))
+    _script(monkeypatch, ["fix the typo"])
     monkeypatch.setattr(ui, "ask_question", _dismiss)
 
     cli.repl(
@@ -424,7 +424,7 @@ def test_repl_keeps_rejecting_a_declined_plan_prompt(tmp_path, monkeypatch) -> N
     """The plan gate's dismissal semantics must not follow the question's."""
     _capture(monkeypatch)
     graph = _PausingGraph()
-    monkeypatch.setattr(ui, "ask", _asker(["fix the typo"]))
+    _script(monkeypatch, ["fix the typo"])
     monkeypatch.setattr(ui, "ask_approval", _dismiss)
 
     cli.repl(
@@ -442,17 +442,6 @@ def test_session_config_enables_answer_mode(tmp_path: Path) -> None:
     assert config["configurable"]["enable_answer_mode"] is True
 
 
-def test_run_shell_in_worktree_captures_output(tmp_path) -> None:
-    exit_code, output = cli._run_shell_in_worktree("echo hi", tmp_path)
-    assert exit_code == 0
-    assert "hi" in output
-
-
-def test_run_shell_in_worktree_reports_a_nonzero_exit(tmp_path) -> None:
-    exit_code, output = cli._run_shell_in_worktree("exit 3", tmp_path)
-    assert exit_code == 3
-
-
 class _CapturingGraph(_FakeGraph):
     def __init__(self) -> None:
         super().__init__()
@@ -465,15 +454,13 @@ class _CapturingGraph(_FakeGraph):
 
 def _drive(monkeypatch, tmp_path, lines, extra_commands=()):
     _capture(monkeypatch)
-    monkeypatch.setattr(commands, "COMMANDS", {})
-    for command in (*commands.builtin_commands(), *extra_commands):
-        commands.register(command)
-    monkeypatch.setattr(ui, "ask", _asker(lines))
+    _script(monkeypatch, lines)
     graph = _CapturingGraph()
     cli.repl(
         graph=graph,
         config=cli._session_config(worktree=tmp_path, session="s1"),
         model_name="m",
+        commands=extra_commands,
     )
     return graph
 
@@ -500,12 +487,12 @@ def test_a_task_goes_to_the_graph_with_its_attachment(tmp_path, monkeypatch) -> 
 
 
 def test_a_prompt_command_goes_to_the_graph_as_a_task(tmp_path, monkeypatch) -> None:
-    class _Review(commands.PromptCommand):
+    class _Review(PromptCommand):
         name = "review"
         summary = "review a file"
 
         def run(self, ctx, args):
-            return commands.CommandOutcome(prompt=f"Review {args}.")
+            return CommandOutcome(prompt=f"Review {args}.")
 
     graph = _drive(monkeypatch, tmp_path, ["/review src/a.py"], extra_commands=[_Review()])
     assert graph.payloads[0]["messages"][0].content == "Review src/a.py."
@@ -521,11 +508,8 @@ def test_scripted_session_mixes_shorthands_and_tasks(tmp_path, monkeypatch) -> N
     (tmp_path / "NOTES.md").write_text("hello", encoding="utf-8")
     rendered: list[str] = []
     _capture(monkeypatch)
-    monkeypatch.setattr(commands, "COMMANDS", {})
-    for command in commands.builtin_commands():
-        commands.register(command)
-    monkeypatch.setattr(ui, "render_local", rendered.append)
-    monkeypatch.setattr(ui, "ask", _asker(["!echo hi", "/help", "summarize @NOTES.md", "/quit"]))
+    monkeypatch.setattr("repl_console.repl.render_local", rendered.append)
+    _script(monkeypatch, ["!echo hi", "/help", "summarize @NOTES.md", "/quit"])
     graph = _CapturingGraph()
 
     cli.repl(

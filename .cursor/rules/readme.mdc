@@ -8,7 +8,7 @@ alwaysApply: false
 
 ## 根目录 `README.md`
 
-只做导航：一句话说明仓库是什么 + 项目表（名称 / 一句话 / 链接到项目 README 与 PROJECT.md）。不写任何项目细节。
+只做导航：一句话说明仓库是什么 + 两张表。项目表：名称 / 一句话 / 链接到项目 README 与 PROJECT.md。组件表：名称 / 一句话 / 导入名。不写任何项目细节。
 
 ## 项目 `README.md`
 

@@ -1,9 +1,8 @@
 from pathlib import Path
 
 from langchain_core.documents import Document
-from PIL import Image
-
 from multimodal_doc_qa.retrievers.rerank import PageRank, order_documents, rerank_pages
+from PIL import Image
 
 
 def _doc(page_id: str) -> Document:
@@ -22,7 +21,7 @@ def test_rerank_skips_the_model_for_a_single_page() -> None:
             raise AssertionError("one page has nothing to reorder")
 
     docs = [_doc("a/p000")]
-    assert rerank_pages(_Model(), "q", docs, Path("."), None) is docs
+    assert rerank_pages(_Model(), "q", docs, Path(), None) is docs
 
 
 def test_rerank_follows_the_model(tmp_path: Path) -> None:

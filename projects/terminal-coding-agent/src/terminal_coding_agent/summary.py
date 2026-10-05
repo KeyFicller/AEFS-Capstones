@@ -7,10 +7,11 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, message_chunk_to_message
 from langchain_core.runnables import RunnableConfig
+from telemetry import chat_span, record_chat_usage, resolve_model_name
 
-from terminal_coding_agent import shorthands
 from terminal_coding_agent.artifacts import publish_patch
-from terminal_coding_agent.budget import (
+from terminal_coding_agent.attachments import strip_images
+from terminal_coding_agent.ledger import (
     BudgetSession,
     ledger_from_state,
     summarize_todos,
@@ -20,7 +21,6 @@ from terminal_coding_agent.budget import (
 from terminal_coding_agent.middleware.sequence import write_sequence_png
 from terminal_coding_agent.models import AgentModels
 from terminal_coding_agent.state import CodingAgentState
-from terminal_coding_agent.telemetry import chat_span, record_chat_usage, resolve_model_name
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +89,7 @@ def build_summary(
 
     def summary(state: CodingAgentState, config: RunnableConfig) -> dict[str, Any]:
         summary_message = HumanMessage(content="Summarize the task.")
-        summary_input = shorthands.strip_images(list(state["messages"])) + [summary_message]
+        summary_input = strip_images(list(state["messages"])) + [summary_message]
         model_name = resolve_model_name(models.planner)
         ledger = ledger_from_state(state)
         try:

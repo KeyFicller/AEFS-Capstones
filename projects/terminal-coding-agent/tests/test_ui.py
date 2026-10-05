@@ -81,16 +81,6 @@ def test_panel_always_shows_the_replan_count(monkeypatch) -> None:
     assert "replan v0" in stream.getvalue()
 
 
-def test_banner_reports_session_and_worktree(monkeypatch) -> None:
-    stream = _capture(monkeypatch)
-
-    ui.banner(session="cli-abcd", worktree="/tmp/wt", model="deepseek:deepseek-v4-flash")
-
-    out = stream.getvalue()
-    assert "cli-abcd" in out
-    assert "/tmp/wt" in out
-
-
 def test_tool_log_summarises_each_call(monkeypatch) -> None:
     """One line per call: what ran, on what, and how it went."""
     stream = _capture(monkeypatch)
@@ -166,14 +156,6 @@ def test_render_budget_reports_turns_and_stop_reason(monkeypatch) -> None:
     assert "cost" not in out and "¥" not in out
 
 
-def test_render_error_surfaces_the_message(monkeypatch) -> None:
-    stream = _capture(monkeypatch)
-
-    ui.render_error("boom")
-
-    assert "boom" in stream.getvalue()
-
-
 def test_importing_ui_enables_a_line_editor() -> None:
     """Without readline, input() erases one byte per backspace and mangles CJK.
 
@@ -195,25 +177,6 @@ def test_importing_ui_enables_a_line_editor() -> None:
     )
 
     assert completed.stdout.strip() == "True"
-
-
-def test_ask_hands_the_prompt_to_readline(monkeypatch) -> None:
-    """readline must own the prompt, or over-backspacing erases 'you ›' itself.
-
-    A prompt printed separately (as rich's Console.input does) leaves readline
-    thinking column 0 is the start of the input.
-    """
-    seen: dict[str, str] = {}
-
-    def fake_input(prompt: str = "") -> str:
-        seen["prompt"] = prompt
-        return "修复登录"
-
-    monkeypatch.setattr("builtins.input", fake_input)
-
-    assert ui.ask() == "修复登录"
-    assert "you" in seen["prompt"]
-    assert "[bold" not in seen["prompt"], "input() prints raw text, so no rich markup"
 
 
 def _open_tty(monkeypatch):
@@ -475,24 +438,6 @@ def test_tool_log_survives_brackets_in_a_path(monkeypatch) -> None:
     assert "[red]boom[/red]" in out
 
 
-def test_render_error_survives_brackets(monkeypatch) -> None:
-    """The error renderer is the last line of defence; it must not raise itself."""
-    stream = _capture(monkeypatch)
-
-    ui.render_error("KeyError: 'a[b]'")
-
-    assert "KeyError" in stream.getvalue()
-
-
-def test_banner_survives_bracketed_paths(monkeypatch) -> None:
-    stream = _capture(monkeypatch)
-
-    ui.banner(session="s[1]", worktree="/tmp/wt[x]", model="m")
-
-    out = stream.getvalue()
-    assert "/tmp/wt[x]" in out
-
-
 def test_ask_question_handles_a_unicode_digit(monkeypatch) -> None:
     """`'²'.isdigit()` is True but `int('²')` raises: the prompt must not crash on it."""
     _capture(monkeypatch)
@@ -517,66 +462,3 @@ def test_ask_question_escapes_a_bracketed_option(monkeypatch) -> None:
     assert "which[?]" in stream.getvalue()
 
 
-def test_render_shell_shows_output_and_exit_code(monkeypatch) -> None:
-    stream = _capture(monkeypatch)
-    ui.render_shell(exit_code=0, output="hello\n")
-    assert "hello" in stream.getvalue()
-    assert "exit 0" in stream.getvalue()
-
-
-def test_render_shell_survives_rich_markup_in_output(monkeypatch) -> None:
-    """A command printing `[red]x[/red]` is markup to rich: it must not raise."""
-    stream = _capture(monkeypatch)
-    ui.render_shell(exit_code=0, output="[red]boom[/red]")
-    assert "[red]boom[/red]" in stream.getvalue()
-
-
-def test_render_local_prints_plain_text(monkeypatch) -> None:
-    stream = _capture(monkeypatch)
-    ui.render_local("/help  list the registered commands")
-    assert "/help" in stream.getvalue()
-
-
-def test_render_reply_handles_multimodal_content(monkeypatch) -> None:
-    stream = _capture(monkeypatch)
-    ui.render_reply(
-        [{"type": "text", "text": "# title"}, {"type": "image_url", "image_url": {"url": "x"}}]
-    )
-    assert "title" in stream.getvalue()
-
-
-def test_ask_falls_back_to_input_when_ptk_is_unavailable(monkeypatch) -> None:
-    monkeypatch.setattr(ui, "_HAVE_PTK", False)
-    monkeypatch.setattr("builtins.input", lambda prompt="": "hello")
-    assert ui.ask() == "hello"
-
-
-def test_ptk_completer_completes_a_slash_command(tmp_path) -> None:
-    """The wiring (completer -> candidate list) without a real terminal."""
-    pytest.importorskip("prompt_toolkit")
-    from prompt_toolkit.completion import CompleteEvent
-    from prompt_toolkit.document import Document
-
-    completer = ui._ShorthandCompleter(tmp_path, ("help", "quit"))
-    document = Document("/he", 3)
-    completions = [
-        completion.text for completion in completer.get_completions(document, CompleteEvent())
-    ]
-    assert completions == ["/help"]
-
-
-def test_a_prompt_session_returns_the_typed_line(tmp_path) -> None:
-    """ptk's own pipe input: proves the session type reads a line and runs the completer."""
-    pytest.importorskip("prompt_toolkit")
-    from prompt_toolkit import PromptSession
-    from prompt_toolkit.input import create_pipe_input
-    from prompt_toolkit.output import DummyOutput
-
-    with create_pipe_input() as pipe:
-        session = PromptSession(
-            input=pipe,
-            output=DummyOutput(),
-            completer=ui._ShorthandCompleter(tmp_path, ("help",)),
-        )
-        pipe.send_text("/he\t\r")
-        assert session.prompt("you > ") == "/he"

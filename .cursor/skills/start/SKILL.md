@@ -11,7 +11,7 @@ description: 仓库根目录的 ./start.sh 是环境、脚手架、测试、运�
 |---|---|
 | 建 `.venv` 并装依赖 | `./start.sh setup` |
 | 从 `examples/hello-agent` 新建项目并注册到 `requirements.txt` | `./start.sh new <name>` |
-| 跑测试（默认 `examples/` + `projects/`） | `./start.sh test [path]` |
+| 跑测试（默认 `examples/` + `projects/` + `components/`） | `./start.sh test [path]` |
 | 在共享环境里跑任意命令 | `./start.sh run <cmd...>`（等价 `uv run --no-project <cmd>`） |
 | 清 `__pycache__` / `.pytest_cache` / `.ruff_cache` | `./start.sh clean` |
 

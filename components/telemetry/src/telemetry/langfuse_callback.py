@@ -7,7 +7,7 @@ Docs: https://langfuse.com/integrations/frameworks/langchain
 
 from typing import Any
 
-from terminal_coding_agent.telemetry.setup import langfuse_env
+from telemetry.setup import langfuse_env
 
 
 def langfuse_callback_handler() -> Any | None:
@@ -17,7 +17,7 @@ def langfuse_callback_handler() -> Any | None:
     # SDK also reads LANGFUSE_HOST; keep it aligned with BASE_URL (skill/CLI note).
     import os
 
-    from terminal_coding_agent.telemetry.setup import DEFAULT_LANGFUSE_BASE_URL
+    from telemetry.setup import DEFAULT_LANGFUSE_BASE_URL
 
     base = os.environ.get("LANGFUSE_BASE_URL", "").strip() or DEFAULT_LANGFUSE_BASE_URL
     os.environ["LANGFUSE_BASE_URL"] = base

@@ -46,6 +46,6 @@ def set_tool_attributes(
 
 
 def assert_no_content_attributes(span: Span) -> None:
-    for key, value in span.attributes.items():
+    for key in span.attributes:
         if any(key.startswith(prefix) for prefix in FORBIDDEN_ATTR_PREFIXES_OR_KEYS):
             raise ValueError(f"Attribute {key} is forbidden")

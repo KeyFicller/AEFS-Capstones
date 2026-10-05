@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import suppress
 from pathlib import Path
 
 from langchain_core.messages import HumanMessage
@@ -104,10 +105,8 @@ def test_crashed_node_is_rerun_on_resume(tmp_path: Path) -> None:
     cfg = {"configurable": {"thread_id": "t4"}}
     app = graph.compile(checkpointer=build_checkpointer(tmp_path))
 
-    try:
+    with suppress(RuntimeError):
         app.invoke({}, cfg)
-    except RuntimeError:
-        pass
     assert app.get_state(cfg).next == ("b",)
 
     fail["on"] = False

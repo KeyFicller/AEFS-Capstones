@@ -15,8 +15,8 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import MessagesState
 
 from multimodal_doc_qa.agent import nodes
-from multimodal_doc_qa.budget import Budget
 from multimodal_doc_qa.config import Settings
+from multimodal_doc_qa.limits import Budget
 from multimodal_doc_qa.schemas import Answer, Document
 
 
@@ -200,4 +200,4 @@ if __name__ == "__main__":
         render_dir=png_path.parent,
     )
     png_path.write_bytes(build_graph(structure, settings).get_graph(xray=True).draw_mermaid_png())
-    print(f"graph     {png_path}")
+    print(f"graph     {png_path}")  # noqa: T201  # noqa: T201

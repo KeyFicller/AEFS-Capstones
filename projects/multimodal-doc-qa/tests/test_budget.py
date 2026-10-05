@@ -5,12 +5,35 @@ that respects its loop bound can still cost more than a caller expected. These t
 three caps independently, because a cap that only works when another one is off is not a cap.
 """
 
+import subprocess
+import sys
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from multimodal_doc_qa.budget import Budget, BudgetCallback
 from multimodal_doc_qa.config import Settings
+from multimodal_doc_qa.limits import Budget, BudgetCallback
+
+
+def test_script_directory_does_not_shadow_the_budget_package() -> None:
+    pkg = Path(__file__).resolve().parents[1] / "src" / "multimodal_doc_qa"
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "from multimodal_doc_qa.limits import Budget\n"
+            "import budget\n"
+            "print(budget.__file__)\n",
+            str(pkg),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "multimodal_doc_qa/budget.py" not in proc.stdout
 
 
 def _budget(**overrides: object) -> Budget:

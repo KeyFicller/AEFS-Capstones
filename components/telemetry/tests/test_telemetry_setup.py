@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, patch
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-from terminal_coding_agent.telemetry.langfuse_callback import langfuse_callback_handler
-from terminal_coding_agent.telemetry.setup import (
+from telemetry.langfuse_callback import langfuse_callback_handler
+from telemetry.setup import (
     configure_default_exporters,
     get_tracer,
     langfuse_env,
@@ -39,7 +39,7 @@ def test_langfuse_env_reads_keys_and_base(monkeypatch) -> None:
 
 
 def test_langfuse_otlp_exporter_endpoint_and_headers() -> None:
-    with patch("terminal_coding_agent.telemetry.setup.OTLPSpanExporter") as exporter_cls:
+    with patch("telemetry.setup.OTLPSpanExporter") as exporter_cls:
         exporter_cls.return_value = MagicMock(name="otlp")
         langfuse_otlp_exporter(
             public_key="pk-test",
@@ -70,7 +70,7 @@ def test_configure_default_exporters_otlp_opt_in(tmp_path: Path, monkeypatch) ->
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test")
     monkeypatch.setenv("LANGFUSE_OTLP", "1")
     with patch(
-        "terminal_coding_agent.telemetry.setup.langfuse_otlp_exporter",
+        "telemetry.setup.langfuse_otlp_exporter",
         return_value=MagicMock(name="otlp"),
     ):
         provider = TracerProvider()

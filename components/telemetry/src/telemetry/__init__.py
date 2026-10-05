@@ -1,7 +1,7 @@
 """Telemetry package exports."""
 
-from terminal_coding_agent.telemetry.chat import chat_span, record_chat_usage, resolve_model_name
-from terminal_coding_agent.telemetry.setup import (
+from telemetry.chat import chat_span, record_chat_usage, resolve_model_name
+from telemetry.setup import (
     get_tracer,
     otel_jsonl_path,
     setup_tracing,

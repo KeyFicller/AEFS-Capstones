@@ -56,10 +56,10 @@ class MultiVectorIndex:
         torch.save({pid: v.cpu() for pid, v in self._vectors.items()}, path)
 
     @classmethod
-    def load(cls, path: Path) -> MultiVectorIndex:
+    def load(cls, path: Path) -> "MultiVectorIndex":
         """Load an index written by ``save``."""
         obj = cls(device="cpu")
-        obj._vectors = {pid: v for pid, v in torch.load(path, weights_only=True).items()}
+        obj._vectors = dict(torch.load(path, weights_only=True).items())
         return obj
 
     def matrices(self) -> dict[str, torch.Tensor]:

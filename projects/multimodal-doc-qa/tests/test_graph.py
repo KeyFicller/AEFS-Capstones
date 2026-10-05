@@ -10,9 +10,9 @@ reaches ``max_rounds + 1`` before anyone notices.
 from pathlib import Path
 
 from langchain_core.documents import Document
-from multimodal_doc_qa.budget import Budget
 from multimodal_doc_qa.config import Settings
 from multimodal_doc_qa.graph import GraphDeps, build_graph, initial_state
+from multimodal_doc_qa.limits import Budget
 from multimodal_doc_qa.schemas import Answer, Citation
 from PIL import Image
 
@@ -43,7 +43,7 @@ class _StubModel:
         self.unsupported = list(unsupported)
         self.calls: list[list[dict]] = []
 
-    def invoke(self, messages: list[dict]) -> _StubModel:
+    def invoke(self, messages: list[dict]) -> "_StubModel":
         self.calls.append(messages)
         return self
 

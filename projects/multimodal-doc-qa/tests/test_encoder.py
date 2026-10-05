@@ -45,7 +45,7 @@ def test_encode_texts_calls_process_texts(monkeypatch: pytest.MonkeyPatch) -> No
     """Document text must not pick up the query-augmentation suffix."""
 
     class _Batch(dict):
-        def to(self, device: str) -> _Batch:
+        def to(self, device: str) -> "_Batch":
             return self
 
     class _Processor:

@@ -11,16 +11,17 @@ from langchain.agents.middleware import SummarizationMiddleware
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.errors import GraphBubbleUp
+from telemetry import resolve_model_name
 
-from terminal_coding_agent.budget import (
+from terminal_coding_agent.attachments import attached_images
+from terminal_coding_agent.config import PRECOMPACT_TOKENS
+from terminal_coding_agent.ledger import (
     budget_updates,
-    check,
     ledger_from_state,
     summarize_todos,
     trace_path,
     write_trace,
 )
-from terminal_coding_agent.config import PRECOMPACT_TOKENS
 from terminal_coding_agent.middleware import (
     AskUserMiddleware,
     BlockedReportMiddleware,
@@ -32,9 +33,7 @@ from terminal_coding_agent.middleware import (
 )
 from terminal_coding_agent.models import SYSTEM_PROMPTS, AgentModels
 from terminal_coding_agent.recover import project_evidence
-from terminal_coding_agent.shorthands import attached_images
 from terminal_coding_agent.state import CodingAgentState, ToDoStatus, format_todos
-from terminal_coding_agent.telemetry import resolve_model_name
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +66,7 @@ def build_execute_nodes(
         # A new task starts unblocked: the block report belongs to the task that just ended.
         clear_block = {"blocked_reason": None, "blocked_evidence": []}
 
-        if reason := check(ledger):
+        if reason := ledger.check():
             ledger.stop_reason = reason
             write_trace(trace, ledger, todo_list=todos, stop_reason=reason)
             return {**budget_updates(ledger), **clear_block, "stop_reason": reason}

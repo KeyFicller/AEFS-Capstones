@@ -4,13 +4,13 @@ from types import SimpleNamespace
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-from terminal_coding_agent.middleware.observability import ObservabilityMiddleware
-from terminal_coding_agent.telemetry.attrs import (
+from telemetry.attrs import (
     ATTR_MODEL,
     ATTR_TOOL_NAME,
     assert_no_content_attributes,
 )
-from terminal_coding_agent.telemetry.setup import setup_tracing
+from telemetry.setup import setup_tracing
+from terminal_coding_agent.middleware.observability import ObservabilityMiddleware
 
 
 def _model_request() -> dict:

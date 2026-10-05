@@ -1,5 +1,5 @@
 from langchain_core.messages import AIMessage
-from terminal_coding_agent.budget import BudgetSession
+from terminal_coding_agent.ledger import BudgetSession
 
 
 def test_budget_session_applies_usage_on_exit() -> None:

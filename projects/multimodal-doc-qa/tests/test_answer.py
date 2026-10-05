@@ -104,7 +104,7 @@ def test_build_page_blocks_sends_text_for_a_text_document(tmp_path: Path) -> Non
 # ------------------------------------------------------------ AnswerSynthesizer
 
 
-class _UnsupportedStructuredOutput(RuntimeError):
+class _UnsupportedStructuredOutputError(RuntimeError):
     """Stands in for a provider that cannot bind a schema.
 
     A distinct type on purpose: asserting ``NotImplementedError`` here would also
@@ -236,9 +236,9 @@ def test_synthesizer_surfaces_an_unsupported_structured_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Structured output is required, so an unbound model must fail at construction."""
-    model = _StubModel(unsupported=_UnsupportedStructuredOutput("no tool calling"))
+    model = _StubModel(unsupported=_UnsupportedStructuredOutputError("no tool calling"))
 
-    with pytest.raises(_UnsupportedStructuredOutput):
+    with pytest.raises(_UnsupportedStructuredOutputError):
         _synthesizer(monkeypatch, model)
 
 

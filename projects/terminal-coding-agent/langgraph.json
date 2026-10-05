@@ -4,6 +4,8 @@
   },
   "dependencies": [
     "requirements-harbor.txt",
-    "."
+    ".",
+    "./vendor/budget",
+    "./vendor/telemetry"
   ]
 }

@@ -102,7 +102,7 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 | `src/multimodal_doc_qa/retrievers/` | LangChain `BaseRetriever`：`MultiVectorRetriever`（vision）/ `TextRetriever`（OCR） | langchain-core, index |
 | `src/multimodal_doc_qa/agent/` | `plan` / `assess` / `verify` 的 prompt 与结构化 schema | langchain |
 | `src/multimodal_doc_qa/graph.py` | LangGraph 装配，维护页面池与 `rounds` | langgraph, langchain |
-| `src/multimodal_doc_qa/budget.py` | 单次 ask 的调用数 / token / 墙钟三档熔断与用量统计 | langchain-core |
+| `src/multimodal_doc_qa/limits.py` | `from_settings`。账本在 `budget`：调用次数、token、墙钟 | `budget` |
 | `src/multimodal_doc_qa/synth/` | `deepseek:deepseek-flash` 合成 + 引用/bbox 抽取 | langchain |
 | `src/multimodal_doc_qa/baseline/` | OCR-first 文本抽取 + 分块（供 `TextRetriever` 建索引） | pymupdf, pytesseract, sentence-transformers |
 | `src/multimodal_doc_qa/eval/` | 指标、runner、结果落盘 | — |
@@ -191,7 +191,7 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 
 - **CLI**：`doc-qa`（加载 artifacts 后进入 REPL）、`doc-qa chat [--mode]`、`doc-qa ingest <corpus_dir>`、`doc-qa ask "<question>"`、`doc-qa eval --questions <questions.json> [--mode] [--max-tokens] [--max-seconds]`。
 - **CLI 细节**：
-  - REPL（不带子命令）：启动时加载视觉编码器和文本编码器各一次，四条臂里索引在的都建好。`--mode` 或 `MDQ_MODE` 选 `vision` / `pool` / `ocr` / `summary`，默认 `vision`。`vision` 是多向量后期交互；`pool` 把同一份多向量按 patch 做平均池化；`ocr` 是页文本；`summary` 是入库时视觉模型写的页描述，再用文本编码器检索。状态栏只显示当前臂的模型：`vision` / `pool` 是视觉编码器，`ocr` 是文本编码器，`summary` 是写描述的模型加文本编码器。`Shift-Tab` 按 `vision → ocr → pool → summary` 切换，不再加载模型；缺索引的那一档停在当前档。空行忽略；`:q` / Ctrl-C / Ctrl-D 退出，一轮还在跑时 Ctrl-C 只取消这一轮。
+  - REPL（不带子命令）：由 `repl-console` 驱动。启动时加载视觉编码器和文本编码器各一次，四条臂里索引在的都建好。`--mode` 或 `MDQ_MODE` 选 `vision` / `pool` / `ocr` / `summary`，默认 `vision`。`vision` 是多向量后期交互；`pool` 把同一份多向量按 patch 做平均池化；`ocr` 是页文本；`summary` 是入库时视觉模型写的页描述，再用文本编码器检索。状态栏只显示当前臂的模型：`vision` / `pool` 是视觉编码器，`ocr` 是文本编码器，`summary` 是写描述的模型加文本编码器。`Shift-Tab` 仍是本项目的按键，按 `vision → ocr → pool → summary` 切换，不再加载模型；缺索引的那一档停在当前档。`/index <路径>` 用 artifacts 下的语料重写索引，`.` 就是 artifacts 目录。建完当前会话换上新索引并清空历史。失败则留下旧索引。空行忽略；`/quit`、主提示上的 Ctrl-C、Ctrl-D 退出，一轮还在跑时 Ctrl-C 只取消这一轮。
   - `summary` 只在 `MDQ_MODE=summary` 或 `MDQ_SUMMARIES=1` 时随 `ingest` 写入。缓存是图片字节的 sha256，同一张图只调用一次视觉模型。
   - `MDQ_RERANK=1` 时，检索之后用视觉模型把本轮命中的页重排一次。默认关闭。
   - `ingest --corpus` 接受 `pdf` / 图片（`png` / `jpg` / `jpeg` / `webp`）/ `txt` / `md`：PDF 与图片走 `encode_images`；纯文本按块切、用同一视觉编码器的 `encode_texts` 进视觉索引，不光栅化。字节相同的后一份文件跳过。只有一份文件时 `doc_id` 是词干，同词干有两份则用完整文件名、两份都入库。

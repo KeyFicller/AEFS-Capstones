@@ -2,47 +2,31 @@
 
 import re
 import sys
-from collections.abc import Iterator, Mapping, Sequence
-from contextlib import contextmanager
-from pathlib import Path
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager, suppress
 from typing import Any
 
+from repl_console import reply_panel
 from rich.console import Console, Group, RenderableType
 from rich.live import Live
-from rich.markdown import Markdown
 from rich.markup import escape
 from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.syntax import Syntax
 from rich.text import Text
 
-from terminal_coding_agent import shorthands
-
 # Imported for its side effect: it switches input() from the tty's canonical mode
 # to a line editor. Canonical mode erases one BYTE per backspace, so a 3-byte CJK
 # character takes three presses and leaves stray bytes on screen ("残留").
 # macOS uses libedit, Linux GNU readline; both handle wide characters correctly.
-try:
-    import readline  # noqa: F401
-except ImportError:  # pragma: no cover - platforms without readline (e.g. Windows)
-    pass
-
-try:
-    from prompt_toolkit import PromptSession
-    from prompt_toolkit.completion import Completer, Completion
-
-    _HAVE_PTK = True
-except ImportError:  # pragma: no cover - Harbor's venv has no prompt_toolkit
-    _HAVE_PTK = False
+with suppress(ImportError):
+    import readline  # noqa: F401  side effect: line editor instead of canonical tty mode
 
 # Module-level so tests can swap it for a file-backed Console.
 CONSOLE = Console()
 
 # \1..\2 tell readline these escapes occupy no columns; without them the colour
 # codes would count toward the prompt width and shift the line.
-PROMPT = "\001\033[1;32m\002you › \001\033[0m\002"
-PLAIN_PROMPT = "you › "
-PROMPT_FORMATTED = [("bold ansigreen", "you › ")]
 APPROVAL_PROMPT = "\001\033[1;33m\002approve? [y/n] › \001\033[0m\002"
 PLAIN_APPROVAL_PROMPT = "approve? [y/n] › "
 QUESTION_PROMPT = "\001\033[1;36m\002answer › \001\033[0m\002"
@@ -226,57 +210,6 @@ class ToolLog:
             self._console.print(Syntax(result, "diff", background_color="default", word_wrap=True))
 
 
-def banner(*, session: str, worktree: str, model: str) -> None:
-    """Opening panel: which thread, which worktree, which model."""
-    body = Text.from_markup(
-        f"[bold]session[/]  {escape(session)}\n"
-        f"[bold]worktree[/] {escape(str(worktree))}\n"
-        f"[bold]model[/]    {escape(model)}"
-    )
-    CONSOLE.print(Panel(body, title="terminal-coding-agent", border_style="cyan"))
-
-
-def ask(*, session: Any = None) -> str:
-    """One user line. Raises EOFError on Ctrl-D, KeyboardInterrupt on Ctrl-C.
-
-    The prompt is handed to `input()` rather than `Console.input()`, because readline
-    must own it: given the prompt, it knows the line's starting column and refuses to
-    backspace past it. Printed separately (as rich does), readline treats column 0 as
-    the start of the input, so over-backspacing eats the prompt itself. `\\1`/`\\2`
-    mark the ANSI escapes as zero-width. Piped stdin gets the plain text instead.
-    A `prompt_toolkit` session (built by `make_session`) owns the line when available,
-    which is what gives `@` / `/` completion.
-    """
-    if session is not None:
-        return session.prompt(PROMPT_FORMATTED)
-    return input(PROMPT if sys.stdin.isatty() else PLAIN_PROMPT)
-
-
-def make_session(*, worktree: Path, command_names: Sequence[str]) -> Any | None:
-    """A reusable ptk session with shorthand completion; None without a tty or ptk."""
-    if not (sys.stdin.isatty() and _HAVE_PTK):
-        return None
-    return PromptSession(completer=_ShorthandCompleter(worktree, tuple(command_names)))
-
-
-if _HAVE_PTK:
-
-    class _ShorthandCompleter(Completer):
-        """Wraps the pure `completion_candidates` so the rules stay testable."""
-
-        def __init__(self, worktree: Path, command_names: tuple[str, ...]) -> None:
-            self._worktree = worktree
-            self._command_names = command_names
-
-        def get_completions(self, document: Any, complete_event: Any) -> Iterator[Any]:
-            text = document.text_before_cursor
-            for candidate in shorthands.completion_candidates(
-                text, self._worktree, self._command_names
-            ):
-                index = text.rfind(candidate[0])
-                yield Completion(candidate, start_position=index - len(text))
-
-
 def ask_approval(payload: Mapping[str, Any], *, show_plan: bool = True) -> str:
     """Show the plan and read a decision. Distinct prompt from `ask()` on purpose.
 
@@ -333,50 +266,6 @@ def ask_question(payload: Mapping[str, Any]) -> dict[str, Any]:
         if answer.isdecimal() and 1 <= int(answer) <= len(options):
             return {"answer": options[int(answer) - 1], "cancelled": False}
         return {"answer": answer, "cancelled": False}
-
-
-def _content_text(content: Any) -> str:
-    """Markdown text of a message; image blocks become a placeholder."""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for part in content:
-            if not isinstance(part, dict):
-                continue
-            if part.get("type") == "text":
-                parts.append(part.get("text", ""))
-            elif part.get("type") == "image_url":
-                parts.append("[image]")
-        return "\n".join(parts)
-    return ""
-
-
-def reply_panel(text: str) -> Panel:
-    """The one agent-reply panel, shared by the one-shot renderer and the live summary."""
-    return Panel(Markdown(_content_text(text)), title="agent", border_style="green")
-
-
-def render_reply(text: str) -> None:
-    CONSOLE.print(reply_panel(text))
-
-
-def render_error(message: str) -> None:
-    # escape(): this is the handler for failures, and exception text routinely contains
-    # brackets (`KeyError: 'a[b]'`) — unescaped it would raise MarkupError instead.
-    CONSOLE.print(Panel(escape(message), title="error", border_style="red"))
-
-
-def render_shell(*, exit_code: int | None, output: str) -> None:
-    """A `!` command's output: no model, no budget, nothing enters the transcript."""
-    title = "shell" if exit_code is None else f"shell (exit {exit_code})"
-    body = Text(output.rstrip("\n") or "(no output)")
-    CONSOLE.print(Panel(body, title=title, border_style="dim", expand=False))
-
-
-def render_local(text: str) -> None:
-    """Local command output (e.g. `/help`); printed as-is, never as an agent reply."""
-    CONSOLE.print(Text(text))
 
 
 def render_budget(state: Mapping[str, Any]) -> None:

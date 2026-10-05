@@ -245,7 +245,10 @@ def test_make_graph_forwards_the_injected_tool_renderer(tmp_path: Path, monkeypa
     """The renderer travels config -> graph -> execute nodes, like todo_renderer."""
     os.environ["DEEPSEEK_API_KEY"] = "test"
     captured = _spy_on_execute_nodes(monkeypatch)
-    renderer = lambda *_: None
+    def _noop_renderer(*_args: object) -> None:
+        return None
+
+    renderer = _noop_renderer
 
     make_graph({"configurable": {"worktree": tmp_path, "tool_renderer": renderer}})
     os.environ.pop("DEEPSEEK_API_KEY")

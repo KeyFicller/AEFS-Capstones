@@ -16,7 +16,7 @@ alwaysApply: false
 # 共享环境
 
 - 仓库根一个 `.venv`，所有项目共用；禁止子项目另建。
-- 依赖唯一来源是根 `requirements.txt`；本地项目以 `-e ./projects/<project>` 加入；子项目 `pyproject.toml` 只声明打包 / 入口点。
+- 依赖唯一来源是根 `requirements.txt`；capstone 以 `-e ./projects/<project>` 加入，共用库以 `-e ./components/<name>` 加入；子项目 `pyproject.toml` 只声明打包 / 入口点。
 - 环境 / 建项目 / 测试 / 运行统一走根目录 `./start.sh`（见 skill `start`），不手写等价 uv 命令。
 
 # 布局
@@ -24,11 +24,14 @@ alwaysApply: false
 ```
 projects/<project>/
   src/<pkg>/   tests/   eval/   PROJECT.md   README.md   pyproject.toml
+components/<name>/
+  src/<pkg>/   tests/   pyproject.toml
 ```
 
 # 风格
 
 - 公开函数 / 类必须有类型注解，禁止 `Any` 兜底。
+- 构造参数列表过长时，考虑优先把相关参数定义成一个类，构造时传入该对象。
 - 库代码用 `logging` 不用 `print`；CLI 输出走专用 renderer。
 - 错误用异常 + 上下文抛出；禁止裸 `except:` 或吞异常。
 - 机械检查交给 `ruff`（根 `ruff.toml`）。

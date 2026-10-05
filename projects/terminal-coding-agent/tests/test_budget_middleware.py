@@ -1,9 +1,9 @@
 from pathlib import Path
 
+from budget import Budget
 from langchain.agents.middleware.types import ModelResponse
 from langchain_core.messages import AIMessage, HumanMessage
 from terminal_coding_agent import config
-from terminal_coding_agent.budget import BudgetLedger
 from terminal_coding_agent.middleware.budget import BudgetMiddleware
 
 
@@ -37,7 +37,7 @@ def _model_response_with_usage(
 
 
 def test_wrap_model_call_hard_stops_without_handler() -> None:
-    ledger = BudgetLedger(turns=config.MAX_TURNS)
+    ledger = Budget(max_turns=config.MAX_TURNS, turns=config.MAX_TURNS)
     middleware = BudgetMiddleware(ledger)
     called = {"n": 0}
 
@@ -54,7 +54,11 @@ def test_wrap_model_call_hard_stops_without_handler() -> None:
 
 
 def test_wrap_model_call_applies_usage_from_model_response() -> None:
-    ledger = BudgetLedger()
+    ledger = Budget(
+        price_cache_hit_per_m=config.PRICE_CACHE_HIT_PER_M,
+        price_cache_miss_per_m=config.PRICE_CACHE_MISS_PER_M,
+        price_output_per_m=config.PRICE_OUTPUT_PER_M,
+    )
     middleware = BudgetMiddleware(ledger)
 
     def handler(request):
@@ -72,6 +76,6 @@ def test_wrap_model_call_applies_usage_from_model_response() -> None:
 
 def test_after_agent_does_not_write_trace(tmp_path: Path) -> None:
     trace_path = tmp_path / ".agent" / "trace.json"
-    middleware = BudgetMiddleware(BudgetLedger(turns=1))
+    middleware = BudgetMiddleware(Budget(turns=1))
     assert middleware.after_agent(state={}, runtime=None) is None
     assert not trace_path.exists()

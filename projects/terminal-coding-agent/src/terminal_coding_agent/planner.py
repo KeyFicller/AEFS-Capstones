@@ -6,9 +6,14 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
+from telemetry import (
+    chat_span,
+    record_chat_usage,
+    resolve_model_name,
+)
 
-from terminal_coding_agent import shorthands
-from terminal_coding_agent.budget import BudgetSession
+from terminal_coding_agent.attachments import strip_images
+from terminal_coding_agent.ledger import BudgetSession
 from terminal_coding_agent.models import SYSTEM_PROMPTS, AgentModels
 from terminal_coding_agent.state import (
     CodingAgentState,
@@ -16,11 +21,6 @@ from terminal_coding_agent.state import (
     RoutingPlan,
     ToDoItem,
     ToDoStatus,
-)
-from terminal_coding_agent.telemetry import (
-    chat_span,
-    record_chat_usage,
-    resolve_model_name,
 )
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ def build_planner(
         with BudgetSession(state) as budget:
             try:
                 with chat_span(model_name) as span:
-                    messages = shorthands.strip_images(list(state["messages"]))
+                    messages = strip_images(list(state["messages"]))
                     if enable_answer:
                         messages = [SystemMessage(content=SYSTEM_PROMPTS["planner"]), *messages]
                     response = planner_model.invoke(messages, config=config)

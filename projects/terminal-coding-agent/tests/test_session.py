@@ -2,10 +2,16 @@ import os
 from pathlib import Path
 
 from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.types import Command
 from terminal_coding_agent import graph as graph_module
 from terminal_coding_agent.graph import make_graph
 from terminal_coding_agent.models import AgentModels
-from terminal_coding_agent.session import reset_updates, run_task_turn
+from terminal_coding_agent.session import (
+    pending_interrupts,
+    reset_updates,
+    resume_turn,
+    run_task_turn,
+)
 from terminal_coding_agent.state import CodingAgentState
 
 
@@ -115,10 +121,6 @@ def test_real_graph_accepts_a_reset_on_a_fresh_thread(tmp_path: Path, monkeypatc
     values = agent.get_state(config).values
     assert values["turns"] == 0
     assert values["todo_list"] == []
-
-
-from langgraph.types import Command
-from terminal_coding_agent.session import pending_interrupts, resume_turn
 
 
 def test_resume_turn_sends_a_resume_command_without_resetting() -> None:

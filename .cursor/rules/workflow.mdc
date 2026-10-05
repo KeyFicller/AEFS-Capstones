@@ -5,7 +5,7 @@ alwaysApply: true
 
 # Capstone 工作流
 
-- 一个项目一个顶层目录 `projects/<name>/`，一次只聚焦一个。
+- 一个项目一个顶层目录 `projects/<name>/`，一次只聚焦一个。共用库放 `components/<name>/`，不是 capstone，不写 `PROJECT.md` / `README.md`。
 - `PROJECT.md` 是项目特有信息（架构 / 栈 / 指标 / 预算 / 交付物）的唯一来源；与规则冲突以它为准。新项目的栏目照抄既有项目的 `PROJECT.md`。
 - feature 级 spec-driven，顺序固定，没走到的那步不提前写：
   1. `docs/features/<slug>/design.md`——只写行为与架构决策。取舍由用户拍板，没拍板的不写死。

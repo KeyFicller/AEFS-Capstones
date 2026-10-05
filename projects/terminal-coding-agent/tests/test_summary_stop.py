@@ -1,4 +1,5 @@
 import json
+from contextlib import suppress
 from pathlib import Path
 
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
@@ -57,10 +58,8 @@ def test_summary_writes_trace_even_if_the_model_fails(tmp_path: Path) -> None:
     model = _Boom(AIMessage(content="unused"))
     node = build_summary(AgentModels(planner=model, executor=model), worktree=tmp_path)
 
-    try:
+    with suppress(RuntimeError):
         node(_state(), RunnableConfig())
-    except RuntimeError:
-        pass
 
     trace = json.loads((tmp_path / ".agent" / "trace.json").read_text(encoding="utf-8"))
     assert trace["stop_reason"] == "completed"

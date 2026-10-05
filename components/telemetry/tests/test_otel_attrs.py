@@ -2,7 +2,16 @@ from pathlib import Path
 
 import pytest
 from opentelemetry.sdk.trace import TracerProvider
-from terminal_coding_agent.telemetry.attrs import *
+from telemetry.attrs import (
+    ATTR_INPUT_TOKENS,
+    ATTR_MODEL,
+    ATTR_OUTPUT_TOKENS,
+    ATTR_TOOL_CALL_ID,
+    ATTR_TOOL_NAME,
+    assert_no_content_attributes,
+    set_chat_attributes,
+    set_tool_attributes,
+)
 
 
 def test_set_chat_attributes(tmp_path: Path):

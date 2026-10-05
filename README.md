@@ -8,4 +8,10 @@ AEFS capstone 项目的 monorepo：一个项目一个顶层目录，依赖与评
 | [`multimodal-doc-qa`](projects/multimodal-doc-qa/) | 把文档页当图像检索，有界 agent 循环带引用作答，对照 vision-first 与 OCR-first | [README](projects/multimodal-doc-qa/README.md) · [PROJECT.md](projects/multimodal-doc-qa/PROJECT.md) |
 | [`hello-agent`](examples/hello-agent/) | `./start.sh new` 的脚手架模板（非 capstone） | [README](examples/hello-agent/README.md) · [PROJECT.md](examples/hello-agent/PROJECT.md) |
 
-环境是仓库级共享的，统一入口是根目录 `./start.sh`（见 skill `start`）。新增项目时在表里加一行。
+| 组件 | 一句话 | 导入名 |
+| --- | --- | --- |
+| [`repl-console`](components/repl-console/) | 共享 REPL：循环、基本显示，以及 `@` / `!` / `/` | `repl_console` |
+| [`budget`](components/budget/) | 可选上限的花费账本 | `budget` |
+| [`telemetry`](components/telemetry/) | OpenTelemetry 与 Langfuse 的共享安装 | `telemetry` |
+
+环境是仓库级共享的，统一入口是根目录 `./start.sh`（见 skill `start`）。新增项目或组件时在对应表里加一行。

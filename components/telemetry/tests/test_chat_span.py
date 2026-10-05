@@ -2,13 +2,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-from terminal_coding_agent.telemetry.attrs import ATTR_INPUT_TOKENS, ATTR_MODEL
-from terminal_coding_agent.telemetry.chat import (
+from telemetry.attrs import ATTR_INPUT_TOKENS, ATTR_MODEL
+from telemetry.chat import (
     chat_span,
     record_chat_usage,
     resolve_model_name,
 )
-from terminal_coding_agent.telemetry.setup import setup_tracing
+from telemetry.setup import setup_tracing
 
 
 def test_resolve_model_name_from_chat_model() -> None:

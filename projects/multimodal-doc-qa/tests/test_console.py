@@ -8,7 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from multimodal_doc_qa.ui import console
-from multimodal_doc_qa.ui.console import banner, render_error, render_sources
+from multimodal_doc_qa.ui.console import render_error, render_sources
+from repl_console import repl
 from rich.console import Console
 
 
@@ -21,11 +22,12 @@ def _sink(monkeypatch) -> Console:
 
 def test_render_error_shows_bracketed_text_literally(monkeypatch) -> None:
     """Unescaped, ``[b]`` is a bold tag and the message silently loses its characters."""
-    sink = _sink(monkeypatch)
+    recording = Console(record=True, width=200)
+    monkeypatch.setattr(repl, "CONSOLE", recording)
 
     render_error("KeyError: 'a[b]c'")
 
-    assert "a[b]c" in sink.export_text()
+    assert "a[b]c" in recording.export_text()
 
 
 def test_render_sources_escapes_paths_and_text(monkeypatch, tmp_path: Path) -> None:
@@ -48,15 +50,6 @@ def test_render_sources_escapes_paths_and_text(monkeypatch, tmp_path: Path) -> N
     assert "doc[b]/p000" in text
     assert "row [b] value" in text
     assert "[missing].png" in text
-
-
-def test_banner_shows_bracketed_names_literally(monkeypatch) -> None:
-    sink = _sink(monkeypatch)
-
-    banner(artifacts="/tmp/[a]", mode="vision", models="m[b]")
-
-    text = sink.export_text()
-    assert "/tmp/[a]" in text and "m[b]" in text
 
 
 def test_mode_models_names_only_that_arms_models() -> None:

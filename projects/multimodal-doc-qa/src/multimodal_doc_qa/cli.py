@@ -10,8 +10,8 @@ from pathlib import Path
 
 import typer
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from repl_console.commands import CommandOutcome, LocalCommand
 
-from multimodal_doc_qa.budget import Budget
 from multimodal_doc_qa.config import (
     ENV_PATH,
     Settings,
@@ -21,6 +21,7 @@ from multimodal_doc_qa.config import (
     summary_paths,
 )
 from multimodal_doc_qa.graph import GraphDeps, build_graph, initial_state
+from multimodal_doc_qa.limits import Budget
 from multimodal_doc_qa.schemas import (
     Answer,
     BBox,
@@ -154,14 +155,18 @@ def _render_turn(
     )
 
 
+_INGEST_CORPUS = typer.Option(
+    ..., "--corpus", help="Directory of PDF, image, .txt, or .md documents"
+)
+_INGEST_OUT = typer.Option(
+    None, "--out", help="Artifacts directory (default: settings.artifacts_dir)"
+)
+
+
 @app.command()
 def ingest(
-    corpus: Path = typer.Option(
-        ..., "--corpus", help="Directory of PDF, image, .txt, or .md documents"
-    ),
-    out: Path | None = typer.Option(
-        None, "--out", help="Artifacts directory (default: settings.artifacts_dir)"
-    ),
+    corpus: Path = _INGEST_CORPUS,
+    out: Path | None = _INGEST_OUT,
 ) -> None:
     """Persist both indices. One ``ask`` uses one; the ablation needs both.
 
@@ -521,11 +526,18 @@ def ask(
         raise typer.Exit(code=1)
 
 
+_EVAL_QUESTIONS = typer.Option(
+    ..., "--questions", help="Questions JSON: gold answer and evidence"
+)
+_EVAL_MODE = typer.Option(None, "--mode", help=_MODE_HELP)
+_EVAL_OUT = typer.Option(None, "--out", help="results.jsonl to append to")
+
+
 @app.command("eval")
 def eval_questions(
-    questions: Path = typer.Option(..., "--questions", help="Questions JSON: gold answer and evidence"),
-    mode: str | None = typer.Option(None, "--mode", help=_MODE_HELP),
-    out: Path | None = typer.Option(None, "--out", help="results.jsonl to append to"),
+    questions: Path = _EVAL_QUESTIONS,
+    mode: str | None = _EVAL_MODE,
+    out: Path | None = _EVAL_OUT,
     iou_threshold: float = typer.Option(
         0.5, "--iou-threshold", help="IoU above which a citation matches a gold box"
     ),
@@ -637,13 +649,71 @@ def _preload_retrievers(settings: Settings) -> tuple[dict[str, object], dict[str
     return loaded, missing
 
 
+def _corpus_under_artifacts(artifacts: Path, arg: str) -> Path | None:
+    """Resolve `arg` under `artifacts`. `.` is `artifacts` itself."""
+    raw = Path(arg).expanduser()
+    root = artifacts.expanduser().resolve()
+    candidate = raw.resolve() if raw.is_absolute() else (root / raw).resolve()
+    if candidate != root and root not in candidate.parents:
+        return None
+    return candidate
+
+
+class IndexCommand(LocalCommand):
+    """Rebuild the artifacts index from a corpus directory and use it immediately."""
+
+    name = "index"
+    summary = "rebuild the index from a corpus under artifacts"
+
+    def __init__(self, settings, artifacts, loaded, missing, page_texts, history, active) -> None:
+        self._settings = settings
+        self._artifacts = artifacts
+        self._loaded = loaded
+        self._missing = missing
+        self._page_texts = page_texts
+        self._history = history
+        self._active = active
+
+    def run(self, ctx, args: str) -> CommandOutcome:
+        text = args.strip()
+        if not text:
+            return CommandOutcome(message="usage: /index <corpus-dir>")
+        corpus = _corpus_under_artifacts(self._artifacts, text)
+        if corpus is None:
+            return CommandOutcome(message="path escapes artifacts")
+        try:
+            ingest(corpus=corpus, out=None)
+        except typer.Exit:
+            return CommandOutcome()
+        new_loaded, new_missing = _preload_retrievers(self._settings)
+        if not new_loaded:
+            mode = self._active["mode"]
+            ui.render_error(new_missing.get(mode) or next(iter(new_missing.values())))
+            return CommandOutcome()
+        self._loaded.clear()
+        self._loaded.update(new_loaded)
+        self._missing.clear()
+        self._missing.update(new_missing)
+        self._page_texts.clear()
+        self._page_texts.update(_ocr_page_texts(self._settings))
+        self._history.clear()
+        mode = self._active["mode"]
+        if mode not in self._loaded:
+            mode = next(name for name in _MODES if name in self._loaded)
+            self._active["mode"] = mode
+            return CommandOutcome(message=f"using the new index ({mode})")
+        return CommandOutcome(message="using the new index")
+
+
 def _repl(mode: str) -> None:
     """Load every retrieval arm up front, then answer questions until the user stops.
 
-    A blank line is ignored. ``:q`` exits. Ctrl-C during a turn cancels that turn only.
+    A blank line is ignored. ``/quit`` exits. Ctrl-C during a turn cancels that turn only.
     Shift-Tab switches the retrieval path; the status bar names that path's models.
     Each question compiles its own graph. Earlier turns are messages, not a joined string.
     """
+    from repl_console import Repl
+
     settings = Settings()
     artifacts = settings.artifacts_dir
     loaded, missing = _preload_retrievers(settings)
@@ -651,42 +721,53 @@ def _repl(mode: str) -> None:
         ui.render_error(missing[mode])
         raise typer.Exit(code=1)
     page_texts = _ocr_page_texts(settings)
-    ui.banner(artifacts=str(artifacts), mode=mode, models=_mode_models(settings, mode))
-
     active = {"mode": mode}
-
-    def switch() -> None:
-        nxt = ui.other_mode(active["mode"])
-        if nxt not in loaded:
-            ui.render_error(missing[nxt])
-            return
-        active["mode"] = nxt
-
-    prompt = ui.Prompt(
-        on_switch=switch,
-        status=lambda: ui.status_bar(active["mode"], _mode_models(settings, active["mode"])),
-    )
     history: list[BaseMessage] = []
-    while True:
-        question = _read_question(prompt)
-        if question is None:
-            return
-        if not question:
-            continue
+
+    try:
+        from prompt_toolkit.key_binding import KeyBindings
+    except ImportError:  # pragma: no cover - the dev env has prompt_toolkit
+        bindings = None
+    else:
+        def switch(event) -> None:
+            nxt = ui.other_mode(active["mode"])
+            if nxt not in loaded:
+                ui.render_error(missing[nxt])
+                return
+            active["mode"] = nxt
+            event.app.invalidate()
+
+        bindings = KeyBindings()
+        bindings.add("s-tab")(switch)
+
+    def on_task(message) -> None:
+        question = str(message.content)
         _run_turn(
-            settings, loaded[active["mode"]], question, history, artifacts, page_texts, active["mode"]
+            settings,
+            loaded[active["mode"]],
+            question,
+            history,
+            artifacts,
+            page_texts,
+            active["mode"],
         )
 
-
-def _read_question(prompt: ui.Prompt) -> str | None:
-    """The next line. ``None`` leaves the REPL; an empty string is ignored."""
-    try:
-        question = prompt.ask().strip()
-    except (EOFError, KeyboardInterrupt):
-        return None
-    if question in {":q", "quit", "exit"}:
-        return None
-    return question
+    Repl(
+        title="multimodal-doc-qa",
+        info={
+            "artifacts": str(artifacts),
+            "mode": mode,
+            "models": _mode_models(settings, mode),
+        },
+        root=Path.cwd(),
+        extra_dirs=(artifacts,),
+        commands=(
+            IndexCommand(settings, artifacts, loaded, missing, page_texts, history, active),
+        ),
+        on_task=on_task,
+        toolbar=lambda: ui.status_bar(active["mode"], _mode_models(settings, active["mode"])),
+        key_bindings=bindings,
+    ).run()
 
 
 def _run_turn(
@@ -717,7 +798,7 @@ def _run_turn(
 def chat(
     mode: str | None = typer.Option(None, "--mode", help=_MODE_HELP),
 ) -> None:
-    """Load the artifacts once and answer questions until :q, Ctrl-C, or Ctrl-D."""
+    """Load the artifacts once and answer questions until /quit, Ctrl-C, or Ctrl-D."""
     settings = Settings()
     _repl(_resolve_mode(mode, settings))
 

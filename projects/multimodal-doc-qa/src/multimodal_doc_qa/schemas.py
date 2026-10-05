@@ -24,7 +24,7 @@ class BBox(BaseModel):
     y1: float = Field(ge=0.0, le=1.0)
 
     @model_validator(mode="after")
-    def _corners_are_ordered(self) -> BBox:
+    def _corners_are_ordered(self) -> "BBox":
         """Reject inverted corners. ``ge``/``le`` alone accept ``x0 > x1``, which then contains nothing."""
         if self.x0 > self.x1 or self.y0 > self.y1:
             raise ValueError(
@@ -32,7 +32,7 @@ class BBox(BaseModel):
             )
         return self
 
-    def contains(self, inner: BBox) -> bool:
+    def contains(self, inner: "BBox") -> bool:
         return (
             self.x0 <= inner.x0
             and self.x1 >= inner.x1
@@ -44,7 +44,7 @@ class BBox(BaseModel):
     def area(self) -> float:
         return (self.x1 - self.x0) * (self.y1 - self.y0)
 
-    def iou(self, other: BBox) -> float:
+    def iou(self, other: "BBox") -> float:
         """Intersection over union, or ``0.0`` when the boxes do not overlap."""
         x0, y0 = max(self.x0, other.x0), max(self.y0, other.y0)
         x1, y1 = min(self.x1, other.x1), min(self.y1, other.y1)

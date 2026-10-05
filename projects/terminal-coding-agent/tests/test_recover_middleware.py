@@ -10,7 +10,7 @@ from terminal_coding_agent.middleware.recover import BlockedReportMiddleware
 class _ToolFakeChatModel(GenericFakeChatModel):
     """Scripted model that tolerates bind_tools (create_agent calls it)."""
 
-    def bind_tools(self, tools: Any, **kwargs: Any) -> _ToolFakeChatModel:
+    def bind_tools(self, tools: Any, **kwargs: Any) -> "_ToolFakeChatModel":
         return self
 
 

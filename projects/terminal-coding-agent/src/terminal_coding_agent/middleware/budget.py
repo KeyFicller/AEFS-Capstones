@@ -2,15 +2,9 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from budget import Budget, usage_from_message
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import AIMessage
-
-from terminal_coding_agent.budget import (
-    BudgetLedger,
-    apply_usage,
-    check,
-    usage_from_message,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +22,7 @@ def _ai_message_from_result(result: Any) -> AIMessage | None:
 
 
 class BudgetMiddleware(AgentMiddleware):
-    def __init__(self, ledger: BudgetLedger) -> None:
+    def __init__(self, ledger: Budget) -> None:
         super().__init__()
         self.ledger = ledger
 
@@ -54,17 +48,16 @@ class BudgetMiddleware(AgentMiddleware):
             logger.warning("budget: model result carried no AIMessage; usage not counted")
             return
         input_tokens, output_tokens, cache_read = usage_from_message(ai_message)
-        apply_usage(
-            self.ledger,
+        self.ledger.apply_usage(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cache_read_tokens=cache_read,
         )
-        if tripped := check(self.ledger):
+        if tripped := self.ledger.check():
             self.ledger.stop_reason = tripped
 
     def wrap_model_call(self, request: Any, handler: Callable[..., Any]) -> Any:
-        if reason := check(self.ledger):
+        if reason := self.ledger.check():
             self.ledger.stop_reason = reason
             return AIMessage(content=f"Stopped: budget exceeded ({reason})")
 
@@ -73,7 +66,7 @@ class BudgetMiddleware(AgentMiddleware):
         return result
 
     async def awrap_model_call(self, request: Any, handler: Callable[..., Any]) -> Any:
-        if reason := check(self.ledger):
+        if reason := self.ledger.check():
             self.ledger.stop_reason = reason
             return AIMessage(content=f"Stopped: budget exceeded ({reason})")
 

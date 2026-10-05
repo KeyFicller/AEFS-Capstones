@@ -55,7 +55,8 @@ class JSONLSpanExporter(SpanExporter):
     def export(self, spans) -> SpanExportResult:
         if self.file is None:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.file = open(self.path, "a", encoding="utf-8")
+            # Kept open across exports; shutdown() closes it.
+            self.file = self.path.open("a", encoding="utf-8")  # noqa: SIM115
         for span in spans:
             self.file.write(json.dumps(json.loads(span.to_json())) + "\n")
             self.file.flush()
