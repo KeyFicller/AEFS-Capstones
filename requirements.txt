@@ -42,7 +42,8 @@ pyte>=0.8
 # multimodal-doc-qa：vision-first Agentic RAG
 # 页面图像编码 / 后期交互检索（本地，MPS）
 colpali-engine==0.3.18
-torch==2.13.0
+torch==2.13.0+cu126 ; sys_platform == "win32"
+torch==2.13.0 ; sys_platform != "win32"
 transformers==5.18.0
 # 页面渲染
 pymupdf==1.28.2

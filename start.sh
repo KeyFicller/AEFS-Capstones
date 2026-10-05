@@ -32,8 +32,12 @@ ensure_uv() {
 cmd_setup() {
   ensure_uv
   [ -d "$VENV" ] || { log "Creating shared virtualenv $VENV"; uv venv; }
+  local torch_backend=()
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) torch_backend=(--torch-backend=cu126) ;;
+  esac
   log "Installing dependencies: $REQ"
-  uv pip install -r "$REQ"
+  uv pip install ${torch_backend[@]+"${torch_backend[@]}"} -r "$REQ"
   log "Done. Enter the environment with 'source $VENV/bin/activate' or './start.sh run <cmd>'"
 }
 
