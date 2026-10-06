@@ -32,6 +32,11 @@ projects/terminal-coding-agent/vendor/
 # Local artifacts
 _artifacts/
 # Built indices + rendered pages (Settings.artifacts_dir default)
-projects/*/artifacts/
+# `/*` excludes the directory's contents, not the directory itself. Excluding
+# the directory itself stops git from descending, which would make the `!`
+# exception at the bottom dead.
+projects/*/artifacts/*
 
 .DS_Store
+
+!projects/tiny-llm-pipeline/artifacts/prefs/

@@ -277,6 +277,54 @@ def write_sft_splits(bundle: SFTBundle, out_dir: Path | str) -> dict[str, Path]:
     return paths
 
 
+def read_prompts(path: Path | str) -> list[str]:
+    """Read the `{"prompt": ...}` rows written by `write_sft_splits`."""
+    rows = []
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            rows.append(json.loads(line)["prompt"])
+    return rows
+
+
+def read_sft(path: Path | str, limit: int | None = None) -> list[SFTExample]:
+    """Read an SFT split written by `write_sft_splits`.
+
+    Line-oriented, because `_dump_jsonl` escapes newlines and so a split is
+    strict jsonl. `limit` stops early: `sft_train.jsonl` is 1.2 GB, and a smoke
+    run wants a few dozen rows, not the whole split in memory.
+    """
+    rows: list[SFTExample] = []
+    with Path(path).open(encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            rows.append(json.loads(line))
+            if limit is not None and len(rows) >= limit:
+                break
+    return rows
+
+
+def read_preferences(path: Path | str) -> list[PreferenceExample]:
+    """Read the `prefs.jsonl` rows written by `synth-pref`.
+
+    Extra keys (model, created_at) are ignored; only the three the loss needs
+    are kept.
+    """
+    rows: list[PreferenceExample] = []
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        rows.append(
+            {
+                "prompt": str(row["prompt"]),
+                "chosen": str(row["chosen"]),
+                "rejected": str(row["rejected"]),
+            }
+        )
+    return rows
+
+
 def _dump_jsonl(rows: Iterable[object], path: Path) -> None:
     with path.open("w", encoding="utf-8") as handle:
         for row in rows:
