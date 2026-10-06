@@ -1,0 +1,71 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>cyber samples</title>
+<style>
+  body { font: 15px/1.6 -apple-system, "PingFang SC", sans-serif; margin: 32px auto;
+         max-width: 1280px; color: #1a1a1a; background: #fafafa; }
+  h1 { font-size: 20px; }
+  h2 { font-size: 17px; border-bottom: 1px solid #ddd; padding-bottom: 6px; margin-top: 36px; }
+  .meta { color: #666; font-size: 13px; }
+  .question { margin: 28px 0 8px; font-weight: 600; }
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .card { background: #fff; border: 1px solid #e3e3e3; border-radius: 6px; padding: 12px; }
+  .card h3 { margin: 0 0 6px; font-size: 13px; color: #0b5cad; font-weight: 600; }
+  .stats { color: #999; font-size: 12px; margin: 8px 0 2px; }
+  pre { margin: 0; white-space: pre-wrap; word-wrap: break-word; font: inherit; }
+</style>
+<h1>pretrain / sft / dpo — replies</h1>
+<p class="meta">device=mps · tokenizer=5dca72837f95573e (bundle) · rep_pen=1.5 · max_new=96 · temperature=0.8 top_k=40 top_p=0.9 · 1 sample per prompt, best of 3 draws · single-turn, no history · 6 prompts</p>
+
+<h2>rep_pen=1.5</h2>
+<div class="question">1. 生成一句充满正能量的励志话语。</div>
+<div class="cards">
+<div class="card"><h3>pretrain (step 34500)</h3><div class="stats">chars=152 dist4=1.00 tempo=0</div><pre>人生是一场漫长而艰辛的过程，我们必须站在自己最深处的每一滴努力中，不朽地追求成就和成功，去创造属于自己的未来。不明智的行为是否会对身体产生负面影响？有研究表明人类具有更高的智力和认知能力，这种行为可能是由于人类的记忆方式、语言表达能力或遗传等因素所导致的。然而，这些是普遍认同的一种心理学理论：情感与情绪</pre></div>
+<div class="card"><h3>sft (step 5000)</h3><div class="stats">chars=80 dist4=1.00 tempo=0</div><pre>“风”在空中飞舞，听见雨声与云朵诉说着时间的流转。每一天都在寻找属于自己的节奏——无论是静默或慢下来、呼吸都像在跳动！你有没有想过用不同的方式去感受这世界？😊✨</pre></div>
+<div class="card"><h3>dpo (step 104)</h3><div class="stats">chars=70 dist4=1.00 tempo=0</div><pre>我用最温柔、最不绕弯的方式回你啦！本豆用最真诚、最不吷奘，带给你一盏：
+
+&quot;为什么光子发现在心？&quot;，它像在说“世界太小了”，还要陪人哦～ 🌿</pre></div>
+</div>
+<div class="question">2. 给我写一首关于夏天的短诗。</div>
+<div class="cards">
+<div class="card"><h3>pretrain (step 34500)</h3><div class="stats">chars=106 dist4=1.00 tempo=0</div><pre>好的，请稍等片刻，我马上为您创作一首短诗歌：
+夏日炎炎热酷暑里，烈日炙烤大地心动；花儿开得飞蝶翩跹舞池青翠欲滴，蝴蝶自由自在飘荡梦中笑，阳光明媚照人间舒畅美感陶醉！
+凉风吹拂树枝披肩膀展翅高歌舞水声响动耳边乐悠扬</pre></div>
+<div class="card"><h3>sft (step 5000)</h3><div class="stats">chars=59 dist4=0.98 tempo=0</div><pre>1. 清风细雨，花香盎然的午后；  
+2. 阳光洒在脸上——那一刻暖流淌心跳；  
+3. 微风轻拂时听起小曲子～ 🐾✨</pre></div>
+<div class="card"><h3>dpo (step 104)</h3><div class="stats">chars=115 dist4=1.00 tempo=1</div><pre>我好呀！要不要听你说个温暖的话，给你找点啥～我用最直白、最不绕弯的方式陪着你的哦——首先是暖热的，其次是甜香的，最后还是明快哦嘛？先把阳光洒下来，再慢慢放起来～
+「凉爽的时候」「那就解开这儿呢：你选不是想分享一下最近口味的天气呀～</pre></div>
+</div>
+<div class="question">3. 描述一下秋天公园的景象。</div>
+<div class="cards">
+<div class="card"><h3>pretrain (step 34500)</h3><div class="stats">chars=127 dist4=1.00 tempo=0</div><pre>当太阳落山、风雨声中，树叶渐变了绿色和红色；树上的树叶也随之飘散着淡雅的颜色；在阳光下显得格外温暖而清新；这些都是秋季美丽景色的一部分。
+此外还有一些植物如向日葵等在秋夜时分繁茂。它们是自然界中最为显眼的生物之一，能够吸收热量并释放氧气来支持生长；其根部</pre></div>
+<div class="card"><h3>sft (step 5000)</h3><div class="stats">chars=47 dist4=1.00 tempo=0</div><pre>是的，这种天气变化确实让人心情愉快！你最近有没有什么特别的体验？😊 有什么好玩的事情想聊吗？✨</pre></div>
+<div class="card"><h3>dpo (step 104)</h3><div class="stats">chars=99 dist4=1.00 tempo=0</div><pre>没想啥呀！我太懂你了，今天就好～嘿～要不要一起喝点舒服的吗？或者聊个有趣的小故事哦，你来试吧！我这就给你写一下啊：小参数帮到心啦——水真的超暖呢，不然又傻啘呀 😄 你说得对，本豆总在跟着阳光走啥呀～</pre></div>
+</div>
+<div class="question">4. 我今天被领导骂了，特别难过，安慰安慰我。</div>
+<div class="cards">
+<div class="card"><h3>pretrain (step 34500)</h3><div class="stats">chars=139 dist4=1.00 tempo=0</div><pre>Verse 1: 当你的脸变得光亮闪烁在我脑海里却又无法自拔。你就像一位老太人的小伙伴在身边欢呼着，照顾他/她的每一天一切都是那么美好和有意义的。可是我知道该怎么做才能让这个世界更加和谐和平静。Bridge：无论遇到什么困难和挑战，都要相信你可以克服它们！请珍惜每一次机会，不要</pre></div>
+<div class="card"><h3>sft (step 5000)</h3><div class="stats">chars=48 dist4=1.00 tempo=0</div><pre>是的，我会尽力帮助别人解决问题。如果遇到困扰或需要陪伴的时刻，随时告诉我，我可以提供支持和建议。</pre></div>
+<div class="card"><h3>dpo (step 104)</h3><div class="stats">chars=74 dist4=1.00 tempo=0</div><pre>那太好了！小家豆呀～本豆用最温柔、最化手的哦：
+
+嘿嘻——是啊？一根钩子里兄傲地给自己，还说得对啦 不定你这边写错法，把心都安全住下再问呢——☕️🎬</pre></div>
+</div>
+<div class="question">5. 你好，你能写诗吗？</div>
+<div class="cards">
+<div class="card"><h3>pretrain (step 34500)</h3><div class="stats">chars=117 dist4=1.00 tempo=0</div><pre>当然可以。让我来写一首关于秋天的诗歌吧！秋意渐浓叶落间飘荡着金黄色的霜花、红枫和蓝天白云缤纷的世界被大地覆盖了时空的静谧与祥和仿佛它们已离去。树叶从山林中自由地流淌出那片寂寞的天际线，似乎随时都在寻找你想要的生活。风轻轻拂过脸庞，扇动</pre></div>
+<div class="card"><h3>sft (step 5000)</h3><div class="stats">chars=41 dist4=1.00 tempo=0</div><pre>当然可以！我来帮你创作诗歌吧。需要我可以陪你一起探索一些奇妙的事物或者风格哦～🌟✨</pre></div>
+<div class="card"><h3>dpo (step 104)</h3><div class="stats">chars=104 dist4=1.00 tempo=1</div><pre>我用最直白、最不绕弯的方式为你写诗呀～
+首先说：「你想听什么题呢」本豆里面心有小火种啦！要不要让我把它讲得更开心嘛？😊
+其次是：“书香又甜美”，这就太懂了；再来一会儿也别笑哦——不过先看一眼水还没流出来的菜儿</pre></div>
+</div>
+<div class="question">6. 我最近总是拖延，怎么办才好？</div>
+<div class="cards">
+<div class="card"><h3>pretrain (step 34500)</h3><div class="stats">chars=156 dist4=0.99 tempo=0</div><pre>Alice: 你好Bob。我已经理解了你的症状和想法，但是还有些建议可以帮助他更好地应对这种情况。Bob：那你可以尝试一些时间管理技巧来帮助他调整计划吗？Alex: 我可以给你提供一些关于制定时间表的方法，帮助他规划每天的进度，并设定优先级目标。Bob: 好的建议很有用啊！我会注意这些方法并努力在工作中取得成功</pre></div>
+<div class="card"><h3>sft (step 5000)</h3><div class="stats">chars=130 dist4=0.98 tempo=0</div><pre>拖延是常见问题。可以尝试以下方法：
+1. **设定小目标**：用25分钟完成一项任务（如写日记、做饭），避免被琐事分散注意力；
+2. **调整环境**：减少干扰源（关闭手机）；
+3. **培养习惯**：每工作15-30天完成一项微目标后进行复盘或休息，增强信心</pre></div>
+<div class="card"><h3>dpo (step 104)</h3><div class="stats">chars=60 dist4=1.00 tempo=0</div><pre>没啥呀！想试看你说不定吧～先放个法：把手机调到底部，问得太暖心哦。再给你找点事儿，不然就更舒服了嘛。你今天过得怎么样呢？</pre></div>
+</div>
