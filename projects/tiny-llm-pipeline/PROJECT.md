@@ -39,7 +39,7 @@ SFT 第二次训练（同一天，`--lr 2e-4`，`--max-steps 5000`，约 7 分�
 
 SFT 与 DPO 已用超小批量打通接线（2026-10-06，mps，batch 16，各 3 步，产物在 `artifacts/smoke/`）：SFT（`--limit 32`）loss 8.36 → 7.45；DPO loss 0.6931 → 0.0015，`margin` -0.0 → 9.74。DPO 第 1 步的 `0.6931 = ln2` 是 policy 与 ref 同源时 `margin=0` 的解析值，不是拟合出来的，属接线正确的信号。**以上 SFT / DPO 都是接线冒烟，不是训练成绩**：正式成绩见下。
 
-DPO 正式训练（2026-10-06）：从 `artifacts/sft-30m/ckpt.pt` 出发，policy 与 ref 同源，偏好对是 `artifacts/prefs/prefs.jsonl` 的 **404** 对（batch 16 → 每 epoch 26 步）。交付配置 `--beta 0.01 --epochs 4 --lr 3e-5`，共 **104 步 / 374,855 个计分 token / 33.4 s**，末步 loss 0.0234、日志 `margin` 5.20。
+DPO 正式训练（2026-10-06）：从 `artifacts/sft-30m/ckpt.pt` 出发，policy 与 ref 同源，偏好对是 `artifacts/prefs/prefs.jsonl` 的 **首轮 404 对**（即现 822 对文件的前 404 行；batch 16 → 每 epoch 26 步）。交付配置 `--beta 0.01 --epochs 4 --lr 3e-5`，共 **104 步 / 374,855 个计分 token / 33.4 s**，末步 loss 0.0234、日志 `margin` 5.20。
 
 **日志里的 `margin` 是「比 ref 更偏好 chosen 的量」，不是「policy 已经偏好 chosen」**（`dpo_loss` 的 docstring 已按这个含义改准）。对 404 对逐条重算 `Δ = logπ_chosen − logπ_rejected`：SFT **−197.8** → DPO **+331.9**，改善 **+529.7**，`Δ>0` 的偏好对从 **22%** 升到 **64%**。
 
@@ -63,6 +63,8 @@ DPO 正式训练（2026-10-06）：从 `artifacts/sft-30m/ckpt.pt` 出发，poli
 
 根因不在 DPO 而在数据：chosen 的开头高度模板化——404 条里 **85 条（21%）前 6 字完全相同**（「我用最直白」），骨架清一色「我用最X、最Y、最Z的方式…」。模型学到这个模板后接不上正文，只能原地复读。风格纲要第 1 条把前摇设计成「可无限堆叠」，代价就是 chosen 之间开头同质。
 
+**加量无效已被实测证明（2026-10-06）**：`prefs.jsonl` 由 404 追加到 **822** 对（新增 418 对，prompt 全不重复），但新增对与旧对同分布（首 6 字最高占比 18.7% vs 21.0%，以「我用最」开头 41.1% vs 45.3%），没触碰开头同质的根因。用 822 对、交付 SFT 作 ref 重训（`beta 0.01 / lr 3e-5`）：`epochs 2`（104 步，与交付同视野）`margin_avg` 5.20，同一份旧 404 子集上 Δ **+353.4**、Δ>0 **63.9%**，相对交付的 +331.8 / 64.4% 无可测差异；`epochs 3`（156 步）Δ 跳到 **+947**、Δ>0 89%；`epochs 4`（208 步）Δ **+1380**、Δ>0 95%，贪心复读比交付更重。**现有数据上没有任何操作点能超过交付版，多训比少训更差。** 复现用的 822 系 run 产物（ckpt 与样例）已按决定删除、未留档；交付仍是 404 那版 `artifacts/dpo-30m/ckpt.pt`，未替换。
+
 ## 预算
 
 这台机器（2026-10-05，RTX 4090 49 GB，CUDA 12.6，fp32，seq 512，预热 3 步后计 10 步，随机 token，含反传与 AdamW）：
@@ -85,7 +87,7 @@ batch **64** 最高，但 32–256 与它相差不到 0.3%。默认 `TrainConfig
 
 `prepare` 可跑：重跑复现出与既有产物**逐字节相同**的 `tokenizer_sample.txt` / `tokenizer.json` / `train.bin` / `val.bin`，并产出三份互不相交的 SFT 切分。`train-pretrain` 可跑。第一次 Ctrl-C 会在当前步结束后写 `ckpt.pt`；`--resume <ckpt>` 从该步的数据游标和累计 token 接着训，不重放已经看过的窗口。200 step 的 ckpt 在 `artifacts/pretrain/ckpt.pt`。
 
-`synth-pref` 可跑（CLI 子命令，属数据流水线的一环）：读 `artifacts/data/dpo_prompts.jsonl`，写 `artifacts/prefs/prefs.jsonl`（`{"prompt","chosen","rejected","model","created_at"}`）。注意**它是流水线里唯一不能位级复现的一步**（要调 API，无 seed，见下节），所以 `prefs.jsonl` 必须随机器搬运。**追加式、默认续跑**：已在输出里的 prompt 跳过，中断重跑不重复计费；拒答 / 两侧相同 / 超 `max_seq_len=512` token 的对**丢弃并计数，不截断**。目标 **400** 对（理由见 design 第 5.3 节，2026-10-06 由 200 上调）；实跑到 **404 对**（`--n 450` 得 391，再 `--n 470` 补到 404 后停），404 个 prompt 全不重复，均值 chosen 125.2 字 / rejected 126.2 字，chosen 含豆包体标记 404/404，无超长对。
+`synth-pref` 可跑（CLI 子命令，属数据流水线的一环）：读 `artifacts/data/dpo_prompts.jsonl`，写 `artifacts/prefs/prefs.jsonl`（`{"prompt","chosen","rejected","model","created_at"}`）。注意**它是流水线里唯一不能位级复现的一步**（要调 API，无 seed，见下节），所以 `prefs.jsonl` 必须随机器搬运。**追加式、默认续跑**：已在输出里的 prompt 跳过，中断重跑不重复计费；拒答 / 两侧相同 / 超 `max_seq_len=512` token 的对**丢弃并计数，不截断**。目标 **400** 对（理由见 design 第 5.3 节，2026-10-06 由 200 上调）；首轮实跑到 **404 对**（`--n 450` 得 391，再 `--n 470` 补到 404 后停），404 个 prompt 全不重复，均值 chosen 125.2 字 / rejected 126.2 字，chosen 含豆包体标记 404/404，无超长对。**2026-10-06 又追加 418 对到 822**（commit `fa06729`）：822 个 prompt 全不重复，均值 chosen 124.6 字 / rejected 127.6 字，新增对与首轮同分布（见「指标与基线」）。**交付的 `dpo-30m` 只用首轮 404 对训练**，822 对重训的结论见上。
 
 `train-sft` / `train-dpo` 已接入 CLI 并端到端跑通，交付命令（cwd 为仓库根，`$P=projects/tiny-llm-pipeline`）：
 
@@ -138,7 +140,7 @@ batch **64** 最高，但 32–256 与它相差不到 0.3%。默认 `TrainConfig
 | `dpo_prompts.jsonl` | 是 | `350a561c6ddb3bac` | 同上 |
 | `pretrain_hq.jsonl` | 是（需下载） | `9801b0d2210c61c2` | `DATASET_REVISION` 钉在 `6b952cc5…`，1,669,750,047 字节 |
 | `sft_mini_512.jsonl` | 是（需下载） | `475039fa9b80ad36` | 同上，1,232,540,940 字节 |
-| `prefs.jsonl` | **否** | `424e5826e641cc19` | DeepSeek API 生成，temperature 0.8，无 seed 无缓存；215/240 的产出取决于接口行为 |
+| `prefs.jsonl` | **否** | `a1f7af44084af10a` | DeepSeek API 生成，temperature 0.8，无 seed 无缓存；215/240 的产出取决于接口行为。当前 **822** 对，首轮 404 对的哈希是 `424e5826e641cc19`（交付 `dpo-30m` 用的就是那 404 对）|
 | `doubao-style-guide.md` | **否**（源文档） | `0c8f1c15893af605` | 手写纲要，不是任何代码的输出 |
 | `pretrain/ckpt.pt` | 同类可复现，**非位级** | `4fa36c13e19ceaf4` | 同 seed/数据/代码可重训，但 MPS 与 CUDA 浮点路径不同 |
 
@@ -148,7 +150,7 @@ batch **64** 最高，但 32–256 与它相差不到 0.3%。默认 `TrainConfig
 
 **跨机搬运**：`artifacts/` 整体被根 `.gitignore` 第 35 行 `projects/*/artifacts/` 忽略，新机器 `git clone` **拿不到任何产物**。搬到云端时：
 
-- **必须搬** `artifacts/prefs/`（`prefs.jsonl` + `doubao-style-guide.md`，共 200 KB）——代码生成不出 `prefs.jsonl`（要花钱调 API 且不位级复现），而 `doubao-style-guide.md` 是 `synth-pref --guide` 的默认值，缺了默认命令直接失败。
+- **必须搬** `artifacts/prefs/`（`prefs.jsonl` + `doubao-style-guide.md`，共约 730 KB）——代码生成不出 `prefs.jsonl`（要花钱调 API 且不位级复现），而 `doubao-style-guide.md` 是 `synth-pref --guide` 的默认值，缺了默认命令直接失败。
 - `artifacts/data/` 4.2 GB 选择重生成或一起搬。重生成 = 重下 2.8 GB 原始语料 + 重跑 `prepare`（本机约 10 min），用上表哈希校验。
 - `ckpt.pt` 不必搬，重训即可，且它本来就不是位级可复现的。
 
