@@ -1,11 +1,12 @@
 """Console entry. `prepare` builds the data, `train-pretrain` trains on it."""
 
 import logging
+import sys
 from pathlib import Path
 
 import typer
 
-from tiny_llm_pipeline.config import DEFAULT_MODEL
+from tiny_llm_pipeline.config import DEFAULT_MODEL, PRETRAIN_TOKENS
 from tiny_llm_pipeline.data import (
     PRETRAIN_FILE,
     SFT_FILE,
@@ -38,7 +39,7 @@ def _root() -> None:
 def prepare_cmd(
     dataset: str = typer.Option("minimind", "--dataset"),
     out: Path = typer.Option(Path("artifacts/data"), "--out"),
-    max_tokens: int = typer.Option(100_000_000, "--max-tokens"),
+    max_tokens: int = typer.Option(PRETRAIN_TOKENS, "--max-tokens"),
     sample_mb: int = typer.Option(200, "--sample-mb"),
 ) -> None:
     """Fetch the corpus, train the tokenizer, then write the bins and splits.
@@ -93,7 +94,7 @@ def train_pretrain_cmd(
     data: Path = typer.Option(Path("artifacts/data"), "--data"),
     out: Path = typer.Option(Path("artifacts/pretrain"), "--out"),
     max_steps: int | None = typer.Option(None, "--max-steps"),
-    max_tokens: int = typer.Option(100_000_000, "--max-tokens"),
+    max_tokens: int = typer.Option(PRETRAIN_TOKENS, "--max-tokens"),
     dtype: str = typer.Option("fp32", "--dtype"),
     resume: Path | None = typer.Option(None, "--resume"),
     ckpt_every: int = typer.Option(500, "--ckpt-every"),
@@ -213,8 +214,31 @@ def monitor_cmd(
     typer.echo(str(write_monitor(log, dest)))
 
 
+def _utf8_stdio() -> None:
+    """Print Chinese as UTF-8. Windows otherwise uses the ANSI code page (GBK)."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8")
+        except (OSError, ValueError):
+            continue
+    if sys.platform != "win32":
+        return
+    isatty = getattr(sys.stdout, "isatty", None)
+    if isatty is None or not isatty():
+        return
+    import ctypes
+
+    kernel32 = ctypes.windll.kernel32
+    kernel32.SetConsoleOutputCP(65001)
+    kernel32.SetConsoleCP(65001)
+
+
 def main(argv: list[str] | None = None) -> None:
     """Dispatch a subcommand. Typer exits the process."""
+    _utf8_stdio()
     if argv is None:
         app()
     else:

@@ -6,7 +6,7 @@
 
 ## 目标与范围
 
-- 目标：从零训练一个约 11M 的中文小模型，走通预训练接龙、SFT、DPO 对齐豆包体。行为与架构以 design 为准。
+- 目标：从零训练一个约 29M 的中文小模型，走通预训练接龙、SFT、DPO 对齐豆包体。行为与架构以 design 为准。当前 `ModelConfig` 对齐 MiniMind2-Small：词表 6400、宽度 512、8 层、8 个 query 头、2 个 KV 头，FFN 宽度取仓库公式 `ceil(512 * pi / 64) * 64 = 1664`，绑定词嵌入后 **28,975,616** 参数。训练窗口 `max_seq_len=768`，对应 `pretrain_t2t_mini` 的推荐长度。
 - 不做：量化、vLLM、K8s、安全检查、MOF model card、W&B、MinHash、PII。完整列表见 design 第 1.2 节。
 
 ## 架构
@@ -17,19 +17,35 @@
 
 ## 技术栈
 
-Python 3.12.13，共享 venv。`torch`（fp32）、`tokenizers`、`numpy`、`langchain-deepseek`、`typer`、`rich`、`matplotlib`、`pytest`。不新增依赖。
+Python 3.12.13，共享 venv。`torch`（fp32；设备按 CUDA、MPS、CPU 的顺序选取）、`tokenizers`、`numpy`、`langchain-deepseek`、`typer`、`rich`、`matplotlib`、`pytest`。不新增依赖。
 
 ## 指标与基线
 
-预训练短跑（2026-10-05，fp32，batch 16 × seq 512，200 step，约 1.64M token）：loss 9.07 → 5.53（最低 4.90），val ppl **226.7**。随机初始化的交叉熵约 `ln(8192) ≈ 9.01`。这不是完整预训练的成绩，而且用的是拆段之前的语料。按 `<|im_start|>` / `<|im_end|>` 拆段后重写的 bin：train **99,723,098** token / 1,705,551 段，val **276,902** token / 8,570 段。这套 bin 还没有跑过训练。SFT 与 DPO 已用超小批量打通接线（2026-10-06，mps，batch 16，各 3 步，产物在 `artifacts/smoke/`）：SFT（`--limit 32`）loss 8.36 → 7.45；DPO loss 0.6931 → 0.0015，`margin` -0.0 → 9.74。DPO 第 1 步的 `0.6931 = ln2` 是 policy 与 ref 同源时 `margin=0` 的解析值，不是拟合出来的，属接线正确的信号。**以上都是接线冒烟，不是训练成绩**：SFT 的 holdout ppl、DPO 的 `reward_margin` 与豆包体指标（design 第 8 节）仍需正式训练后实测。
+11M（5 层）完整预训练（2026-10-05，fp32，batch 16 × seq 512，1.000e8 token，12231 step，约 13.5 分钟）：末步 loss **3.31**，val ppl **40.47**。随机初始化的交叉熵约 `ln(8192) ≈ 9.01`。checkpoint 在 `artifacts/pretrain/ckpt.pt`。
+
+20M 这次把 `pretrain_hq.jsonl` 按同样规则打满：train **348,135,922** token，val **567,293** token，合计 **348,703,215**。Chinchilla 预算是 **409,121,280** token（20 × 20,456,064），独立语料少约 15%，多出来的步会在 bin 上再循环。该次停在第 50000 步（预算 50040），累计 **408,800,000** token，val ppl **28.1**。checkpoint 在 `artifacts/pretrain-20m/ckpt.pt`。换词表后这份 bin 和 tokenizer 会被 30M 的准备过程覆盖，20M 权重不再对得上新的 `tokenizer.json`。
+
+30M 这次改用 MiniMind 当前推荐的轻量预训练语料 `pretrain_t2t_mini.jsonl`（dataset `main`，1,241,043,656 字节，从 ModelScope 国内 CDN 下载）。词表 6400 的 byte-level BPE 训完后，train **313,991,763** token，val **1,152,847** token，合计 **315,144,610**。Chinchilla 预算是 **579,512,320** token（20 × 28,975,616），独立语料大约只够 0.54 个预算，多出来的步会在 bin 上再循环。停在第 34500 步（预算 47223），累计 **423,384,000** token，val ppl **11.8**。checkpoint 在 `artifacts/pretrain-30m/ckpt.pt`。
+
+SFT 与 DPO 已用超小批量打通接线（2026-10-06，mps，batch 16，各 3 步，产物在 `artifacts/smoke/`）：SFT（`--limit 32`）loss 8.36 → 7.45；DPO loss 0.6931 → 0.0015，`margin` -0.0 → 9.74。DPO 第 1 步的 `0.6931 = ln2` 是 policy 与 ref 同源时 `margin=0` 的解析值，不是拟合出来的，属接线正确的信号。**以上 SFT / DPO 都是接线冒烟，不是训练成绩**：SFT 的 holdout ppl、DPO 的 `reward_margin` 与豆包体指标（design 第 8 节）仍需正式训练后实测。
 
 ## 预算
 
-吞吐与 token 预算尚未在目标机器上实测。`--max-tokens` 默认 **1e8** 暂留，待目标机器上测出 tokens/s 后钉死正式 token 与墙钟。
+这台机器（2026-10-05，RTX 4090 49 GB，CUDA 12.6，fp32，seq 512，预热 3 步后计 10 步，随机 token，含反传与 AdamW）：
+
+| batch | tok/s | 峰值显存 |
+| --- | --- | --- |
+| 8 | 208835 | 1.3 GB |
+| 16 | 235395 | 2.5 GB |
+| 32 | 239771 | 4.8 GB |
+| 64 | **240419** | 9.5 GB |
+| 128 | 240095 | 18.8 GB |
+| 256 | 239776 | 37.5 GB |
+| 512 及以上 | OOM | |
 
 `synth-pref` 的 API 预算是池子 1000 prompt × 2 次调用（估算 < ¥5）。到 404 对为止累计 **~1108 次调用**：首轮 200 prompt + 补量 70（合计 540），扩量轮 `--n 450` 再 235 prompt（+470），收尾 `--n 470` 再 49 prompt（+98，达标后手动停）。缺口全是模型拒答（"你是阿里员工吗"、"查财报"、"明天北京会下雨吗"），按 design 丢弃不截断。**每次重跑会把所有历史失败 prompt 再试一遍**（resume 只跳过已成功的），所以拒答越攒越多、扩量轮的调用量高于新增 prompt 数；拒答在 temperature 0.8 下高度可复现，重试基本不转正。
 
-`TrainConfig.batch_size` 暂保持 **16**。batch 对吞吐与内存的影响依机器而异（含 OOM 阈值），换机后需重新扫一遍，不要沿用旧结论。
+batch **64** 最高，但 32–256 与它相差不到 0.3%。默认 `TrainConfig.batch_size` 仍是 **16**。正式预训练 token 预算钉为 `PRETRAIN_TOKENS = 579_512_320`，对应 20 token/参数。上面的 tok/s 是 11M 模型上测的，不能直接套到 30M。
 
 ## 交付物
 
@@ -81,4 +97,4 @@ Python 3.12.13，共享 venv。`torch`（fp32）、`tokenizers`、`numpy`、`lan
 
 ## 风险
 
-见 design 第 14 节。模型冒烟与 200 step 预训练短跑已通过。完整 token 预算尚未钉死。
+见 design 第 14 节。模型冒烟与 200 step 预训练短跑已通过。预训练 token 预算已钉为 `PRETRAIN_TOKENS`；SFT / DPO 的正式指标仍未实测。

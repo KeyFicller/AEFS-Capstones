@@ -6,15 +6,22 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class ModelConfig:
-    """Llama-style decoder-only sizes. Defaults are the pinned ~11M model."""
+    """Llama-style decoder-only sizes. Defaults follow MiniMind2-Small.
 
-    vocab_size: int = 8192
-    d_model: int = 384
-    n_layers: int = 5
-    n_heads: int = 6
+    Vocab, width, depth, and head counts match that model (6400 / 512 / 8 /
+    8 query heads / 2 KV heads). `ffn_hidden` uses the current MiniMind
+    feed-forward size, ``ceil(d_model * pi / 64) * 64``, which is 1664.
+    With the tied embedding counted once that is 28,975,616 parameters.
+    `max_seq_len` is the training window recommended for `pretrain_t2t_mini`.
+    """
+
+    vocab_size: int = 6400
+    d_model: int = 512
+    n_layers: int = 8
+    n_heads: int = 8
     n_kv_heads: int = 2
-    ffn_hidden: int = 1024
-    max_seq_len: int = 512
+    ffn_hidden: int = 1664
+    max_seq_len: int = 768
     tied_embedding: bool = True
     dropout: float = 0.0
 
@@ -36,6 +43,11 @@ class TrainConfig:
 
 
 DEFAULT_TRAIN = TrainConfig()
+
+# Hoffmann et al. 2022: compute-optimal pretraining is about 20 tokens per parameter.
+CHINCHILLA_TOKENS_PER_PARAM = 20
+# 20 * TinyLM(DEFAULT_MODEL).num_params(), with the tied embedding counted once.
+PRETRAIN_TOKENS = 579_512_320
 
 
 def lr_at(step: int, max_steps: int, cfg: TrainConfig) -> float:

@@ -42,6 +42,8 @@ pyte>=0.8
 # multimodal-doc-qa：vision-first Agentic RAG
 # 页面图像编码 / 后期交互检索（本地，MPS）
 colpali-engine==0.3.18
+# Windows 上 PyPI 的 torch 是 CPU 轮子；2.13 的 CUDA 构建从 cu126 起。
+--extra-index-url https://download.pytorch.org/whl/cu126
 torch==2.13.0+cu126 ; sys_platform == "win32"
 torch==2.13.0 ; sys_platform != "win32"
 transformers==5.18.0
@@ -56,3 +58,5 @@ pydantic>=2.9
 pydantic-settings>=2.5
 typer>=0.27
 streamlit>=1.40
+# tiny-llm-pipeline: train-pretrain writes monitor.png
+matplotlib>=3.9

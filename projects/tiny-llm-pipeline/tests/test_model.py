@@ -1,12 +1,13 @@
 import torch
 
-from tiny_llm_pipeline.config import DEFAULT_MODEL
+from tiny_llm_pipeline.config import CHINCHILLA_TOKENS_PER_PARAM, DEFAULT_MODEL, PRETRAIN_TOKENS
 from tiny_llm_pipeline.model import TinyLM
 
 
-def test_param_count_about_11m() -> None:
+def test_param_count_matches_chinchilla_budget() -> None:
     m = TinyLM(DEFAULT_MODEL)
-    assert 10_000_000 < m.num_params() < 12_500_000
+    assert m.num_params() == 28_975_616
+    assert PRETRAIN_TOKENS == CHINCHILLA_TOKENS_PER_PARAM * m.num_params()
 
 
 def test_causal_mask() -> None:

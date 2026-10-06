@@ -63,7 +63,7 @@ class Tok:
 def train_tokenizer(
     text_path: Path | str,
     out_dir: Path | str,
-    vocab_size: int = 8192,
+    vocab_size: int = 6400,
     sample_mb: int = 200,
 ) -> Path:
     """Train a byte-level BPE on at most `sample_mb` megabytes and save it."""

@@ -1,9 +1,29 @@
 import json
 import shutil
+import sys
 from pathlib import Path
 
-from tiny_llm_pipeline.cli import app
+from tiny_llm_pipeline.cli import _utf8_stdio, app
 from tiny_llm_pipeline.data import PRETRAIN_FILE, SFT_FILE
+
+
+def test_utf8_stdio_reconfigures_text_streams(monkeypatch) -> None:
+    class Stream:
+        def __init__(self) -> None:
+            self.encoding = "gbk"
+
+        def reconfigure(self, **kwargs: str) -> None:
+            self.encoding = kwargs["encoding"]
+
+        def isatty(self) -> bool:
+            return False
+
+    out, err = Stream(), Stream()
+    monkeypatch.setattr(sys, "stdout", out)
+    monkeypatch.setattr(sys, "stderr", err)
+    _utf8_stdio()
+    assert out.encoding == "utf-8"
+    assert err.encoding == "utf-8"
 
 
 def test_prepare_help(runner) -> None:
