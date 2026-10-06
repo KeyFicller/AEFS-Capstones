@@ -2,11 +2,12 @@
 
 import logging
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import typer
 
-from tiny_llm_pipeline.config import DEFAULT_MODEL, PRETRAIN_TOKENS
+from tiny_llm_pipeline.config import DEFAULT_MODEL, DEFAULT_TRAIN, DPO_LR, PRETRAIN_TOKENS, SFT_LR
 from tiny_llm_pipeline.data import (
     PRETRAIN_FILE,
     SFT_FILE,
@@ -140,17 +141,28 @@ def train_sft_cmd(
     limit: int | None = typer.Option(None, "--limit"),
     resume: Path | None = typer.Option(None, "--resume"),
     seed: int = typer.Option(42, "--seed"),
+    ckpt_every: int = typer.Option(500, "--ckpt-every"),
+    plot_every: int = typer.Option(10, "--plot-every"),
+    val_every: int = typer.Option(1000, "--val-every"),
+    lr: float = typer.Option(SFT_LR, "--lr"),
 ) -> None:
     """Supervised fine-tuning from `--base` on the assistant-only loss mask.
 
     Trains on the `sft_train.jsonl` split written by `prepare`. `--max-steps`
     wins over `--epochs`, and `--limit` caps how many rows are read, which is
     what the smoke run uses instead of pulling in all 1.2 GB of the split.
+    Ctrl-C finishes the current step and writes a checkpoint. Pass that file
+    to `--resume` to continue the same row cursor and token count. Holdout
+    perplexity is recorded on each save and the lowest one so far goes to
+    `best.pt`; `--val-every` prints 5 greedy replies drawn from the holdout
+    for that step. `--lr` defaults to `SFT_LR`, below pretraining's `1e-3`.
     """
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     tok = load_tokenizer(data)
     rows = read_sft(data / "sft_train.jsonl", limit=limit)
-    bundle = SFTBundle(train=rows, holdout=[], dpo_prompts=[])
+    holdout_path = data / "sft_holdout.jsonl"
+    holdout = read_sft(holdout_path) if holdout_path.is_file() else []
+    bundle = SFTBundle(train=rows, holdout=holdout, dpo_prompts=[])
     ckpt = train_sft(
         bundle,
         out,
@@ -161,8 +173,14 @@ def train_sft_cmd(
         max_steps=max_steps,
         seed=seed,
         resume=resume,
+        train_cfg=replace(DEFAULT_TRAIN, lr=lr),
+        ckpt_every=ckpt_every,
+        plot_every=plot_every,
+        val_every=val_every,
     )
     typer.echo(str(ckpt))
+    if plot_every > 0:
+        typer.echo(str(out / "monitor.png"))
 
 
 @app.command("train-dpo")
@@ -176,10 +194,12 @@ def train_dpo_cmd(
     max_steps: int | None = typer.Option(None, "--max-steps"),
     resume: Path | None = typer.Option(None, "--resume"),
     seed: int = typer.Option(42, "--seed"),
+    lr: float = typer.Option(DPO_LR, "--lr"),
 ) -> None:
     """DPO on `prefs.jsonl`, with `--ref` frozen as the reference policy.
 
     The policy starts from `--ref` too. `--ref` itself is only ever read.
+    `--lr` defaults to `DPO_LR`, an order below SFT's.
     """
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     tok = load_tokenizer(data)
@@ -194,6 +214,7 @@ def train_dpo_cmd(
         max_steps=max_steps,
         seed=seed,
         resume=resume,
+        train_cfg=replace(DEFAULT_TRAIN, lr=lr),
     )
     typer.echo(str(ckpt))
 

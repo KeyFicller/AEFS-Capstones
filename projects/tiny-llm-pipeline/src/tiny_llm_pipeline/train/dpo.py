@@ -29,7 +29,9 @@ def dpo_loss(pw: Tensor, pl: Tensor, rw: Tensor, rl: Tensor, beta: float) -> tup
     """Return `(loss, margin)` for one batch. The caller reduces the batch dim.
 
     `margin` is `beta * [(logπ_w − logπ_ref_w) − (logπ_l − logπ_ref_l)]`, the
-    quantity the run tracks: positive means the policy already prefers chosen.
+    quantity the run tracks. It is the *gain over the reference*, not an
+    outright preference: a positive `margin` can coexist with the policy still
+    scoring rejected above chosen. Divide `beta` back out for the raw gap.
     """
     margin = beta * ((pw - rw) - (pl - rl))
     return -F.logsigmoid(margin), margin

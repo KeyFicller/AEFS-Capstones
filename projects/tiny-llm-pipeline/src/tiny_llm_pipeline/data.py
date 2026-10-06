@@ -227,19 +227,22 @@ def prepare_sft(
 ) -> SFTBundle:
     """Split SFT jsonl in file order, without shuffling.
 
-    Drop rows whose `encode_chat` length exceeds `ModelConfig.max_seq_len`.
-    Then `holdout` is the first `holdout_n` rows, `dpo_prompts` is the first
-    user turn of the next `dpo_prompt_n` rows, and `train` is the rest.
+    A source record lists several user/assistant pairs back to back. Those
+    pairs are separate questions, not context for each other, so each pair
+    becomes its own one-turn example before the split. Drop pairs whose
+    `encode_chat` length exceeds `ModelConfig.max_seq_len`. Then `holdout` is
+    the first `holdout_n` pairs, `dpo_prompts` is the user text of the next
+    `dpo_prompt_n` pairs, and `train` is the rest.
 
     The corpus repeats user turns, so index slicing alone would let one split
-    share a user text with another. A row is claimed only when none of its user
-    turns is already `blocked`, and claiming it blocks all of its user turns.
+    share a user text with another. A row is claimed only when its user text
+    is not already `blocked`, and claiming it blocks that text.
     """
-    rows = [
-        row
-        for row in _load_sft(Path(raw_jsonl))
-        if len(encode_chat(list(row["conversations"]), tok)[0]) <= DEFAULT_MODEL.max_seq_len
-    ]
+    rows: list[SFTExample] = []
+    for source in _load_sft(Path(raw_jsonl)):
+        for pair in _single_turns(source):
+            if len(encode_chat(list(pair["conversations"]), tok)[0]) <= DEFAULT_MODEL.max_seq_len:
+                rows.append(pair)
     holdout = rows[:holdout_n]
     blocked: set[str] = set()
     for row in holdout:
@@ -442,6 +445,33 @@ def _load_sft(path: Path) -> list[SFTExample]:
         row, index = decoder.raw_decode(text, index)
         rows.append(row)
     return rows
+
+
+def _single_turns(row: SFTExample) -> list[SFTExample]:
+    """One example per user→assistant pair. Extra keys such as reasoning are dropped.
+
+    A question with no following answer is dropped. An answer with no preceding
+    question is dropped. A new question replaces a question that never got an answer.
+    """
+    pairs: list[SFTExample] = []
+    question: str | None = None
+    for message in row["conversations"]:
+        role = message["role"]
+        content = message["content"]
+        if role == "user":
+            question = content
+            continue
+        if role == "assistant" and question is not None:
+            pairs.append(
+                {
+                    "conversations": [
+                        {"role": "user", "content": question},
+                        {"role": "assistant", "content": content},
+                    ]
+                }
+            )
+        question = None
+    return pairs
 
 
 def _first_user(row: SFTExample) -> str:

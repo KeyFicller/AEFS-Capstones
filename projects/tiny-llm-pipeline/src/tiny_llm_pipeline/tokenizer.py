@@ -46,9 +46,9 @@ class Tok:
             return [token_id]
         return self._tok.encode(text).ids
 
-    def decode(self, ids: list[int]) -> str:
-        """Decode ids back to text."""
-        return self._tok.decode(ids)
+    def decode(self, ids: list[int], *, skip_special_tokens: bool = True) -> str:
+        """Decode ids back to text. Special tokens are omitted unless asked for."""
+        return self._tok.decode(ids, skip_special_tokens=skip_special_tokens)
 
     @property
     def vocab_size(self) -> int:

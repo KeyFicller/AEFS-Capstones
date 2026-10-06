@@ -13,6 +13,24 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+# An optimization spike can push one val-ppl point orders of magnitude above the
+# run's normal level and flatten the whole axis. Points above this multiple of
+# the median are left out of the figure only; train_log.jsonl keeps every value.
+_PPL_SPIKE_FACTOR = 10.0
+
+
+def _drop_ppl_spikes(steps: list[int], values: list[float]) -> tuple[list[int], list[float]]:
+    """Leave out val-ppl points above `_PPL_SPIKE_FACTOR` times the median.
+
+    The monitor is a readable summary, not the record: the log still holds the
+    spikes, so a figure that omits them must not be read as if they never fired.
+    """
+    if not values:
+        return [], []
+    limit = _PPL_SPIKE_FACTOR * sorted(values)[len(values) // 2]
+    kept = [(step, value) for step, value in zip(steps, values) if value <= limit]
+    return [step for step, _ in kept], [value for _, value in kept]
+
 
 def write_flow(path: Path | str) -> Path:
     """Write the pretrain → sft → dpo diagram."""
@@ -53,7 +71,11 @@ def write_flow(path: Path | str) -> Path:
 
 
 def write_monitor(log_path: Path | str, out_path: Path | str) -> Path:
-    """Plot loss, learning rate, and val perplexity from a train log."""
+    """Plot loss, learning rate, and val perplexity from a train log.
+
+    Transient val-ppl spikes are dropped from the figure (see `_drop_ppl_spikes`);
+    the loss and lr panels keep every step.
+    """
     source = Path(log_path)
     rows = _read_log(source)
     if not rows:
@@ -72,6 +94,7 @@ def write_monitor(log_path: Path | str, out_path: Path | str) -> Path:
         if math.isfinite(value):
             ppl_steps.append(int(row["step"]))
             ppl.append(value)
+    ppl_steps, ppl = _drop_ppl_spikes(ppl_steps, ppl)
     fig, axes = plt.subplots(3, 1, figsize=(8, 7), sharex=True)
     axes[0].plot(steps, loss, color="#1f4e79")
     axes[0].set_ylabel("loss")

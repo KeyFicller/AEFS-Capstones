@@ -48,6 +48,13 @@ DEFAULT_TRAIN = TrainConfig()
 CHINCHILLA_TOKENS_PER_PARAM = 20
 # 20 * TinyLM(DEFAULT_MODEL).num_params(), with the tied embedding counted once.
 PRETRAIN_TOKENS = 579_512_320
+# SFT starts from a converged model, so it needs a smaller step than pretraining.
+# At 1e-3 the holdout perplexity bottomed at step 4500 and then rose to 36.6.
+SFT_LR = 2e-4
+# DPO moves an already-finetuned policy toward the preference pairs, so it wants
+# a step below SFT's; `DEFAULT_TRAIN.lr` (1e-3, the pretraining value) is far too
+# large. The delivered run overrode this with `--lr 3e-5`; see PROJECT.md.
+DPO_LR = 1e-5
 
 
 def lr_at(step: int, max_steps: int, cfg: TrainConfig) -> float:

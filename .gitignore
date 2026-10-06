@@ -39,4 +39,6 @@ projects/*/artifacts/*
 
 .DS_Store
 
+checkpoints/
+
 !projects/tiny-llm-pipeline/artifacts/prefs/

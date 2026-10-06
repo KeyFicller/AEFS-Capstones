@@ -28,3 +28,9 @@ def test_loss_mask_only_on_assistant(tok) -> None:
 
 def test_special_token_ids_are_fixed(tok) -> None:
     assert [tok.encode(token)[0] for token in SPECIAL_TOKENS] == list(range(len(SPECIAL_TOKENS)))
+
+
+def test_decode_can_keep_special_tokens(tok) -> None:
+    ids = tok.encode("<|user|>")
+    assert "<|user|>" not in tok.decode(ids)
+    assert tok.decode(ids, skip_special_tokens=False) == "<|user|>"

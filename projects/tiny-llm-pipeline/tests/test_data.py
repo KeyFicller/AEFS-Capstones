@@ -111,6 +111,33 @@ def test_write_sft_splits_round_trips_every_split(tmp_path, tiny_sft_jsonl, tok)
     assert [row["prompt"] for row in prompts] == bundle.dpo_prompts
 
 
+def test_prepare_sft_splits_unrelated_turns(tmp_path, tok) -> None:
+    raw = tmp_path / "sft.jsonl"
+    row = {
+        "conversations": [
+            {"role": "user", "content": "第一问"},
+            {"role": "assistant", "content": "第一答", "reasoning_content": "忽略"},
+            {"role": "user", "content": "第二问"},
+            {"role": "assistant", "content": "第二答"},
+            {"role": "user", "content": "没有回答"},
+        ]
+    }
+    raw.write_text(json.dumps(row, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    bundle = prepare_sft(raw, tok, holdout_n=1, dpo_prompt_n=1)
+
+    assert bundle.holdout == [
+        {
+            "conversations": [
+                {"role": "user", "content": "第一问"},
+                {"role": "assistant", "content": "第一答"},
+            ]
+        }
+    ]
+    assert bundle.dpo_prompts == ["第二问"]
+    assert bundle.train == []
+
+
 def test_prepare_sft_drops_rows_that_repeat_another_split(tmp_path, tok) -> None:
     # The real corpus repeats user turns, so index-only slicing lets a train
     # row share its user text with the holdout or the DPO prompts. A repeat in
