@@ -8,18 +8,6 @@
 
 ![图结构](graph.png)
 
-## 输入前缀
-
-REPL 里一行可以带三种前缀（行首 `\` 转义可让整行当普通任务）：
-
-| 前缀 | 例子 | 行为 |
-| --- | --- | --- |
-| `@path` | `把 @NOTES.md 的内容给我看看` | 把文件内容附到该轮消息；`png/jpg/jpeg/webp/gif`（≤5 MB）转成图片块交给模型，其余按 UTF-8 文本读入并截断至 4k tokens。路径须在 worktree 内。 |
-| `!cmd` | `!pytest -q` | 在 worktree 里直接跑 shell，输出就地显示；**不进对话上下文、不计预算**，也不走破坏性命令守卫。 |
-| `/cmd` | `/help`、`/quit` | 该次 REPL 的命令表（`repl-console`）：`LocalCommand` 只在本地动作，`PromptCommand` 展开成 prompt 再进图。同名后传入的命令替换内置。 |
-
-在真实终端下主提示用 `prompt_toolkit`，输入 `@` 补文件路径、行首 `/` 补命令名；管道/无 tty 时自动回退到 `input()`（补全关闭），Harbor 侧不装 `prompt_toolkit`。
-
 ## 跑起来
 
 ```bash
@@ -30,4 +18,4 @@ REPL 里一行可以带三种前缀（行首 `\` 转义可让整行当普通任�
 bash projects/terminal-coding-agent/scripts/verify_harbor_tasks_local.sh   # 任务集双向验证（真 Docker，不用 LLM / Harbor）
 ```
 
-评测跑批（`harbor run`，需要 `local.env` 里的 `DEEPSEEK_API_KEY`）与实测口径见 `PROJECT.md`。
+评测跑批（`harbor run`，凭据放 `local.env`，模型走 `configurable`）的命令与实测结果见 `PROJECT.md` 的「交付物」。

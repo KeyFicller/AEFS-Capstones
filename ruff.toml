@@ -28,6 +28,7 @@ ignore = [
 "**/tests/**" = ["T20"]
 "**/eval/**" = ["T20"]
 "**/scripts/**" = ["T20"]
+"**/checkpoints/**" = ["T20"]
 "**/cli*.py" = ["T20"]
 
 [format]

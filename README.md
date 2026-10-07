@@ -1,12 +1,13 @@
 # AEFS-Capstones
 
-AEFS capstone 项目的 monorepo：一个项目一个顶层目录，依赖与评测互相隔离。
+AEFS capstone 项目的 monorepo：一个项目一个顶层目录，评测互相隔离。
 
 | 项目 | 一句话 | 入口 |
 | --- | --- | --- |
 | [`terminal-coding-agent`](projects/terminal-coding-agent/) | 终端里的 coding agent，在隔离 worktree 内改代码、跑命令、交 patch | [README](projects/terminal-coding-agent/README.md) · [PROJECT.md](projects/terminal-coding-agent/PROJECT.md) |
 | [`multimodal-doc-qa`](projects/multimodal-doc-qa/) | 把文档页当图像检索，有界 agent 循环带引用作答，对照 vision-first 与 OCR-first | [README](projects/multimodal-doc-qa/README.md) · [PROJECT.md](projects/multimodal-doc-qa/PROJECT.md) |
 | [`tiny-llm-pipeline`](projects/tiny-llm-pipeline/) | 从零训练 ~29M 中文小模型：预训练接龙 → SFT → DPO 对齐豆包体 | [README](projects/tiny-llm-pipeline/README.md) · [PROJECT.md](projects/tiny-llm-pipeline/PROJECT.md) |
+| [`cyber-cricket`](projects/cyber-cricket/) | 游戏无关的 bot 竞技平台（C++20，零第三方依赖）；LLM 多智能体研发队是后续 feature | [PROJECT.md](projects/cyber-cricket/PROJECT.md)（**未落地**，README 待写） |
 
 | 组件 | 一句话 | 导入名 |
 | --- | --- | --- |

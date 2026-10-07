@@ -23,6 +23,9 @@ jobs/
 # Local OTel demo export
 projects/*/otel.jsonl
 
+# Local build output (cyber-cricket: CMake)
+projects/*/build/
+
 # VsCode 
 .vscode/
 
@@ -39,6 +42,10 @@ projects/*/artifacts/*
 
 .DS_Store
 
-checkpoints/
+# Anchored with the full path: a bare `checkpoints/` would exclude the directory
+# itself and make the `!` exception below dead, but `checkpoints/*` would only
+# match a repo-root `checkpoints/` (a middle slash anchors the pattern).
+projects/*/checkpoints/*
+!projects/tiny-llm-pipeline/checkpoints/sync_ckpt.py
 
 !projects/tiny-llm-pipeline/artifacts/prefs/
