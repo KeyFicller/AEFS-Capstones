@@ -277,7 +277,7 @@ def test_results_do_not_land_in_the_source_tree() -> None:
 def test_the_runner_writes_a_run_line_a_question_line_and_a_summary(tmp_path: Path) -> None:
     out = tmp_path / "results.jsonl"
 
-    run_eval([_question()], lambda q: _run(), out_path=out, mode="vision", k=5)
+    run_eval([_question()], lambda q: _run(), out_path=out, mode="maxsim", k=5)
 
     kinds = [row["kind"] for row in _read(out)]
     assert kinds == ["run", "question", "summary"]
@@ -424,7 +424,7 @@ def test_two_runs_append_without_merging(tmp_path: Path) -> None:
     out = tmp_path / "results.jsonl"
 
     run_eval(
-        [_question()], lambda q: _run(), out_path=out, settings=_settings(), mode="vision", k=5
+        [_question()], lambda q: _run(), out_path=out, settings=_settings(), mode="maxsim", k=5
     )
     run_eval([_question()], lambda q: _run(), out_path=out, settings=_settings(), mode="ocr", k=5)
 
@@ -437,7 +437,7 @@ def test_two_runs_append_without_merging(tmp_path: Path) -> None:
         "question",
         "summary",
     ]
-    assert [row["mode"] for row in rows if row["kind"] == "run"] == ["vision", "ocr"]
+    assert [row["mode"] for row in rows if row["kind"] == "run"] == ["maxsim", "ocr"]
 
 
 def _settings():

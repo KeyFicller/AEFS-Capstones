@@ -23,8 +23,8 @@ def test_settings_defaults() -> None:
     assert settings.max_ask_calls == 16
     assert settings.max_ask_tokens == 200_000
     assert settings.max_ask_seconds == 120.0
-    assert settings.mode == "vision"
-    assert settings.summaries is False
+    assert settings.mode == "maxsim"
+    assert settings.abstracts is False
     assert settings.rerank is False
 
 

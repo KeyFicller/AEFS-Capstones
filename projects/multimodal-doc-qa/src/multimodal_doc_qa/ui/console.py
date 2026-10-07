@@ -35,30 +35,26 @@ def echo(message: str) -> None:
     CONSOLE.print(message)
 
 
-def mode_models(mode: str, *, vision: str, ocr: str, describer: str) -> str:
-    """The model names the status bar shows for ``mode``, and no others.
+def mode_models(mode: str, **models: str) -> str:
+    """The model names the status bar shows for ``mode``: its embedding stage's label, filled in."""
+    from multimodal_doc_qa.retrievers.assembly import ARMS, COMPONENTS
 
-    ``summary`` is the describe arm: the VLM that wrote the page text, then the
-    text embedder that retrieves it.
-    """
-    if mode in {"vision", "pool"}:
-        return vision
-    if mode == "ocr":
-        return ocr
-    if mode == "summary":
-        return f"{describer}  {ocr}"
-    raise ValueError(f"mode must be one of {', '.join(_MODES)}, got {mode!r}")
-
-
-_MODES = ("vision", "ocr", "pool", "summary")
+    stages = ARMS[mode].stages
+    component = next(
+        (COMPONENTS[s] for s in stages if COMPONENTS[s].family == "embedding"),
+        COMPONENTS[stages[0]],
+    )
+    return component.label.format(**models)
 
 
 def other_mode(mode: str) -> str:
-    """The retrieval path Shift-Tab switches to. One step along ``vision → ocr → pool → summary``."""
+    """The retrieval path Shift-Tab switches to: one step along ``MODES``."""
+    from multimodal_doc_qa.retrievers.assembly import MODES
+
     try:
-        return _MODES[(_MODES.index(mode) + 1) % len(_MODES)]
+        return MODES[(MODES.index(mode) + 1) % len(MODES)]
     except ValueError as exc:
-        raise ValueError(f"mode must be one of {', '.join(_MODES)}, got {mode!r}") from exc
+        raise ValueError(f"mode must be one of {', '.join(MODES)}, got {mode!r}") from exc
 
 
 def status_bar(mode: str, embedder: str) -> FormattedText:

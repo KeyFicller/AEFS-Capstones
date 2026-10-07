@@ -175,7 +175,7 @@ def test_load_local_env_tolerates_an_unreadable_file(
     assert "MDQ_X" not in os.environ
 
 
-def test_ingest_writes_a_summary_once_per_distinct_page(
+def test_ingest_writes_an_abstract_once_per_distinct_page(
     corpus: Path, artifacts: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The VLM runs at ingest, and a second ingest of the same bytes does not call it again."""
@@ -188,7 +188,7 @@ def test_ingest_writes_a_summary_once_per_distinct_page(
 
         return describe
 
-    monkeypatch.setenv("MDQ_SUMMARIES", "1")
+    monkeypatch.setenv("MDQ_ABSTRACTS", "1")
     monkeypatch.setattr("multimodal_doc_qa.cli._page_describer", describer)
 
     first = _invoke("ingest", "--corpus", str(corpus))
@@ -197,10 +197,10 @@ def test_ingest_writes_a_summary_once_per_distinct_page(
     assert first.exit_code == 0, first.stdout
     assert second.exit_code == 0, second.stdout
     assert calls == ["p000.png"]
-    from multimodal_doc_qa.config import summary_paths
+    from multimodal_doc_qa.config import abstract_paths
 
-    cache_path, summary_path = summary_paths(artifacts)
-    assert cache_path.is_file() and summary_path.is_file()
+    cache_path, abstract_path = abstract_paths(artifacts)
+    assert cache_path.is_file() and abstract_path.is_file()
 
 
 def test_the_help_lists_both_commands() -> None:
@@ -213,13 +213,13 @@ def test_the_help_lists_both_commands() -> None:
 # ------------------------------------------------------------------ ingest
 
 
-def test_ingest_saves_a_vision_index_that_holds_the_pages(corpus: Path, artifacts: Path) -> None:
+def test_ingest_saves_a_multivector_index_that_holds_the_pages(corpus: Path, artifacts: Path) -> None:
     """The regression that matters: an index with no vectors looks exactly like success."""
     result = _invoke("ingest", "--corpus", str(corpus))
 
     assert result.exit_code == 0, result.stdout
-    _, vision_path, _ = artifact_paths(artifacts)
-    index = MultiVectorIndex.load(vision_path)
+    _, multivector_path, _ = artifact_paths(artifacts)
+    index = MultiVectorIndex.load(multivector_path)
     assert index.search(torch.tensor([[1.0, 0.0]]), k=5), "the saved index has no pages"
 
 
@@ -245,7 +245,7 @@ def test_ingest_saves_an_ocr_index_with_chunk_text(corpus: Path, artifacts: Path
 
 
 def test_a_text_file_is_encoded_as_text_not_rasterized(tmp_path: Path, artifacts: Path) -> None:
-    """Plain text stays text: encode_texts fills the vision index, and no page image is written."""
+    """Plain text stays text: encode_texts fills the multivector index, and no page image is written."""
     from multimodal_doc_qa.config import documents_path
     from multimodal_doc_qa.schemas import TextDocument, load_documents
 
@@ -256,11 +256,11 @@ def test_a_text_file_is_encoded_as_text_not_rasterized(tmp_path: Path, artifacts
     result = _invoke("ingest", "--corpus", str(corpus))
 
     assert result.exit_code == 0, result.stdout
-    render_dir, vision_path, ocr_path = artifact_paths(artifacts)
+    render_dir, multivector_path, ocr_path = artifact_paths(artifacts)
     assert not (render_dir / "note").exists()
     assert _StubVisionEncoder.text_calls == [["The tanh gate starts at zero."]]
     assert _StubVisionEncoder.image_calls == []
-    assert MultiVectorIndex.load(vision_path).search(torch.tensor([[1.0, 0.0]]), k=5)
+    assert MultiVectorIndex.load(multivector_path).search(torch.tensor([[1.0, 0.0]]), k=5)
     saved = torch.load(ocr_path, weights_only=True)
     assert any("tanh gate" in text for text, _ in saved["note"]["chunks"])
     assert "tanh gate" in (artifacts / "note.txt").read_text(encoding="utf-8")
@@ -331,7 +331,7 @@ def test_cited_materials_find_a_pdf_named_as_its_doc_id(tmp_path: Path) -> None:
     assert found[0].pdf == pdf
 
 
-def test_a_long_text_file_is_one_vision_page_per_chunk(tmp_path: Path, artifacts: Path) -> None:
+def test_a_long_text_file_is_one_multivector_page_per_chunk(tmp_path: Path, artifacts: Path) -> None:
     corpus = tmp_path / "notes"
     corpus.mkdir()
     (corpus / "note.md").write_text(("alpha " * 120).strip(), encoding="utf-8")
@@ -340,8 +340,8 @@ def test_a_long_text_file_is_one_vision_page_per_chunk(tmp_path: Path, artifacts
 
     assert result.exit_code == 0, result.stdout
     assert len(_StubVisionEncoder.text_calls[0]) > 1
-    _, vision_path, _ = artifact_paths(artifacts)
-    assert len(MultiVectorIndex.load(vision_path).search(torch.tensor([[1.0, 0.0]]), k=5)) > 1
+    _, multivector_path, _ = artifact_paths(artifacts)
+    assert len(MultiVectorIndex.load(multivector_path).search(torch.tensor([[1.0, 0.0]]), k=5)) > 1
 
 
 def test_an_image_file_is_encoded_as_an_image(tmp_path: Path, artifacts: Path, monkeypatch) -> None:
@@ -359,11 +359,11 @@ def test_an_image_file_is_encoded_as_an_image(tmp_path: Path, artifacts: Path, m
     result = _invoke("ingest", "--corpus", str(corpus))
 
     assert result.exit_code == 0, result.stdout
-    render_dir, vision_path, ocr_path = artifact_paths(artifacts)
+    render_dir, multivector_path, ocr_path = artifact_paths(artifacts)
     assert (render_dir / "chart" / "p000.png").is_file()
     assert _StubVisionEncoder.image_calls == [1]
     assert _StubVisionEncoder.text_calls == []
-    assert MultiVectorIndex.load(vision_path).search(torch.tensor([[1.0, 0.0]]), k=5)
+    assert MultiVectorIndex.load(multivector_path).search(torch.tensor([[1.0, 0.0]]), k=5)
     saved = torch.load(ocr_path, weights_only=True)
     assert saved["chart"]["chunks"] == [("a lone chart", 0)]
     document = load_documents(documents_path(artifacts))["chart"]
@@ -402,8 +402,8 @@ def test_ingest_writes_where_ask_reads(corpus: Path, artifacts: Path) -> None:
 
     _invoke("ingest", "--corpus", str(corpus), "--out", str(other))
 
-    render_dir, vision_path, ocr_path = artifact_paths(other)
-    assert vision_path.is_file() and ocr_path.is_file()
+    render_dir, multivector_path, ocr_path = artifact_paths(other)
+    assert multivector_path.is_file() and ocr_path.is_file()
     assert (render_dir / "doc000" / "p000.png").is_file()
 
 
@@ -657,7 +657,7 @@ def test_shift_tab_switches_the_retrieval_path_on_the_status_bar(tmp_path) -> No
     from prompt_toolkit.output import DummyOutput
     from repl_console import Repl
 
-    mode = {"value": "vision"}
+    mode = {"value": "maxsim"}
     seen: list[str] = []
     bindings = KeyBindings()
 
@@ -680,9 +680,9 @@ def test_shift_tab_switches_the_retrieval_path_on_the_status_bar(tmp_path) -> No
         ).run()
 
     assert seen == ["hi"]
-    assert mode["value"] == "ocr"
+    assert mode["value"] == "pool"
     shown = "".join(piece for _, piece in status_bar(mode["value"], "BAAI/bge-small-en-v1.5"))
-    assert "ocr" in shown and "shift-tab" in shown
+    assert "pool" in shown and "shift-tab" in shown
 
 
 def test_the_two_arms_point_at_the_same_render_dir(artifacts: Path) -> None:
@@ -690,3 +690,45 @@ def test_the_two_arms_point_at_the_same_render_dir(artifacts: Path) -> None:
     settings = Settings()
 
     assert artifact_paths(settings.artifacts_dir)[0] == settings.render_dir
+
+
+def test_the_lexical_arm_retrieves_text_chunks(
+    corpus: Path, artifacts: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "multimodal_doc_qa.synth.answer.build_chat_model", lambda *a, **k: _StubChat()
+    )
+    monkeypatch.setattr("multimodal_doc_qa.synth.answer.AnswerSynthesizer", _StubSynth)
+    _invoke("ingest", "--corpus", str(corpus))
+
+    result = _invoke("ask", "what was the EMEA margin?", "--mode", "lexical")
+
+    assert result.exit_code == 0, result.stdout
+    assert "doc000/p000" in result.stdout
+
+
+def test_the_hybrid_arm_fuses_and_retrieves(
+    corpus: Path, artifacts: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "multimodal_doc_qa.synth.answer.build_chat_model", lambda *a, **k: _StubChat()
+    )
+    monkeypatch.setattr("multimodal_doc_qa.synth.answer.AnswerSynthesizer", _StubSynth)
+    _invoke("ingest", "--corpus", str(corpus))
+
+    result = _invoke("ask", "what was the EMEA margin?", "--mode", "hybrid-ocr")
+
+    assert result.exit_code == 0, result.stdout
+    assert "doc000/p000" in result.stdout
+
+
+def test_hybrid_abstract_without_abstracts_reports_it(
+    corpus: Path, artifacts: Path
+) -> None:
+    """The abstract arm needs its own index; the hybrid must not paper over that."""
+    _invoke("ingest", "--corpus", str(corpus))
+
+    result = _invoke("ask", "anything", "--mode", "hybrid-abstract")
+
+    assert result.exit_code == 1
+    assert "abstract" in result.stdout

@@ -50,8 +50,8 @@ def load_local_env(env_path: Path) -> None:
 
 
 def artifact_paths(root: Path) -> tuple[Path, Path, Path]:
-    """``(render_dir, vision_index, ocr_index)`` under ``root``. One layout for ingest and ask."""
-    return root / "render", root / "vision_index.pt", root / "ocr_index.pt"
+    """``(render_dir, multivector_index, ocr_index)`` under ``root``. One layout for ingest and ask."""
+    return root / "render", root / "multivector_index.pt", root / "ocr_index.pt"
 
 
 def documents_path(root: Path) -> Path:
@@ -59,9 +59,9 @@ def documents_path(root: Path) -> Path:
     return root / "documents.json"
 
 
-def summary_paths(root: Path) -> tuple[Path, Path]:
-    """``(summary_cache, summary_index)`` under ``root``. The cache skips a second VLM call."""
-    return root / "summary_cache.json", root / "summary_index.pt"
+def abstract_paths(root: Path) -> tuple[Path, Path]:
+    """``(abstract_cache, abstract_index)`` under ``root``. The cache skips a second VLM call."""
+    return root / "abstract_cache.json", root / "abstract_index.pt"
 
 
 class Settings(BaseSettings):
@@ -74,8 +74,8 @@ class Settings(BaseSettings):
     answerer_model: str = "deepseek:deepseek-flash"
     device: str = _device()
     dtype: str = "float16"
-    mode: str = "vision"
-    summaries: bool = False
+    mode: str = "maxsim"
+    abstracts: bool = False
     rerank: bool = False
     top_k: int = 5
     min_score_ratio: float = 0.5
@@ -91,8 +91,8 @@ class Settings(BaseSettings):
         return artifact_paths(self.artifacts_dir)[0]
 
     @property
-    def vision_index_path(self) -> Path:
-        """Persisted multi-vector page index."""
+    def multivector_index_path(self) -> Path:
+        """Persisted multi-vector page index, shared by the ``maxsim`` and ``pool`` arms."""
         return artifact_paths(self.artifacts_dir)[1]
 
     @property

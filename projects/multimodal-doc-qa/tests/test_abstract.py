@@ -2,7 +2,7 @@ import hashlib
 from pathlib import Path
 
 from multimodal_doc_qa.schemas import PdfDocument, TextDocument
-from multimodal_doc_qa.summarize import index_summaries
+from multimodal_doc_qa.abstract import index_abstracts
 from PIL import Image
 
 
@@ -26,8 +26,8 @@ def test_identical_pages_are_described_once(tmp_path: Path) -> None:
     def encode(texts: list[str]):
         return texts
 
-    first = index_summaries(docs, tmp_path, encode, cache, None, describe)
-    second = index_summaries(docs, tmp_path, encode, cache, None, describe)
+    first = index_abstracts(docs, tmp_path, encode, cache, None, describe)
+    second = index_abstracts(docs, tmp_path, encode, cache, None, describe)
 
     assert len(calls) == 1
     assert len(cache) == 1
@@ -41,7 +41,7 @@ def test_a_text_page_is_its_own_description(tmp_path: Path) -> None:
     def describe(png: Path) -> str:
         raise AssertionError("text pages are not shown to the VLM")
 
-    payload = index_summaries(
+    payload = index_abstracts(
         [TextDocument(doc_id="note", pages=["The margin was 16.8%."])],
         tmp_path,
         lambda texts: texts,

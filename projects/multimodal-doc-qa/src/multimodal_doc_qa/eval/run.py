@@ -126,7 +126,7 @@ def run_eval(
     *,
     out_path: Path = RESULTS_PATH,
     settings: object | None = None,
-    mode: str = "vision",
+    mode: str = "maxsim",
     k: int = 5,
     iou_threshold: float = 0.5,
     max_tokens: int | None = None,

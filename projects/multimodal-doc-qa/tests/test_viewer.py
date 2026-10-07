@@ -215,18 +215,18 @@ def _write_results(path: Path, run_mode: str, qid: str, answer: str) -> None:
 def test_load_runs_keeps_each_run_separate(tmp_path: Path) -> None:
     """Appended runs must not merge, or a viewer would show two arms as one."""
     path = tmp_path / "results.jsonl"
-    _write_results(path, "vision", "q1", "vision answer")
+    _write_results(path, "maxsim", "q1", "vision answer")
     _write_results(path, "ocr", "q1", "ocr answer")
 
     runs = load_runs(path)
 
-    assert [run["header"]["mode"] for run in runs] == ["vision", "ocr"]
+    assert [run["header"]["mode"] for run in runs] == ["maxsim", "ocr"]
     assert [run["questions"]["q1"]["answer"] for run in runs] == ["vision answer", "ocr answer"]
 
 
 def test_load_runs_ignores_the_summary_as_a_question(tmp_path: Path) -> None:
     path = tmp_path / "results.jsonl"
-    _write_results(path, "vision", "q1", "an answer")
+    _write_results(path, "maxsim", "q1", "an answer")
 
     run = load_runs(path)[0]
 
@@ -239,7 +239,7 @@ def test_append_turn_loads_without_gold_metrics(tmp_path: Path) -> None:
     path = tmp_path / "turns.jsonl"
     append_turn(
         path,
-        mode="vision",
+        mode="maxsim",
         question="目标是什么",
         answer=Answer(text="四条", citations=[_citation(bbox=_box(0.1, 0.2, 0.3, 0.4))]),
         rounds=1,
@@ -265,7 +265,7 @@ def test_load_runs_keeps_a_run_whose_summary_never_arrived(tmp_path: Path) -> No
     path = tmp_path / "results.jsonl"
     with path.open("w") as handle:
         for row in (
-            {"kind": "run", "mode": "vision"},
+            {"kind": "run", "mode": "maxsim"},
             {"kind": "question", "qid": "q1", "answer": "partial", "citations": []},
         ):
             handle.write(json.dumps(row) + "\n")
@@ -280,7 +280,7 @@ def test_load_runs_skips_a_malformed_line(tmp_path: Path) -> None:
     """Rows are flushed as they are written, so a truncated line is a real state."""
     path = tmp_path / "results.jsonl"
     with path.open("w") as handle:
-        handle.write(json.dumps({"kind": "run", "mode": "vision"}) + "\n")
+        handle.write(json.dumps({"kind": "run", "mode": "maxsim"}) + "\n")
         handle.write('{"kind": "question", "qid": "q1"\n')  # truncated JSON
         handle.write(json.dumps({"kind": "summary", "n_done": 0}) + "\n")
 
@@ -320,7 +320,7 @@ def test_page_image_returns_a_detached_copy(tmp_path: Path) -> None:
 
 def test_runs_for_question_pairs_the_arms(tmp_path: Path) -> None:
     vision, ocr = tmp_path / "vision.jsonl", tmp_path / "ocr.jsonl"
-    _write_results(vision, "vision", "q1", "vision answer")
+    _write_results(vision, "maxsim", "q1", "vision answer")
     _write_results(ocr, "ocr", "q1", "ocr answer")
 
     paired = runs_for_question([*load_runs(vision), *load_runs(ocr)], "q1")
@@ -330,7 +330,7 @@ def test_runs_for_question_pairs_the_arms(tmp_path: Path) -> None:
 
 def test_runs_for_question_skips_a_run_that_never_answered_it(tmp_path: Path) -> None:
     path = tmp_path / "results.jsonl"
-    _write_results(path, "vision", "q1", "vision answer")
+    _write_results(path, "maxsim", "q1", "vision answer")
 
     paired = runs_for_question(load_runs(path), "q2")
 
@@ -372,7 +372,7 @@ def test_the_app_renders_a_real_result_without_raising(tmp_path: Path) -> None:
         )
     )
     results = tmp_path / "results.jsonl"
-    _write_results(results, "vision", "q1", "an answer")
+    _write_results(results, "maxsim", "q1", "an answer")
 
     app = AppTest.from_file(viewer.__file__)
     app.run()
@@ -395,7 +395,7 @@ def test_the_app_draws_a_turn_that_has_no_gold(tmp_path: Path) -> None:
     Image.new("RGB", (200, 300), "white").save(artifacts / "render" / "d" / "p000.png")
     append_turn(
         artifacts / "turns.jsonl",
-        mode="vision",
+        mode="maxsim",
         question="what is on the page?",
         answer=Answer(
             text="a box", citations=[_citation(doc_id="d", bbox=_box(0.1, 0.2, 0.3, 0.4))]

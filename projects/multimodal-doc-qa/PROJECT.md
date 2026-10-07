@@ -2,7 +2,7 @@
 
 - **项目**：multimodal-doc-qa（Agentic RAG）/ 所属 Phase：Phase19 / Capstone 04
 - **spec**：[Capstone 04 — Multimodal Document QA](https://aieng-zh.cn/lessons/19-capstone-projects/04-multimodal-document-qa/)
-- **状态**：vision-first 与 OCR-first 两条手臂都已跑通——**同一张 agentic 图，只换 retriever**；CLI 入口齐备（`ingest` / `ask` / `eval` / REPL 四档手臂）；单测 `248 passed, 2 deselected`（`-m "not slow"`）。`eval` 逐题出 `recall_at_k`（裸检索器单趟）与 `pool_recall`（agent 循环累积池）；gold 取自公开数据集 MMLongBench-Doc 的一个小子集，由 `python -m multimodal_doc_qa.eval.prepare_gold` 转换为 `questions.json`。**未实现**：答案准确率（`answer_containment`）、bytes/page、index p95。**必须记住**：索引不记录写它的编码器，换 checkpoint 后必须重新 `ingest`。
+- **状态**：`maxsim`（多向量后期交互）与 `ocr` 两条主线都已跑通——**同一张 agentic 图，只换 retriever**；`--mode` 现有九条检索臂；CLI 入口齐备（`ingest` / `ask` / `eval` / REPL）；单测 `287 passed`。`eval` 逐题出 `recall_at_k`（裸检索器单趟）与 `pool_recall`（agent 循环累积池）；gold 取自公开数据集 MMLongBench-Doc 的一个小子集，由 `python -m multimodal_doc_qa.eval.prepare_gold` 转换为 `questions.json`。**未实现**：答案准确率（`answer_containment`）、bytes/page、index p95。**已评测**：`hybrid-maxsim` 19 题（`eval/results-hybrid-maxsim-19q-1007.jsonl`）nDCG@5 0.6953 / recall@5 0.8421 / IoU@0.5 0.8158，对比 `maxsim` 基线（0.7359 / 0.8947 / 0.7895）——召回略降、bbox 定位略升，RRF 未带来检索增益。**未验证**：`lexical` 与其余三条 `hybrid-<dense>` 的端到端评测。**必须记住**：索引不记录写它的编码器，换 checkpoint 后必须重新 `ingest`。
 
 ## 目标与范围
 
@@ -72,12 +72,12 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 | `render/` | PDF → 页面 PNG | pymupdf |
 | `embed/` | 默认 `ColSmol-500M`，可选 `ColQwen2.5-v0.2` | colpali-engine, torch |
 | `index/` | torch 张量多向量存储 + MaxSim | torch |
-| `retrievers/` | LangChain `BaseRetriever`：`MultiVectorRetriever`（vision）· `pool.py`（按 patch 平均池化）· `TextRetriever`（OCR）· `rerank.py`（可选重排） | langchain-core, index |
+| `retrievers/` | LangChain `BaseRetriever` + 声明式装配：`assembly.py`（臂表 `Index` / `Component` / `Arm`，`MODES` 派生自 `ARMS`）· `multivector.py`（`maxsim`）· `pool.py`（按 patch 平均池化）· `text.py`（`ocr` / `abstract`）· `bm25.py`（手写 BM25 词法臂）· `hybrid.py`（RRF 融合）· `rerank.py`（可选重排） | langchain-core, index |
 | `agent/` | `plan` / `assess` / `verify` 的 prompt 与结构化 schema | langchain |
 | `graph.py` | LangGraph 装配，维护页面池与 `rounds` | langgraph, langchain |
 | `limits.py` | `from_settings`。账本在共享组件 `budget`：调用次数、token、墙钟 | budget |
 | `synth/` | 合成 + 引用 / bbox 抽取 | langchain |
-| `summarize.py` | `summary` 臂：入库时视觉模型写页描述，供文本检索 | — |
+| `abstract.py` | `abstract` 臂：入库时视觉模型写页描述，供文本检索 | — |
 | `baseline/` | OCR-first 文本抽取 + 分块 | pymupdf, pytesseract, sentence-transformers |
 | `eval/` | 指标、runner、结果落盘 | — |
 | `ui/` | `viewer.py`（Streamlit 查看器）· `console.py`（REPL 渲染） | streamlit, repl-console |
@@ -102,8 +102,8 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 ## 交付物
 
 - **CLI**：`doc-qa`（无子命令 → 加载 artifacts 后进 REPL）· `doc-qa chat [--mode]` · `doc-qa ingest <corpus_dir>` · `doc-qa ask "<question>" [--mode]` · `doc-qa eval --questions <questions.json> [--mode] [--out] [--iou-threshold] [--max-tokens] [--max-seconds]`。
-- **四条检索臂**（`--mode` 或 `MDQ_MODE`，默认 `vision`）：`vision` 多向量后期交互 · `pool` 同一份多向量按 patch 平均池化 · `ocr` 页文本 · `summary` 入库时视觉模型写的页描述 + 文本检索。会话内切换与状态栏由共享组件 `repl-console` 提供（见根 `README.md` 组件表）。
-- **`ingest`**：接受 `pdf` / 图片（`png` / `jpg` / `jpeg` / `webp`）/ `txt` / `md`。PDF 与图片走 `encode_images`；纯文本按块切、用同一视觉编码器的 `encode_texts` 进视觉索引，**不光栅化**。字节相同的后一份文件跳过。`summary` 臂的描述只在 `MDQ_MODE=summary` 或 `MDQ_SUMMARIES=1` 时随 `ingest` 写入，缓存键是图片字节的 `sha256`。`MDQ_RERANK=1` 时检索后按视觉模型重排，默认关。
+- **九条检索臂**（`--mode` 或 `MDQ_MODE`，默认 `maxsim`）：`maxsim` 多向量后期交互 · `pool` 同一份多向量按 patch 平均池化 · `ocr` 页文本 · `abstract` 入库时视觉模型写的页描述 + 文本检索 · `lexical` 手写 BM25（读 `ocr_index` 的块，零嵌入） · `hybrid-ocr` / `hybrid-abstract` / `hybrid-pool` / `hybrid-maxsim` 各把 BM25（恒读 `ocr_index`）与该 dense 臂按 RRF 融合，两路各取 `4 × top_k` 后归并到页。检索臂由 `retrievers/assembly.py` 的声明表装配，`MODES` 派生自臂表，CLI 与状态栏不再各存一份。会话内切换与状态栏由共享组件 `repl-console` 提供（见根 `README.md` 组件表）。
+- **`ingest`**：接受 `pdf` / 图片（`png` / `jpg` / `jpeg` / `webp`）/ `txt` / `md`。PDF 与图片走 `encode_images`；纯文本按块切、用同一视觉编码器的 `encode_texts` 进视觉索引，**不光栅化**。字节相同的后一份文件跳过。视觉索引落 `multivector_index.pt`（`maxsim` / `pool` 共用，由 `vision_index.pt` 改名——升级时把旧文件改名即可，不必重跑 `ingest`）。`abstract` 臂的描述只在 `MDQ_MODE=abstract` 或 `MDQ_ABSTRACTS=1` 时随 `ingest` 写入 `abstract_index.pt`，缓存键是图片字节的 `sha256`。`MDQ_RERANK=1` 时检索后按视觉模型重排，默认关。
 - **查看器**：`streamlit run .../ui/viewer.py`——证据框叠加 + vision / OCR 并排，并把金标答案、金标证据页、模型引用（`page_id` + 是否给了 bbox）分别列出。`ask` / REPL 把每一轮写进 `artifacts/turns.jsonl`，**没有 `questions.json` 也能看红框**；蓝框只在那份金标文件存在、且题目 id 对得上时画。
 - **评测**：`eval/results.jsonl`——每次 run 由 `kind="run"` 头（commit / 模型 / 日期 / 配置）开头、逐题 `kind="question"` 明细跟写、`kind="summary"` 收尾，**边跑边 flush**，故中途失败（API 报错、超时）时已得结果仍在文件里。逐题行除指标外留原始材料（`ranked` / `pool` / `answer` / `citations` / `stop_reason` / `rounds` / `calls` / `tokens`），使新增指标**无需重跑模型即可回算**。
 - **README.md**：一条命令端到端跑通。

@@ -1,4 +1,4 @@
-"""Page descriptions for the summary index. One VLM call per distinct image, then the cache."""
+"""Page descriptions for the abstract index. One VLM call per distinct image, then the cache."""
 
 import hashlib
 import json
@@ -54,7 +54,7 @@ def describe_page(model: object, png: Path) -> str:
     ).strip()
 
 
-def index_summaries(
+def index_abstracts(
     documents: list[Document],
     render_dir: Path,
     encode: Callable[[list[str]], object],

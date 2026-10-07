@@ -55,7 +55,22 @@ def test_render_sources_escapes_paths_and_text(monkeypatch, tmp_path: Path) -> N
 def test_mode_models_names_only_that_arms_models() -> None:
     from multimodal_doc_qa.ui.console import mode_models
 
-    assert mode_models("vision", vision="col", ocr="bge", describer="vlm") == "col"
-    assert mode_models("pool", vision="col", ocr="bge", describer="vlm") == "col"
-    assert mode_models("ocr", vision="col", ocr="bge", describer="vlm") == "bge"
-    assert mode_models("summary", vision="col", ocr="bge", describer="vlm") == "vlm  bge"
+    assert mode_models("maxsim", embedder="col", ocr="bge", describer="vlm") == "col"
+    assert mode_models("pool", embedder="col", ocr="bge", describer="vlm") == "col"
+    assert mode_models("ocr", embedder="col", ocr="bge", describer="vlm") == "bge"
+    assert mode_models("abstract", embedder="col", ocr="bge", describer="vlm") == "vlm  bge"
+    assert mode_models("lexical", embedder="col", ocr="bge", describer="vlm") == "bm25"
+    assert mode_models("hybrid-ocr", embedder="col", ocr="bge", describer="vlm") == "bge"
+    assert mode_models("hybrid-maxsim", embedder="col", ocr="bge", describer="vlm") == "col"
+
+
+def test_other_mode_cycles_through_every_arm() -> None:
+    from multimodal_doc_qa.retrievers.assembly import MODES
+    from multimodal_doc_qa.ui.console import other_mode
+
+    seen = [MODES[0]]
+    for _ in range(len(MODES) - 1):
+        seen.append(other_mode(seen[-1]))
+
+    assert seen == list(MODES)
+    assert other_mode(MODES[-1]) == MODES[0]

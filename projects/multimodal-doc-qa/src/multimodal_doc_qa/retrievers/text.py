@@ -16,7 +16,7 @@ class OcrEmbedder:
     """Single-vector embedder for the OCR arm only.
 
     It encodes page text at ingest and the query at ``ask --mode ocr``. Page images and
-    vision-arm queries go through ``MultiVectorEncoder`` and do not use this model.
+    maxsim-arm queries go through ``MultiVectorEncoder`` and do not use this model.
     The import is deferred so importing this module stays cheap.
     """
 

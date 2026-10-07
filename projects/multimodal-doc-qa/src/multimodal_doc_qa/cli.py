@@ -15,13 +15,14 @@ from repl_console.commands import CommandOutcome, LocalCommand
 from multimodal_doc_qa.config import (
     ENV_PATH,
     Settings,
+    abstract_paths,
     artifact_paths,
     documents_path,
     load_local_env,
-    summary_paths,
 )
 from multimodal_doc_qa.graph import GraphDeps, build_graph, initial_state
 from multimodal_doc_qa.limits import Budget
+from multimodal_doc_qa.retrievers.assembly import MODES, IndexNotFoundError, build_retriever
 from multimodal_doc_qa.schemas import (
     Answer,
     BBox,
@@ -38,13 +39,14 @@ from multimodal_doc_qa.ui import console as ui
 app = typer.Typer(help="Agentic RAG over document images", add_completion=False)
 
 _MODE_HELP = (
-    "vision: late-interaction over page images. "
+    "maxsim: late-interaction over page images. "
     "pool: one vector per page, the mean of those patches. "
     "ocr: page text embedded with the text encoder. "
-    "summary: a VLM description of each page, embedded as text. "
+    "abstract: a VLM description of each page, embedded as text. "
+    "lexical: BM25 over the OCR chunks, no embeddings. "
+    "hybrid-<dense>: RRF of the lexical arm with maxsim / pool / ocr / abstract. "
     "Set MDQ_MODE to change the default."
 )
-_MODES = ("vision", "ocr", "pool", "summary")
 
 
 @dataclass(frozen=True)
@@ -181,7 +183,7 @@ def ingest(
 
     settings = Settings()
     artifacts = (out or settings.artifacts_dir).expanduser()
-    render_dir, vision_path, ocr_path = artifact_paths(artifacts)
+    render_dir, multivector_path, ocr_path = artifact_paths(artifacts)
     sources = _unique_files(_checked_sources(corpus.expanduser()))
 
     artifacts.mkdir(parents=True, exist_ok=True)
@@ -203,32 +205,32 @@ def ingest(
         documents.append(document)
         ocr_docs[document.doc_id] = payload
 
-    vision.save(vision_path)
+    vision.save(multivector_path)
     ocr_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(ocr_docs, ocr_path)
     save_documents(documents, documents_path(artifacts))
-    if settings.mode == "summary" or settings.summaries:
-        _write_summaries(settings, artifacts, render_dir, documents, ocr_embedder.encode)
+    if settings.mode == "abstract" or settings.abstracts:
+        _write_abstracts(settings, artifacts, render_dir, documents, ocr_embedder.encode)
 
-    ui.echo(f"vision    {vision_path}  ({vision.nbytes() / 1e6:.1f} MB)")
+    ui.echo(f"multivector {multivector_path}  ({vision.nbytes() / 1e6:.1f} MB)")
     ui.echo(f"ocr       {ocr_path}")
     ui.echo(f"[green]ingested[/] {len(sources)} docs -> {artifacts}")
 
 
-def _write_summaries(settings, artifacts, render_dir, documents, encode) -> None:
+def _write_abstracts(settings, artifacts, render_dir, documents, encode) -> None:
     """Bind one description to each page. The cache means a repeated ingest does not call the VLM again."""
-    from multimodal_doc_qa.summarize import index_summaries, load_cache
+    from multimodal_doc_qa.abstract import index_abstracts, load_cache
 
-    cache_path, summary_path = summary_paths(artifacts)
+    cache_path, abstract_path = abstract_paths(artifacts)
     cache = load_cache(cache_path)
-    payload = index_summaries(
+    payload = index_abstracts(
         documents, render_dir, encode, cache, cache_path, _page_describer(settings)
     )
-    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    abstract_path.parent.mkdir(parents=True, exist_ok=True)
     import torch
 
-    torch.save(payload, summary_path)
-    ui.echo(f"summary   {summary_path}  ({len(cache)} cached pages)")
+    torch.save(payload, abstract_path)
+    ui.echo(f"abstract   {abstract_path}  ({len(cache)} cached pages)")
 
 
 def _page_describer(settings: Settings):
@@ -241,7 +243,7 @@ def _page_describer(settings: Settings):
             from multimodal_doc_qa.synth.answer import build_chat_model
 
             model = build_chat_model(settings)
-        from multimodal_doc_qa.summarize import describe_page
+        from multimodal_doc_qa.abstract import describe_page
 
         return describe_page(model, png)
 
@@ -369,97 +371,18 @@ def _corpus_sources(corpus: Path) -> list[Path]:
     )
 
 
-class IndexNotFoundError(Exception):
-    """The selected retrieval path has no index on disk."""
-
-
 def _resolve_mode(mode: str | None, settings: Settings) -> str:
-    """CLI ``--mode`` wins. Otherwise ``MDQ_MODE`` (default ``vision``)."""
+    """CLI ``--mode`` wins. Otherwise ``MDQ_MODE`` (default ``maxsim``)."""
     chosen = mode or settings.mode
-    if chosen not in _MODES:
-        raise typer.BadParameter(f"mode must be one of {', '.join(_MODES)}, got {chosen!r}")
+    if chosen not in MODES:
+        raise typer.BadParameter(f"mode must be one of {', '.join(MODES)}, got {chosen!r}")
     return chosen
-
-
-def _load_retriever(settings: Settings, mode: str, *, encoder: object = None, text_embedder: object = None):
-    """Build the retriever for ``mode``. Pass an encoder to share it across arms."""
-    _, vision_path, ocr_path = artifact_paths(settings.artifacts_dir)
-    if mode == "vision":
-        return _load_vision(settings, vision_path, encoder)
-    if mode == "pool":
-        return _load_pool(settings, vision_path, encoder)
-    if mode == "ocr":
-        return _load_text_index(settings, ocr_path, "OCR", text_embedder)
-    if mode == "summary":
-        return _load_text_index(
-            settings, summary_paths(settings.artifacts_dir)[1], "summary", text_embedder
-        )
-    raise typer.BadParameter(f"mode must be one of {', '.join(_MODES)}, got {mode!r}")
-
-
-def _load_vision(settings: Settings, vision_path: Path, encoder: object = None):
-    from multimodal_doc_qa.embed.encoder import MultiVectorEncoder
-    from multimodal_doc_qa.index.maxsim import MultiVectorIndex
-    from multimodal_doc_qa.retrievers.multivector import MultiVectorRetriever
-
-    if not vision_path.is_file():
-        raise IndexNotFoundError(f"no vision index at {vision_path} -- run `doc-qa ingest` first")
-    return MultiVectorRetriever(
-        encoder=encoder or MultiVectorEncoder(settings.embedder_model, settings),
-        index=MultiVectorIndex.load(vision_path),
-        k=settings.top_k,
-        min_score_ratio=settings.min_score_ratio,
-    )
-
-
-def _load_pool(settings: Settings, vision_path: Path, encoder: object = None):
-    from multimodal_doc_qa.embed.encoder import MultiVectorEncoder
-    from multimodal_doc_qa.index.maxsim import MultiVectorIndex
-    from multimodal_doc_qa.retrievers.pool import PooledRetriever, mean_vector
-
-    if not vision_path.is_file():
-        raise IndexNotFoundError(f"no vision index at {vision_path} -- run `doc-qa ingest` first")
-    index = MultiVectorIndex.load(vision_path)
-    return PooledRetriever(
-        encoder=encoder or MultiVectorEncoder(settings.embedder_model, settings),
-        pages={page_id: mean_vector(matrix) for page_id, matrix in index.matrices().items()},
-        k=settings.top_k,
-        min_score_ratio=settings.min_score_ratio,
-    )
-
-
-def _load_text_index(settings: Settings, path: Path, label: str, embedder: object = None):
-    import torch
-
-    from multimodal_doc_qa.retrievers.text import MultiDocTextRetriever, OcrEmbedder, TextRetriever
-
-    if not path.is_file():
-        hint = " -- run `doc-qa ingest` first"
-        if label == "summary":
-            hint = " -- re-run ingest with MDQ_SUMMARIES=1 or MDQ_MODE=summary"
-        raise IndexNotFoundError(f"no {label} index at {path}{hint}")
-    if embedder is None:
-        embedder = OcrEmbedder(settings.ocr_embedder_model, settings.device)
-    return MultiDocTextRetriever(
-        retrievers=[
-            TextRetriever(
-                doc_id=doc_id,
-                embedder=embedder,
-                index=payload["index"],
-                chunks=payload["chunks"],
-                k=settings.top_k,
-            )
-            for doc_id, payload in torch.load(path, weights_only=True).items()
-        ],
-        k=settings.top_k,
-        min_score_ratio=settings.min_score_ratio,
-    )
 
 
 def _open_retriever(settings: Settings, mode: str):
     """Load one retrieval path, or stop the process when its index is missing."""
     try:
-        return _load_retriever(settings, mode)
+        return build_retriever(settings, mode)
     except IndexNotFoundError as exc:
         ui.render_error(str(exc))
         raise typer.Exit(code=1) from exc
@@ -624,7 +547,7 @@ def _print_eval(
 def _mode_models(settings: Settings, mode: str) -> str:
     return ui.mode_models(
         mode,
-        vision=settings.embedder_model,
+        embedder=settings.embedder_model,
         ocr=settings.ocr_embedder_model,
         describer=settings.answerer_model,
     )
@@ -643,9 +566,9 @@ def _preload_retrievers(settings: Settings) -> tuple[dict[str, object], dict[str
     text_embedder = OcrEmbedder(settings.ocr_embedder_model, settings.device)
     loaded: dict[str, object] = {}
     missing: dict[str, str] = {}
-    for name in _MODES:
+    for name in MODES:
         try:
-            loaded[name] = _load_retriever(
+            loaded[name] = build_retriever(
                 settings, name, encoder=encoder, text_embedder=text_embedder
             )
         except IndexNotFoundError as exc:
@@ -703,7 +626,7 @@ class IndexCommand(LocalCommand):
         self._history.clear()
         mode = self._active["mode"]
         if mode not in self._loaded:
-            mode = next(name for name in _MODES if name in self._loaded)
+            mode = next(name for name in MODES if name in self._loaded)
             self._active["mode"] = mode
             return CommandOutcome(message=f"using the new index ({mode})")
         return CommandOutcome(message="using the new index")
@@ -814,7 +737,7 @@ def main(
 ) -> None:
     """Load ``local.env``, then start the REPL when no subcommand is given.
 
-    ``--mode`` selects vision, pool, ocr, or summary. Omit it to use ``MDQ_MODE``.
+    ``--mode`` selects one of the nine retrieval arms. Omit it to use ``MDQ_MODE``.
     """
     load_local_env(ENV_PATH)
     if ctx.invoked_subcommand is None:
