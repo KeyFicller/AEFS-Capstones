@@ -257,59 +257,6 @@ def test_spinner_is_rendered_only_while_working() -> None:
     assert ui.WORKING_MESSAGE not in _render_to_text(panel._renderable())
 
 
-def test_stream_summary_renders_the_reply_and_drops_the_spinner(monkeypatch) -> None:
-    """The live summary is a real agent panel, and it makes the spinner redundant."""
-    stream = _capture(monkeypatch)
-    panel = ui.TodoPanel()
-
-    with panel.region():  # off a terminal: no Live, so each call prints the panel
-        panel._working = True
-        panel.stream_summary("partial")
-        panel.stream_summary("partial and longer")
-
-    out = stream.getvalue()
-    assert "agent" in out
-    assert "partial and longer" in out
-    rendered = _render_to_text(panel._renderable())
-    assert "partial and longer" in rendered
-    assert ui.WORKING_MESSAGE not in rendered
-
-
-def test_region_resets_the_summary_slot_each_turn(monkeypatch) -> None:
-    """A stale summary from the previous turn must not leak into the next one."""
-    master, stream, chunks, reader = _open_tty(monkeypatch)
-    panel = ui.TodoPanel(Console(file=stream, width=40))
-
-    panel.stream_summary("stale from last turn")
-    with panel.region():
-        assert panel._summary == ""
-
-    stream.close()
-    reader.join(timeout=5)
-    os.close(master)
-
-
-def test_streamed_summary_draws_one_agent_panel_below_the_tasks_panel(monkeypatch) -> None:
-    """Redraw, not stack: a streamed summary is a single panel pinned under Tasks."""
-    master, stream, chunks, reader = _open_tty(monkeypatch)
-    console = Console(file=stream, width=48)
-    panel = ui.TodoPanel(console)
-
-    with panel.region():
-        panel("[-] fix the typo", 0)
-        panel.stream_summary("All done: ")
-        panel.stream_summary("All done: fixed the typo")
-
-    stream.close()
-    reader.join(timeout=5)
-    os.close(master)
-
-    screen = _screen_of(b"".join(chunks), cols=48, rows=24)
-    assert screen.count("agent") == 1, f"summary must redraw, not stack:\n{screen}"
-    assert screen.index("Tasks") < screen.index("agent")
-    assert "fixed the typo" in screen
-
-
 def _screen_of(raw: bytes, *, cols: int, rows: int) -> str:
     """Replay terminal bytes into a fresh screen to read the layout a user would see."""
     pyte = pytest.importorskip("pyte", reason="layout assertions need a terminal emulator")
@@ -460,5 +407,3 @@ def test_ask_question_escapes_a_bracketed_option(monkeypatch) -> None:
 
     assert out == {"answer": "use [bold]a[/bold]", "cancelled": False}
     assert "which[?]" in stream.getvalue()
-
-

@@ -26,24 +26,23 @@ from terminal_coding_agent.session import pending_interrupts, resume_turn, run_t
 
 def _session_config(*, worktree: Path, session: str) -> dict[str, Any]:
     """One thread per session; renderers are injected here, not hardwired in graph.py."""
-    todos = ui.TodoPanel()
-    configurable: dict[str, Any] = {
-        "worktree": str(worktree),
-        "thread_id": session,
-        "todo_renderer": todos,
-        "tool_renderer": ui.ToolLog(),
-        "enable_hitl": True,
-        "enable_answer_mode": True,
-        # "local_model": "qwen3:8b"
+    return {
+        "configurable": {
+            "worktree": str(worktree),
+            "thread_id": session,
+            "todo_renderer": ui.TodoPanel(),
+            "tool_renderer": ui.ToolLog(),
+            "enable_hitl": True,
+            "enable_answer_mode": True,
+            "enable_web_search": True,
+            # "local_model": "qwen3:8b"
+        }
     }
-    if todos.redraws_in_place:
-        configurable["summary_renderer"] = todos.stream_summary
-    return {"configurable": configurable}
 
 
-def _render_task_result(result: dict[str, Any], *, show_reply: bool = True) -> None:
+def _render_task_result(result: dict[str, Any]) -> None:
     messages = result.get("messages") or []
-    if messages and show_reply:
+    if messages:
         render_reply(messages[-1].content)
     ui.render_budget(result)
 
@@ -113,7 +112,6 @@ def repl(
     worktree = Path(configurable["worktree"])
     # Same instance the graph nodes call, so its in-place region covers their updates.
     todos: ui.TodoPanel = configurable["todo_renderer"]
-    streamed_reply = callable(configurable.get("summary_renderer"))
 
     def on_ready() -> None:
         if pending := pending_interrupts(graph, config):
@@ -121,7 +119,7 @@ def repl(
                 result = _drive_approvals(
                     graph=graph, config=config, pending=pending[0], region=todos.region
                 )
-                _render_task_result(result, show_reply=not streamed_reply)
+                _render_task_result(result)
             except _StdinClosedError as exc:
                 raise EndSessionError from exc
             except KeyboardInterrupt:
@@ -140,7 +138,7 @@ def repl(
                 show_plan=False,
                 region=todos.region,
             )
-        _render_task_result(result, show_reply=not streamed_reply)
+        _render_task_result(result)
 
     def guarded(message: HumanMessage) -> None:
         try:

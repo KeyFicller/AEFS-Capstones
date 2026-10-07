@@ -12,6 +12,8 @@
 - `langgraph.json` + `make_graph(config)` 工厂 + 含 `messages` 的 state schema
 - plan / act / observe / recover 四段循环
 - 6 个工具：`read_file`、`edit_file`（带 diff 预览）、`ripgrep`、`tree_sitter_symbols`、`run_shell`（带 timeout）、`git`；每次输出截断至 4k tokens
+- 第 7 个工具 `current_time`（无参数，返回 UTC / 本地 / epoch 三行）：**无条件注册**，零依赖、离线可用 → Harbor 侧也是 7 个
+- 第 8 个可选工具 `web_search`（DuckDuckGo 文本检索，**不抓目标页**），由 `configurable["enable_web_search"]` 开启、**默认关** → Harbor 侧为 7 个
 - ≥4 hook：`PreToolUse`（破坏性命令守卫）、`PostToolUse`（token 记账）、`SessionStart`（预算初始化）、`Stop`（写 trace）
 - 三层预算熔断 + `PreCompact`
 - `gen_ai.*` OTel span
@@ -64,7 +66,7 @@
 | token 记账 | runner 自动累加 `result["messages"]` 的 `usage_metadata` |
 | 运行位置 | 项目 copytree 进容器 `/installed-agent/langgraph-project`；容器内 venv 为 `/opt/harbor-langgraph-venv`，**Python 3.12**；**不会**带上仓库根 `requirements.txt`，项目须可自安装。跑 Harbor 前执行 `scripts/vendor_components.sh`，把 `budget` 和 `telemetry` 拷进 `vendor/`。`requirements-harbor.txt` 不改 |
 
-**模块路径**：`graph.py`（图装配）· `cli.py`（REPL 入口，循环由 `repl_console` 提供）· `attachments.py`（`strip_images` / `attached_images`，不 import `repl_console`）· `tools/`（6 个工具，唯一副作用边界）· `ui.py`（审批、提问、任务面板、工具日志）· `middleware/` · `harbor_tasks/`（`l1-`…`l5-` 五档能力题 + `greeter-fix` 烟测）· `scripts/verify_harbor_tasks_local.sh`（本地双向验证）· `scripts/collect_eval_results.py`（汇总 job 到 `eval/results.jsonl`）· `tests/`（单测）。
+**模块路径**：`graph.py`（图装配）· `cli.py`（REPL 入口，循环由 `repl_console` 提供）· `attachments.py`（`strip_images` / `attached_images`，不 import `repl_console`）· `tools/`（6 个工具 + `current_time` + 可选 `web_search`，唯一副作用边界）· `ui.py`（审批、提问、任务面板、工具日志）· `middleware/` · `harbor_tasks/`（`l1-`…`l5-` 五档能力题 + `greeter-fix` 烟测）· `scripts/verify_harbor_tasks_local.sh`（本地双向验证）· `scripts/collect_eval_results.py`（汇总 job 到 `eval/results.jsonl`）· `tests/`（单测）。
 
 **图产物**：`graph.png` 由 `python -m terminal_coding_agent.graph` 生成（demo 自己放行审批，所以会跑完；前缀 `ENABLE_HITL=0` 得到 Harbor 实际跑的无闸门拓扑），拓扑改了重跑一次；`example.png` 为手工截图。README 只放这两张图。
 
@@ -73,7 +75,7 @@
 - **Python**：本机共享 venv 3.14.6，**容器内 3.12** → 代码须 3.12 兼容
 - **编排**：LangGraph + LangChain（model / tool / retriever 抽象）
 - **模型**：`langchain-deepseek>=1.1.0`，默认 `deepseek-v4-flash`，provider 与模型名经 `configurable` 注入
-- **搜索**：ripgrep 子进程 + tree-sitter（预编译）
+- **搜索**：ripgrep 子进程 + tree-sitter（预编译）；可选 `ddgs`（DuckDuckGo 文本检索，无 API key，仅本地 CLI 开）
 - **沙箱 / 评测**：**Harbor 0.23.0**（`uv tool install harbor`，落在 `~/.local/bin`，**默认不在 PATH**）；`--env docker` 为本地默认，`daytona` / `e2b` / `modal` / `runloop` 为云端备选
 - **可观测性**：OTel `gen_ai.*` → 本地 `{worktree}/.agent/otel.jsonl`；Langfuse 主路径为 LangChain `CallbackHandler`（`LANGFUSE_PUBLIC_KEY`/`SECRET_KEY`/`BASE_URL`）。可选 `LANGFUSE_OTLP=1` 再挂原始 OTLP（默认关，避免与 Callback 双写）
 - **PR 发布**：细粒度 token 的 GitHub App，作用域限目标仓库（MVP 后补）
@@ -155,10 +157,12 @@
 - CLI：`terminal-coding-agent`（无子命令，直接进多轮 REPL；`--worktree` / `--session`）
   - 会话语义：单 `thread_id`，`messages` 跨轮累积；`turns/tokens/cost_rmb/todo_list/stop_reason` 等 12 个 per-turn 字段每轮经 `update_state` 重置（预算是 per task）。默认每轮输入作为一个 task 进图；CLI 注入 `enable_answer_mode` 时，planner 判为 `answer` 的请求（写/解释/翻译等「要一段内容作为回复」）走单次 `answer` 调用、由 `summary` 原样转达，不产生 todo、不过闸门（见「answer/work 分流」）
   - `--worktree` 缺省为**临时目录**，会话结束即删，`.agent/` 不会落进你的项目；要真让 agent 改某个仓库必须显式传 `--worktree <repo>`，续跑同 `--session` 也需连同传
-  - `todo_renderer` / `tool_renderer` / `summary_renderer` 经 `configurable` 注入（`make_graph`）；Harbor 不注入 → todo 走 `_print_todos` 进 `langgraph-run.log`、不装 `ToolLogMiddleware`，summary 走一次性 `invoke()` + `render_reply` 面板。交互式终端下（`TodoPanel.redraws_in_place` 为真）CLI 才注入 `summary_renderer = 同一个 TodoPanel.stream_summary`：一个 turn 内 todo 面板原地覆盖刷新，与 `working…` 指示器共用一块 `Live`；summary 节点改用 `planner.stream(...)`，把累计全文喂进同一 `Live` 的绿色 `agent` 面板原地增量渲染，收尾后不再重复打印（`_render_task_result(show_reply=False)`）。**`stream_usage=True` 必须显式传**——`ChatDeepSeek` 自定义 base URL 下默认关 `include_usage`，漏了会把 summary 那次调用的 token / 成本记成 0（实测流式带 `usage_metadata`）；`ChatOllama` 无该开关，按 `hasattr` 判断后不传。工具调用一行摘要（`edit_file` 附着色 diff），追加在面板上方，单块原地刷新
+  - `todo_renderer` / `tool_renderer` 经 `configurable` 注入（`make_graph` → executor）；Harbor 不注入 → todo 走 `_print_todos` 进 `langgraph-run.log`，且不装 `ToolLogMiddleware`。交互式终端下一个 turn 内：todo 面板原地覆盖刷新，与 `working…` 指示器共用一块 `Live`；工具调用一行摘要（`edit_file` 附着色 diff），追加在面板上方，单块原地刷新
   - 每轮页脚只显示 `turns` 与 `stop`。token / cost 明知不准故不展示（provider `usage_metadata` 常缺字段）；记账本身保留，硬闸门仍依赖它
   - **用户可见用法**：`approve? [y/n] ›` 处 `y` 放行 / `n` 否决（否决即本轮结束并写 trace）；闸门需要显式 `--worktree`，只有落盘 worktree 才能做到「进程被杀后重启、重建审批」。执行途中 agent 可能弹 `agent asks` 面板，在 `answer ›` 输入**编号**选一项，或**直接打一句自己的话**作答；`Ctrl-C` 表示「你自己决定」，agent 按自己判断跑完、本轮不终止（与闸门处 `Ctrl-C` 的含义相反）。提问发生在任何工具执行**之前**，批准后不会重跑上一步工具
   - **输入前缀（2026-10-04）**：`@` / `!` / `/` 由 `repl-console` 提供。`@path` 文本截断至 4k tokens；图片（png/jpg/jpeg/webp/gif，≤5 MB）转 data URL。图片仍只给 executor：`attachments.strip_images` 挡在 planner / summary 之外，该模块不 import `repl_console`。`!cmd` 在 worktree（REPL 的 root）执行，**不进 messages、不进预算**、无破坏性守卫。`/cmd` 是该次 `Repl` 的命令表（`LocalCommand` / `PromptCommand`）；内置 `/help` `/quit`，同名后传入的命令替换内置。`ask_approval` / `ask_question` 仍用 `input()`。账本数学来自 `budget`，本项目保留 trace、state 映射和 `BudgetSession`。span 从 `telemetry` 导入。Harbor 的图导入链不依赖 `repl_console`，`requirements-harbor.txt` 不增加本库和 `prompt_toolkit`。
+  - **web 搜索（2026-10-07）**：CLI 注入 `configurable["enable_web_search"]=True`，`make_tools` 追加工具 `web_search(query, max_results)`（默认 5、上限 10）——返回 DuckDuckGo 的 title / url / snippet，**不抓目标页面**（不触碰硬拒绝项「无 allowlist 时 curl 外部 URL」）；只读、无副作用。失败一律软返回字符串、不抛异常，但**区分两类**：**零命中返回 `No results for: <query>`（无 `Error:` 前缀）**——零命中是*成功但没命中*，不是故障，平铺交给模型由它决定换词或放弃；真故障（未装 `ddgs` / 超时 / 限流 / 上游异常）返回 `Error:` 串。`ddgs` 以抛 `DDGSException("No results found.")` 表示零命中，`_search` 把它归一化成空列表（只能匹配其消息文本，库无类型化信号；上游改词则措辞退化为 `Error: search failed:`，不崩）。`ddgs` 在 `_search` 内惰性 import，`requirements-harbor.txt` 不变 → Harbor 不注入该 flag，工具表为 7 个（6 + `current_time`）。
+  - **时间工具（2026-10-07）**：`current_time()` 无参数，返回 `utc` / `local`（各带 ISO 8601 偏移与星期几）/ `epoch` 三行。**无条件注册**（离线、零依赖、只读，无理由加 flag），故 Harbor 工具表 6 → 7。一次时钟读取（`_now()`）派生三种表示；**不做时区换算**（无 `zoneinfo`、无 tzdata 依赖），`local` 行走 `astimezone()` 取进程时区偏移，容器内通常等于 `utc` 行，偏移量照实输出由模型自行判断。
   - **计划闸门（HITL，2026-10-02）**：`configurable["enable_hitl"]` 为真时（只由 CLI 注入），父图插入 `await_plan_approval` 节点，用 LangGraph 动态 `interrupt()` 暂停并把计划摆给用户；`Command(resume="approve")` 继续，`"reject"` → 走 `summary` 写 trace。**两条入口**：`make_plan`（初计划）与 `recover`（replan，`_after_recover_gated`）；replan 那条必须显式接线——`recover` 把 `make_plan` 当**普通函数**调用（`recover.py`），不经图上的边，闸门不在其路径上。**拒绝标签区分两类失败**（评测报告要分类计数）：初计划被否 → `stop_reason="plan_rejected"`；replan 被否 → `"replan_rejected"`，判据是闸门处的 `replan_count`（`recover` 返回前已 +1，先于闸门落地）。**暂停态落 checkpoint**：显式 `--worktree` + 同 `--session` 可在进程被杀后重启重建审批（`pending_interrupts` 读 `get_state().tasks[].interrupts`）。恢复**不**经 `run_task_turn`（不 `update_state`，否则铲平暂停点）。未注入该 flag（Harbor）时节点集与路由与改动前逐字一致
     - **agent 提问（HITL，2026-10-02）**：`enable_hitl` 为真时 executor 多一个 `ask_user` 工具（`middleware/ask_user.py`），模型可在执行途中给人 1–4 个选项并接受自由文本作答。**中断落在 `after_model` 中间件里，即 ToolNode 之前**：LangGraph 的 resume 重放粒度是整个节点，若把 `interrupt()` 放进工具体内，ToolNode 会把同批调用再执行一遍（实测副作用工具执行 **2** 次）；停在 ToolNode 之前则无东西可重放（实测 **1** 次）。这与框架自带的 `HumanInTheLoopMiddleware` 落点一致。`ask_user` 是**信号工具**：`after_model` 就地答掉该调用、把答案注入为带匹配 `tool_call_id` 的 `ToolMessage`，工具 body 永不执行（同 `report_blocked` 先例）。**该调用必须保留在 `tool_calls` 里**——`create_agent` 的 model→边在 `len(tool_calls) == 0` 时直接结束循环，摘掉它会让 resume 后模型再不被调用、答案无人使用（实现期实测抓到的 bug）；保留则路由落到「有调用但无 pending」一支回到模型。契约：选项数不在 1–4 时不中断、回 error `ToolMessage`；一批多个只问第一个；未作答（Ctrl-C / EOF）→ `{"answer": None, "cancelled": True}`，本轮**不终止**，agent 自行判断继续。**不新增 state 字段**（答案走消息流）。未注入该 flag 时工具表与中间件表逐字一致（Harbor 平价）
   - **`executor.py` 必须放行 `GraphBubbleUp`**：`interrupt()` 无论落在工具体内还是中间件里，都会从 `agent.invoke` 抛出；`run_agent` 原有的 `except Exception` 会把它吞成 `stop_reason="executor_error:GraphInterrupt"`，父图**根本不暂停**（实测）。`except GraphBubbleUp: raise` 必须排在 `except Exception` 之前。这是两条 HITL 路径共用的前置条件
@@ -193,7 +197,7 @@
 
 1. **执行器本地还是云端**：MVP 用本地 docker。已实测 Rosetta 下 amd64 仅 **1.39×** 开销（容器内 `vendor_id: VirtualApple`），性能可行；16GB 内存限制并发 ≈ 1，任务集跑批时再定是否上云（只剩「花不花钱」一个变量）。
 2. **MCP StreamableHTTP vs 进程内工具**：spec 要求经 MCP 暴露工具，规则要求用 LangChain 做 tool 抽象，两者不同层（wire protocol vs 进程内）。本地同机评测下 MCP 是纯开销，但 rubric 的「工具 schema 可读性」偏向显式 schema。**未决。**
-3. **工具面口径**：技术栈栏写 ripgrep + tree-sitter，spec 要求 6 个工具。MVP 按 6 个实现，口径需与实现对齐。
+3. **工具面口径**：技术栈栏写 ripgrep + tree-sitter，spec 要求 6 个工具。MVP 按 6 个实现；另有 `current_time`（无条件注册，Harbor 也有）与 `web_search`（默认关、不进 Harbor），口径见「目标与范围」。
 
 **已知坑**
 

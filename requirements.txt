@@ -39,6 +39,9 @@ ipython>=9.17.1
 # 测试用终端模拟器：把 pty 字节流还原成屏幕，断言 TUI 布局（工具输出在 ToDo 面板之上）
 pyte>=0.8
 
+# web search tool (DuckDuckGo, no API key); local CLI only, off in Harbor
+ddgs>=9
+
 # multimodal-doc-qa：vision-first Agentic RAG
 # 页面图像编码 / 后期交互检索（本地，MPS）
 colpali-engine==0.3.18

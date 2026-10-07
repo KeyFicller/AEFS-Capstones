@@ -193,10 +193,9 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
     enable_answer = bool(configurable.get("enable_answer_mode"))
     make_plan = build_planner(models, enable_answer=enable_answer)
     tool_renderer = configurable.get("tool_renderer")
-    summary_renderer = configurable.get("summary_renderer")
     execute = build_execute_nodes(
         models,
-        make_tools(worktree),
+        make_tools(worktree, enable_web_search=bool(configurable.get("enable_web_search"))),
         worktree=worktree,
         sequence_events=sequence_events,
         tool_renderer=tool_renderer if callable(tool_renderer) else None,
@@ -211,7 +210,6 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
         worktree=worktree,
         sequence_events=sequence_events,
         sequence_path=sequence_path,
-        summary_renderer=summary_renderer if callable(summary_renderer) else None,
     )
 
     coding_agent.add_node("make_plan", _announce_todos(make_plan))

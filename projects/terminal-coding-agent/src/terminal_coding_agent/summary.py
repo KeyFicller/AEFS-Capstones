@@ -5,7 +5,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from langchain_core.messages import AIMessage, HumanMessage, message_chunk_to_message
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from telemetry import chat_span, record_chat_usage, resolve_model_name
 
@@ -49,42 +49,17 @@ def _answer_reply(messages: list) -> AIMessage | None:
     return None
 
 
-def _stream_summary(
-    model: Any,
-    messages: list,
-    config: RunnableConfig,
-    render: Callable[[str], None],
-) -> Any:
-    """Stream the summary, feeding `render` the whole text so far after each chunk.
-
-    stream_usage is explicit: ChatDeepSeek omits usage when streaming, which would zero
-    the summary's budget; ChatOllama lacks the switch, so it is passed conditionally.
-    """
-    kwargs = {"stream_usage": True} if hasattr(model, "stream_usage") else {}
-    accumulated = None
-    for chunk in model.stream(messages, config=config, **kwargs):
-        accumulated = chunk if accumulated is None else accumulated + chunk
-        render(_text_of(accumulated))
-    if accumulated is None:
-        response = model.invoke(messages, config=config)
-        render(_text_of(response))
-        return response
-    return message_chunk_to_message(accumulated)
-
-
 def build_summary(
     models: AgentModels,
     *,
     worktree: Path,
     sequence_events: list | None = None,
     sequence_path: Path | None = None,
-    summary_renderer: Callable[[str], None] | None = None,
 ) -> Callable[[CodingAgentState, RunnableConfig], dict[str, Any]]:
     """Return the summary node. Its finally block is the Stop hook: it never skips.
 
     An `answer`-mode run relays its last message instead of summarizing: the content is
-    the deliverable. `summary_renderer` (interactive CLI only) streams the summary call
-    and paints the relayed answer; without it, both are one-shot.
+    the deliverable.
     """
 
     def summary(state: CodingAgentState, config: RunnableConfig) -> dict[str, Any]:
@@ -100,17 +75,10 @@ def build_summary(
                     else None
                 )
                 if reply is not None:
-                    if summary_renderer is not None:
-                        summary_renderer(_text_of(reply))
                     domain = {"messages": [AIMessage(content=reply.content)]}
                 else:
                     with chat_span(model_name) as span:
-                        if summary_renderer is not None:
-                            response = _stream_summary(
-                                models.planner, summary_input, config, summary_renderer
-                            )
-                        else:
-                            response = models.planner.invoke(summary_input, config=config)
+                        response = models.planner.invoke(summary_input, config=config)
                         record_chat_usage(span, response, model=model_name)
                     budget.observe(response)
                     domain = {"messages": [summary_message, response]}
