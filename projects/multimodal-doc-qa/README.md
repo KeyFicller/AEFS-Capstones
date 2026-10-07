@@ -26,4 +26,6 @@ brew install tesseract                    # 扫描页的 OCR 臂需要它
 ./start.sh run streamlit run projects/multimodal-doc-qa/src/multimodal_doc_qa/ui/viewer.py   # 证据框叠加 + 并排
 ```
 
+`eval` 除 nDCG / IoU 外还报检索侧指标：`recall@k`（裸检索器单趟找到多少 gold 页）与 `pool recall`（agent 循环累积池）。没有 `questions.json` 时，可用 `./start.sh run python -m multimodal_doc_qa.eval.prepare_gold --docs <a.pdf,b.pdf>` 从公开数据集 MMLongBench-Doc 取一个子集生成。
+
 `ask` / REPL / `eval` 的凭据放仓库根 `local.env`；回答器默认 `deepseek:deepseek-flash`，`MDQ_ANSWERER_MODEL` 可换 provider / 模型。

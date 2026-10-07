@@ -2,7 +2,7 @@
 
 - **项目**：terminal-coding-agent / 所属 Phase：Phase19 / Capstone 01
 - **spec**：[Capstone 01 — Terminal-native coding agent](https://aiengineeringfromscratch.com/lesson?path=phases%2F19-capstone-projects%2F01-terminal-native-coding-agent)
-- **状态**（2026-10-07）：**交付重点在 CLI**。CLI 已交付（多轮 REPL / 输入前缀 / HITL / 8 hook / OTel）；Harbor 评测链路也已跑通（垂直切片 + 5 题任务集，实测 5/5）。**已知降级** 3 处：Ctrl-C 取消的那一轮不写 trace、`!` 无破坏性守卫、`@` 图片不剥离。**未做**：PR 发布、OTel trace 归档、失败报告。
+- **状态**：**交付重点在 CLI**。CLI 已交付（多轮 REPL / 输入前缀 / HITL / 8 hook / OTel）；Harbor 评测链路也已跑通（垂直切片 + 5 题任务集，实测 5/5）。**已知降级** 3 处：Ctrl-C 取消的那一轮不写 trace、`!` 无破坏性守卫、`@` 图片不剥离。**未做**：PR 发布、OTel trace 归档、失败报告。
 
 ## 目标与范围
 
@@ -73,7 +73,7 @@ harbor run -p projects/terminal-coding-agent/harbor_tasks \
 ```
 
 - **模型与凭据可换**：`configurable["planner"]` / `["executor"]` 收 `provider:model` 串（缺省 `deepseek:deepseek-v4-flash`），`configurable["local_model"]` 走本地 Ollama（不取 API key）；上面命令里的 `-m` 与 `--ae` 随所选 provider 一起改。
-- **实测**（job `jobs/2026-10-01__19-28-06`，8m29s，0.17 元）：能力题 **5/5**，逐档 L1–L5 全 pass；6 trial 零异常，`stop_reason` 全 `completed`，artifact 全 `ok`，`patch.diff` 均非空。本地双向验证 **13/13**（broken→0 / solve→1，L2 与 L5 各含作弊解→0）。
+- **实测**（job `jobs/<跑批目录>`，8m29s，0.17 元）：能力题 **5/5**，逐档 L1–L5 全 pass；6 trial 零异常，`stop_reason` 全 `completed`，artifact 全 `ok`，`patch.diff` 均非空。本地双向验证 **13/13**（broken→0 / solve→1，L2 与 L5 各含作弊解→0）。
 - **当前无区分度**：`deepseek-v4-flash` 把 5 档全解了。阶梯可证伪（broken 态确实 0 分）但已饱和；下一版在同样 5 档内加深，或换更弱模型当被试。
 - 汇总：`python3 scripts/collect_eval_results.py <job-dir>` → `eval/results.jsonl`（逐题 `reward` / `turns` / in-out tokens / `cost_rmb` / `stop_reason` / artifact 状态）。
 

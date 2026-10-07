@@ -11,7 +11,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from multimodal_doc_qa.schemas import Answer, Citation
+from multimodal_doc_qa.schemas import Answer, Citation, page_id
 
 GOLD = (30, 110, 220)
 CITED = (215, 40, 40)
@@ -160,6 +160,28 @@ def evidence_pages(citations: list[Citation], gold: list[Citation]) -> list[tupl
     return list(dict.fromkeys((c.doc_id, c.page) for c in [*gold, *citations]))
 
 
+def row_citations(row: dict) -> list[Citation]:
+    """The citations a results row recorded."""
+    return [Citation.model_validate(c) for c in row.get("citations", [])]
+
+
+def citation_lines(citations: list[Citation]) -> str:
+    """Markdown list: each page the answer cited, and whether it claimed a region."""
+    if not citations:
+        return "_no citations_"
+    return "\n".join(
+        f"- `{page_id(c.doc_id, c.page)}` — {'box' if c.bbox is not None else 'page-level'}"
+        for c in citations
+    )
+
+
+def evidence_lines(gold: list[Citation]) -> str:
+    """Markdown list of gold evidence pages. Gold is page-level; the dataset carries no box."""
+    if not gold:
+        return "_no gold evidence_"
+    return "\n".join(f"- `{page_id(c.doc_id, c.page)}`" for c in gold)
+
+
 def render_app() -> None:
     """Streamlit entrypoint: ``streamlit run .../viewer.py``."""
     import streamlit as st
@@ -206,13 +228,12 @@ def render_app() -> None:
     gold: list[Citation] = []
     if questions_path.is_file():
         raw = json.loads(questions_path.read_text())
-        gold = [
-            Citation.model_validate(c)
-            for question in raw
-            if question["qid"] == qid
-            for c in question["evidence"]
-        ]
-        st.caption(next((q["text"] for q in raw if q["qid"] == qid), ""))
+        question = next((q for q in raw if q["qid"] == qid), {})
+        gold = [Citation.model_validate(c) for c in question.get("evidence", [])]
+        st.caption(question.get("text", ""))
+        st.subheader("gold")
+        st.markdown(f"**answer**  {question.get('answer') or '—'}")
+        st.markdown(f"**evidence**\n\n{evidence_lines(gold)}")
 
     paired = runs_for_question(runs, qid)
     columns = st.columns(max(1, len(paired)))
@@ -221,6 +242,7 @@ def render_app() -> None:
             mode = run["header"].get("mode", "?")
             st.subheader(mode)
             st.write(row.get("answer") or "_no answer_")
+            st.markdown(f"**citations**\n\n{citation_lines(row_citations(row))}")
             bits = [
                 f"{label} {row[key]}"
                 for label, key in (
@@ -242,7 +264,7 @@ def render_app() -> None:
             if bits:
                 st.caption("  ".join(bits))
 
-    citations = [Citation.model_validate(c) for _, row in paired for c in row.get("citations", [])]
+    citations = [c for _, row in paired for c in row_citations(row)]
     for doc_id, page in evidence_pages(citations, gold):
         image = page_image(render_dir, doc_id, page)
         st.markdown(f"**{doc_id} page {page}**")

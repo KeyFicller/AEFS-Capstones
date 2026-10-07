@@ -2,7 +2,7 @@
 
 - **项目**：multimodal-doc-qa（Agentic RAG）/ 所属 Phase：Phase19 / Capstone 04
 - **spec**：[Capstone 04 — Multimodal Document QA](https://aieng-zh.cn/lessons/19-capstone-projects/04-multimodal-document-qa/)
-- **状态**（2026-10-07）：vision-first 与 OCR-first 两条手臂都已跑通——**同一张 agentic 图，只换 retriever**；CLI 入口齐备（`ingest` / `ask` / `eval` / REPL 四档手臂）；单测 `230 passed, 2 deselected`（`-m "not slow"`）。**未实现**：`recall@k`、答案准确率（`answer_containment`）、bytes/page、index p95。**必须记住**：索引不记录写它的编码器，换 checkpoint 后必须重新 `ingest`。
+- **状态**：vision-first 与 OCR-first 两条手臂都已跑通——**同一张 agentic 图，只换 retriever**；CLI 入口齐备（`ingest` / `ask` / `eval` / REPL 四档手臂）；单测 `248 passed, 2 deselected`（`-m "not slow"`）。`eval` 逐题出 `recall_at_k`（裸检索器单趟）与 `pool_recall`（agent 循环累积池）；gold 取自公开数据集 MMLongBench-Doc 的一个小子集，由 `python -m multimodal_doc_qa.eval.prepare_gold` 转换为 `questions.json`。**未实现**：答案准确率（`answer_containment`）、bytes/page、index p95。**必须记住**：索引不记录写它的编码器，换 checkpoint 后必须重新 `ingest`。
 
 ## 目标与范围
 
@@ -19,7 +19,7 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 - **索引 / 检索**：torch 张量精确 **MaxSim**（逐查询 token 取每页 patch 最大点积再求和）；`top_k` 默认 5（`MDQ_TOP_K`）；top-k 之后再过分数线，低于本轮最高分 `MDQ_MIN_SCORE_RATIO`（默认 `0.5`）的页不进结果。
 - **合成**：回答器读**页面池**图 + 问题，`with_structured_output(Answer)` 直接产出带 `(doc_id, page, bbox?)` 引用的答案——**引用与 bbox 在合成时即结构化落地，无独立抽取步骤**。模型不给 bbox 即为页级引用。
 - **OCR-first 基线**：PyMuPDF 文本层（有则用）+ Tesseract（扫描页）→ 分块 → `bge-small` 稠密检索；与主线**共用同一张图、同一回答器、同一 top-k**，只换 retriever。
-- **查看器**：Streamlit——证据框叠加 + vision / OCR 并排。
+- **查看器**：Streamlit——证据框叠加 + vision / OCR 并排；金标答案 / 证据页与模型引用另作文本列出。
 
 ## 架构
 
@@ -104,7 +104,7 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 - **CLI**：`doc-qa`（无子命令 → 加载 artifacts 后进 REPL）· `doc-qa chat [--mode]` · `doc-qa ingest <corpus_dir>` · `doc-qa ask "<question>" [--mode]` · `doc-qa eval --questions <questions.json> [--mode] [--out] [--iou-threshold] [--max-tokens] [--max-seconds]`。
 - **四条检索臂**（`--mode` 或 `MDQ_MODE`，默认 `vision`）：`vision` 多向量后期交互 · `pool` 同一份多向量按 patch 平均池化 · `ocr` 页文本 · `summary` 入库时视觉模型写的页描述 + 文本检索。会话内切换与状态栏由共享组件 `repl-console` 提供（见根 `README.md` 组件表）。
 - **`ingest`**：接受 `pdf` / 图片（`png` / `jpg` / `jpeg` / `webp`）/ `txt` / `md`。PDF 与图片走 `encode_images`；纯文本按块切、用同一视觉编码器的 `encode_texts` 进视觉索引，**不光栅化**。字节相同的后一份文件跳过。`summary` 臂的描述只在 `MDQ_MODE=summary` 或 `MDQ_SUMMARIES=1` 时随 `ingest` 写入，缓存键是图片字节的 `sha256`。`MDQ_RERANK=1` 时检索后按视觉模型重排，默认关。
-- **查看器**：`streamlit run .../ui/viewer.py`——证据框叠加 + vision / OCR 并排。`ask` / REPL 把每一轮写进 `artifacts/turns.jsonl`，**没有 `questions.json` 也能看红框**；蓝框只在那份金标文件存在、且题目 id 对得上时画。
+- **查看器**：`streamlit run .../ui/viewer.py`——证据框叠加 + vision / OCR 并排，并把金标答案、金标证据页、模型引用（`page_id` + 是否给了 bbox）分别列出。`ask` / REPL 把每一轮写进 `artifacts/turns.jsonl`，**没有 `questions.json` 也能看红框**；蓝框只在那份金标文件存在、且题目 id 对得上时画。
 - **评测**：`eval/results.jsonl`——每次 run 由 `kind="run"` 头（commit / 模型 / 日期 / 配置）开头、逐题 `kind="question"` 明细跟写、`kind="summary"` 收尾，**边跑边 flush**，故中途失败（API 报错、超时）时已得结果仍在文件里。逐题行除指标外留原始材料（`ranked` / `pool` / `answer` / `citations` / `stop_reason` / `rounds` / `calls` / `tokens`），使新增指标**无需重跑模型即可回算**。
 - **README.md**：一条命令端到端跑通。
 

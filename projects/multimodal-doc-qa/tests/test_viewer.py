@@ -9,8 +9,11 @@ from multimodal_doc_qa.ui.viewer import (
     GOLD,
     PAGE_LEVEL,
     append_turn,
+    citation_lines,
     draw_citations,
+    evidence_lines,
     load_runs,
+    row_citations,
     runs_for_question,
 )
 from PIL import Image
@@ -143,6 +146,44 @@ def test_no_citations_leaves_the_page_untouched() -> None:
     out = draw_citations(image, [], doc_id="d", page=0)
 
     assert out.tobytes() == image.tobytes()
+
+
+# ------------------------------------------------------------------ evidence text
+
+
+def test_citation_lines_mark_a_box_and_a_page_level_claim_differently() -> None:
+    lines = citation_lines(
+        [_citation(doc_id="d", page=0, bbox=_box(0.1, 0.1, 0.2, 0.2)), _citation(page=3)]
+    )
+
+    assert "- `d/p000` — box" in lines
+    assert "- `d/p003` — page-level" in lines
+
+
+def test_citation_lines_say_so_when_there_are_none() -> None:
+    assert citation_lines([]) == "_no citations_"
+
+
+def test_evidence_lines_list_the_gold_pages() -> None:
+    assert evidence_lines([_citation(page=0), _citation(page=9)]) == "- `d/p000`\n- `d/p009`"
+
+
+def test_evidence_lines_say_so_when_there_is_none() -> None:
+    assert evidence_lines([]) == "_no gold evidence_"
+
+
+def test_row_citations_parse_a_results_row() -> None:
+    row = {"citations": [{"doc_id": "doc000", "page": 0, "bbox": None}]}
+
+    (citation,) = row_citations(row)
+
+    assert citation.doc_id == "doc000"
+    assert citation.bbox is None
+
+
+def test_row_citations_are_empty_without_the_key() -> None:
+    """A REPL turn with no citations is a state the viewer must render, not crash on."""
+    assert row_citations({}) == []
 
 
 # ------------------------------------------------------------------ loading a results file

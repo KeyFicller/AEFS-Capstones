@@ -3,7 +3,7 @@
 - **项目**：cyber-cricket（游戏无关的 bot 竞技平台）/ 所属 Phase：Phase19 / Capstone 10（**改写**：交付物从「一个 PR」换成「一个 bot」）+ Phase 16
 - **spec 链接**：[Capstone 10 — Multi-Agent Software Engineering Team](https://aiengineeringfromscratch.com/lesson?path=phases%2F19-capstone-projects%2F10-multi-agent-software-team) · [Phase 16 — Multi-Agent & Swarms](https://aiengineeringfromscratch.com/lesson?path=phases%2F16-multi-agent-and-swarms%2F01-why-multi-agent)
 - **设计**：`docs/features/arena-core/design.md`
-- **状态**：立项版（2026-10-06）。设计已出，**尚未落地**；落地后回写本文件。
+- **状态**：立项版。设计已出，**尚未落地**；落地后回写本文件。
 
 ## 目标与范围
 

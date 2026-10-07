@@ -1,7 +1,10 @@
 """Retrieval and evidence metrics.
 
 nDCG takes an explicitly ranked page list. The agent loop's page pool is insertion
-order, not score order, so a rank metric over it is meaningless.
+order, not score order, so a rank metric over it is meaningless. Recall is therefore
+measured twice: ``recall_at_k`` over the retriever's own ranking, ``pool_recall`` over
+the loop's accumulated pool. ``pool_recall`` above ``recall_at_k`` means the loop
+recovered pages the first pass missed.
 """
 
 import math
@@ -71,3 +74,29 @@ def iou_at_threshold(
                 hits += 1
                 break
     return hits / len(gold)
+
+
+def recall_at_k(ranked_page_ids: list[str], relevant: set[str], k: int) -> float:
+    """Fraction of gold pages the retriever's own ranking found within ``k``.
+
+    Takes an explicitly ranked list: this is the retriever alone, before the agent loop.
+    Duplicate ids are collapsed first, the same way ``ndcg_at_k`` does it.
+    Returns ``0.0`` when nothing is relevant.
+    """
+    ranked = list(dict.fromkeys(ranked_page_ids))[:k]
+    if not relevant:
+        return 0.0
+    return len(relevant.intersection(ranked)) / len(relevant)
+
+
+def pool_recall(pool: list[str], relevant: set[str]) -> float:
+    """Fraction of gold pages the agent loop's accumulated pool contains.
+
+    The pool is insertion order, not score order, so it is compared as a set.
+    Returns ``0.0`` when nothing is relevant.
+
+    ``pool_recall > recall_at_k`` means the loop recovered pages the first pass missed.
+    """
+    if not relevant:
+        return 0.0
+    return len(relevant.intersection(pool)) / len(relevant)

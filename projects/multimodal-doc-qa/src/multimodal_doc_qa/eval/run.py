@@ -15,7 +15,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from multimodal_doc_qa.config import PROJECT_ROOT
-from multimodal_doc_qa.eval.metrics import bbox_hit_rate, iou_at_threshold, ndcg_at_k
+from multimodal_doc_qa.eval.metrics import (
+    bbox_hit_rate,
+    iou_at_threshold,
+    ndcg_at_k,
+    pool_recall,
+    recall_at_k,
+)
 from multimodal_doc_qa.schemas import Answer, Question, page_id
 
 RESULTS_PATH = PROJECT_ROOT / "eval" / "results.jsonl"
@@ -85,6 +91,8 @@ def _score(question: Question, run: QuestionRun, k: int, iou_threshold: float) -
         "ranked": run.ranked,
         "pool": run.pool,
         "ndcg_at_k": round(ndcg_at_k(run.ranked, relevant, k), 4),
+        "recall_at_k": round(recall_at_k(run.ranked, relevant, k), 4),
+        "pool_recall": round(pool_recall(run.pool, relevant), 4),
         "iou_at_threshold": round(
             iou_at_threshold(citations, question.evidence, threshold=iou_threshold), 4
         ),
@@ -135,6 +143,8 @@ def run_eval(
     stopped_after: str | None = None
     started = time.perf_counter()
     metrics: list[tuple[float, float, float]] = []
+    recalls: list[float] = []
+    pool_recalls: list[float] = []
     stop_reasons: list[str] = []
 
     with out_path.open("a") as handle:
@@ -164,6 +174,8 @@ def run_eval(
 
             latencies.append(latency)
             metrics.append((row["ndcg_at_k"], row["iou_at_threshold"], row["bbox_hit_rate"]))
+            recalls.append(row["recall_at_k"])
+            pool_recalls.append(row["pool_recall"])
             stop_reasons.append(run.stop_reason)
             tokens += run.tokens
 
@@ -174,6 +186,8 @@ def run_eval(
             "stopped_after": stopped_after,
             "elapsed_s": round(time.perf_counter() - started, 3),
             "ndcg_at_k": _mean([n for n, _, _ in metrics]),
+            "recall_at_k": _mean(recalls),
+            "pool_recall": _mean(pool_recalls),
             "iou_at_threshold": _mean([i for _, i, _ in metrics]),
             "bbox_hit_rate": _mean([b for _, _, b in metrics]),
             "latency_p50_s": _percentile(latencies, 0.50),

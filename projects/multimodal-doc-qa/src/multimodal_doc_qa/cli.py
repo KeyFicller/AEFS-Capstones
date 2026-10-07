@@ -609,6 +609,10 @@ def _print_eval(
         f"  (strict containment {summary['bbox_hit_rate']:.4f})"
     )
     ui.echo(
+        f"recall@{settings.top_k} {summary['recall_at_k']:.4f}"
+        f"  pool {summary['pool_recall']:.4f}"
+    )
+    ui.echo(
         f"latency p50/p95 {summary['latency_p50_s']:.2f}s/{summary['latency_p95_s']:.2f}s"
         f"  tokens {summary['tokens']}  stop_reasons {summary['stop_reasons']}"
     )

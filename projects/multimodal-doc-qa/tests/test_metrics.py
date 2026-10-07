@@ -6,7 +6,13 @@ from contextlib import suppress
 from pathlib import Path
 
 import pytest
-from multimodal_doc_qa.eval.metrics import bbox_hit_rate, iou_at_threshold, ndcg_at_k
+from multimodal_doc_qa.eval.metrics import (
+    bbox_hit_rate,
+    iou_at_threshold,
+    ndcg_at_k,
+    pool_recall,
+    recall_at_k,
+)
 from multimodal_doc_qa.eval.run import RESULTS_PATH, QuestionRun, _percentile, run_eval
 from multimodal_doc_qa.schemas import Answer, BBox, Citation, Question
 
@@ -438,3 +444,70 @@ def _settings():
     from multimodal_doc_qa.config import Settings
 
     return Settings()
+
+
+# ------------------------------------------------------------------ recall_at_k
+
+
+def test_recall_is_one_when_every_gold_page_is_in_the_top_k() -> None:
+    assert recall_at_k(["a", "b", "c"], {"a", "b"}, k=5) == 1.0
+
+
+def test_recall_is_the_fraction_of_gold_pages_found() -> None:
+    assert recall_at_k(["a", "x", "y"], {"a", "b"}, k=5) == 0.5
+
+
+def test_recall_is_zero_when_no_gold_page_is_ranked() -> None:
+    assert recall_at_k(["x", "y"], {"a"}, k=5) == 0.0
+
+
+def test_recall_ignores_pages_beyond_k() -> None:
+    """``k`` is the window; a gold page at rank k+1 must not count."""
+    assert recall_at_k(["x", "y", "a"], {"a"}, k=2) == 0.0
+
+
+def test_recall_counts_a_repeated_page_once() -> None:
+    """The text arms emit several chunks of one page; each chunk is the same page."""
+    assert recall_at_k(["a", "a", "a"], {"a", "b"}, k=5) == 0.5
+
+
+def test_recall_is_zero_for_empty_gold() -> None:
+    assert recall_at_k(["a"], set(), k=5) == 0.0
+
+
+# ------------------------------------------------------------------ pool_recall
+
+
+def test_pool_recall_is_order_independent() -> None:
+    assert pool_recall(["x", "b", "a"], {"a", "b"}) == 1.0
+
+
+def test_pool_recall_counts_a_repeated_page_once() -> None:
+    assert pool_recall(["a", "a"], {"a", "b"}) == 0.5
+
+
+def test_pool_recall_is_zero_for_empty_gold() -> None:
+    assert pool_recall(["a"], set()) == 0.0
+
+
+# ------------------------------------------------------------------ runner recalls
+
+
+def test_each_question_line_carries_both_recalls(tmp_path: Path) -> None:
+    out = tmp_path / "results.jsonl"
+
+    run_eval([_question()], lambda q: _run(), out_path=out, k=5)
+
+    row = _read(out)[1]
+    assert row["recall_at_k"] == 1.0
+    assert row["pool_recall"] == 1.0
+
+
+def test_the_summary_averages_both_recalls(tmp_path: Path) -> None:
+    out = tmp_path / "results.jsonl"
+
+    run_eval([_question()], lambda q: _run(), out_path=out, k=5)
+
+    summary = _read(out)[-1]
+    assert summary["recall_at_k"] == 1.0
+    assert summary["pool_recall"] == 1.0
