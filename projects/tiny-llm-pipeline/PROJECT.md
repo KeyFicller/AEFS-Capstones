@@ -11,7 +11,7 @@
 
 ## 架构
 
-`config.py`（`ModelConfig` / `TrainConfig`）、`model.py`（`TinyLM`）、`tokenizer.py`、`data.py`、`train/pretrain.py`、`train/sft.py`（SFT 循环与 held-out response-token ppl）、`train/dpo.py`（`dpo_loss` / `seq_logprob` / `train_dpo`，ref 为冻结的第二份拷贝）、`pref/synthesize.py`、`viz.py`（流程图与 `monitor.png`）已落地。CLI 有 `prepare`、`train-pretrain`、`synth-pref`、`train-sft`、`train-dpo`、`flow`、`monitor`。三段训练已在真实数据上跑通（接线冒烟在 `artifacts/smoke/`；预训练 / SFT / DPO 的正式权重分别在 `artifacts/pretrain-30m/`、`artifacts/sft-30m/`、`artifacts/dpo-30m/`）；评测（`eval`）与推理 CLI（`gen` / `chat` / `compare`）尚未落地。
+`config.py`（`ModelConfig` / `TrainConfig`）、`model.py`（`TinyLM`）、`tokenizer.py`、`data.py`、`train/pretrain.py`、`train/sft.py`（SFT 循环与 held-out response-token ppl）、`train/dpo.py`（`dpo_loss` / `seq_logprob` / `train_dpo`，ref 为冻结的第二份拷贝）、`pref/synthesize.py`、`viz.py`（流程图与 `monitor.png`）、`generate.py`（三段推理与读数口径，`seed_for` / `stats` / `GenSettings` / `Bundle`）已落地。`eval/sample.py`（离线抽样 + 自包含 HTML）与 `eval/serve.py`（本地对照页，`GET /` + `POST /ask`）已落地，两者共用 `generate.py`。CLI 有 `prepare`、`train-pretrain`、`synth-pref`、`train-sft`、`train-dpo`、`flow`、`monitor`。三段训练已在真实数据上跑通（接线冒烟在 `artifacts/smoke/`；预训练 / SFT / DPO 的正式权重分别在 `artifacts/pretrain-30m/`、`artifacts/sft-30m/`、`artifacts/dpo-30m/`）；评测（`eval`）与推理 CLI（`gen` / `chat` / `compare`）尚未落地。
 
 数据侧：`prepare` 一条命令从 `jingyaogong/minimind_dataset` 拉 `pretrain_hq.jsonl` / `sft_mini_512.jsonl`（走 HF 缓存，重跑只付一次下载），在 200MB 采样上训 `vocab=8192` 的 byte-level BPE，写出 `train.bin` / `val.bin` 与 `sft_train.jsonl` / `sft_holdout.jsonl` / `dpo_prompts.jsonl`。前处理与切分细节见 design 第 4、5 节。
 
@@ -125,6 +125,8 @@ batch **64** 最高，但 32–256 与它相差不到 0.3%。默认 `TrainConfig
 **注意 `--max-steps` 会决定余弦视野**：`--resume` 时提高它会把学习率重新抬高（5000 → 7000 时 `2.0e-5` 跳回 `5.4e-5`，困惑度 6.34 → 8.92）。要延长训练得保持原视野或显式给出更长的计划，别只是调大 `--max-steps`。`train-dpo` 同理：它的视野由 `--epochs × 每 epoch 步数` 或 `--max-steps` 决定，这就是上面扫描里「同样 beta 但不同 epochs 结果差很多」的直接原因。
 
 `eval/results.jsonl` 尚未接入。`gen` / `chat` / `compare` 尚未落地；落地时 `gen` 必须暴露 `repetition_penalty`（默认约 1.3），否则交付的 DPO 权重会复读。
+
+`eval/sample.py` 与 `eval/serve.py` 的实跑口径（2026-10-07，`checkpoints/`：pretrain 34500 / sft 5000 / dpo 104，mps）：`sample.py` 重构到共用的 `generate.py` 前后，同一参数、同一种子产出的 HTML **逐字节相同**。`serve.py` 上 `你好，介绍一下你自己。` 在贪心 + `rep_pen=1.5` 下三段都有文本（chars 116 / 75 / 74，`elapsed_ms` 1839），DPO 栏 `tempo=1`——前摇只出现一次、没有原地复读；同一问在 `temperature=0.8` 下 DPO 栏出现 U+FFFD，复现了「采样只掉连贯性、不加内容」的既有结论，所以页面的默认仍是贪心。
 
 ## 产物与跨机复现
 

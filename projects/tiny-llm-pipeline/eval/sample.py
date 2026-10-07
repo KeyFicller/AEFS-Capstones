@@ -39,18 +39,12 @@ prompt, so the page is grouped that way instead of by stage.
 """
 
 import argparse
-import hashlib
 import html
 from pathlib import Path
 
-import torch
-
-from tiny_llm_pipeline.model import load_ckpt
-from tiny_llm_pipeline.tokenizer import Tok, encode_chat
-from tiny_llm_pipeline.train.pretrain import _device
+from tiny_llm_pipeline.generate import Bundle, GenSettings, stats
 
 BUNDLE = Path(__file__).resolve().parents[1] / "checkpoints"
-TEMPLATE = "我用最直白"
 PROMPTS = [
     "你好，介绍一下你自己。",
     "用一句话解释什么是量子纠缠。",
@@ -78,50 +72,6 @@ _PAGE = """<!doctype html>
 """
 
 
-def _seed(*parts: object) -> int:
-    """A stable 32-bit seed for this generation. Independent of run order."""
-    digest = hashlib.sha256("|".join(map(str, parts)).encode()).digest()
-    return int.from_bytes(digest[:4], "big")
-
-
-def _stats(text: str) -> dict[str, object]:
-    grams = [text[i : i + 4] for i in range(max(0, len(text) - 3))]
-    return {
-        "chars": len(text),
-        "dist4": len(set(grams)) / max(1, len(grams)),
-        "tempo": text.count(TEMPLATE),
-    }
-
-
-def _reply(model, stage: str, prompt: str, tok: Tok, end_id: int, device, args, index: int) -> str:
-    if stage == "pretrain":
-        ids = tok.encode(prompt)
-    else:
-        ids, _ = encode_chat([{"role": "user", "content": prompt}], tok, add_assistant=True)
-    torch.manual_seed(_seed(args.seed, stage, args.rep_pen, prompt, index))
-    with torch.no_grad():
-        out = model.generate(
-            torch.tensor([ids], dtype=torch.long, device=device),
-            args.max_new,
-            temperature=args.temperature,
-            top_k=args.top_k,
-            top_p=args.top_p,
-            repetition_penalty=args.rep_pen,
-        )
-    new = out[0, len(ids) :].tolist()
-    if end_id in new:
-        new = new[: new.index(end_id) + 1]
-    return tok.decode(new).strip()
-
-
-def _samples_for(model, stage, prompts, tok, end_id, device, args) -> list[list[str]]:
-    """One list of `--samples` replies per prompt."""
-    return [
-        [_reply(model, stage, prompt, tok, end_id, device, args, index) for index in range(args.samples)]
-        for prompt in prompts
-    ]
-
-
 def _render(prompts, stages, samples, steps, provenance) -> str:
     parts = [_PAGE.format(columns=len(stages), provenance=html.escape(provenance))]
     parts.append(f"<h2>rep_pen={samples['penalty']}</h2>")
@@ -132,11 +82,11 @@ def _render(prompts, stages, samples, steps, provenance) -> str:
             cards = samples[(stage,)][index]
             body = []
             for position, text in enumerate(cards):
-                stats = _stats(text)
+                reading = stats(text)
                 label = f"#{position + 1} " if len(cards) > 1 else ""
                 body.append(
-                    f'<div class="stats">{label}chars={stats["chars"]} '
-                    f'dist4={stats["dist4"]:.2f} tempo={stats["tempo"]}</div>'
+                    f'<div class="stats">{label}chars={reading["chars"]} '
+                    f'dist4={reading["dist4"]:.2f} tempo={reading["tempo"]}</div>'
                     f"<pre>{html.escape(text)}</pre>"
                 )
             parts.append(
@@ -166,28 +116,38 @@ def main() -> None:
 
     prompts = args.prompts or PROMPTS
     stages = args.stages.split(",")
-    tok = Tok(args.bundle / "tokenizer" / "tokenizer.json")
-    end_id = tok.encode("<|end|>")[0]
-    device = _device()
+    settings = GenSettings(
+        max_new=args.max_new,
+        temperature=args.temperature,
+        top_k=args.top_k,
+        top_p=args.top_p,
+        rep_pen=args.rep_pen,
+        seed=args.seed,
+    )
+    bundle = Bundle.load(args.bundle, stages=tuple(stages))
+    device = bundle.device
+    steps = bundle.steps
     mode = "greedy" if args.temperature <= 0 else (
         f"temperature={args.temperature} top_k={args.top_k} top_p={args.top_p}"
     )
-    print(f"device={device.type} tokenizer={tok.hash} samples={args.samples} {mode}")
+    print(f"device={device.type} tokenizer={bundle.tok.hash} samples={args.samples} {mode}")
 
-    steps: dict[str, int] = {}
     samples: dict[tuple[str], list[list[str]]] = {}
     for stage in stages:
-        loaded = load_ckpt(args.bundle / stage / "ckpt.pt", expect_tokenizer_hash=tok.hash)
-        model = loaded["model"].to(device).eval()
-        steps[stage] = loaded["step"]
-        print(f"\n===== {stage} (step {loaded['step']}) =====")
-        samples[(stage,)] = _samples_for(model, stage, prompts, tok, end_id, device, args)
+        print(f"\n===== {stage} (step {steps[stage]}) =====")
+        samples[(stage,)] = [
+            [
+                bundle.generators[stage].reply(prompt, settings, index)
+                for index in range(args.samples)
+            ]
+            for prompt in prompts
+        ]
         for prompt, replies in zip(prompts, samples[(stage,)], strict=True):
             for position, text in enumerate(replies):
-                stats = _stats(text)
+                reading = stats(text)
                 print(
-                    f"[rp={args.rep_pen} #{position + 1} chars={stats['chars']:3d} "
-                    f"dist4={stats['dist4']:.2f} tempo={stats['tempo']}] {prompt}"
+                    f"[rp={args.rep_pen} #{position + 1} chars={reading['chars']:3d} "
+                    f"dist4={reading['dist4']:.2f} tempo={reading['tempo']}] {prompt}"
                 )
                 if not args.quiet:
                     print(text + "\n")
@@ -195,7 +155,7 @@ def main() -> None:
     if args.html:
         samples["penalty"] = args.rep_pen
         provenance = (
-            f"device={device.type} · tokenizer={tok.hash} (bundle) · rep_pen={args.rep_pen} · "
+            f"device={device.type} · tokenizer={bundle.tok.hash} (bundle) · rep_pen={args.rep_pen} · "
             f"max_new={args.max_new} · {mode} · {args.samples} sample(s) per prompt · "
             f"single-turn, no history · {len(prompts)} prompts"
         )

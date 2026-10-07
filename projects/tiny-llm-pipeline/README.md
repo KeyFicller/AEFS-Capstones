@@ -46,4 +46,14 @@ P=projects/tiny-llm-pipeline
 
 默认读 `checkpoints/` 的三段权重，默认 3 个 prompt（`--prompt` 覆盖，可重复）。种子由 `(seed, stage, rep_pen, prompt, index)` 派生，同一批可复现、与执行顺序无关。6 个问题 × 三段的 18 条实测回复见 [`eval/replies.html`](eval/replies.html)。
 
+## 三阶段对照页
+
+```bash
+./start.sh run python projects/tiny-llm-pipeline/eval/serve.py --open
+```
+
+打开 `http://127.0.0.1:8000/`，输入一个问题，点「生成」：`pretrain` / `sft` / `dpo` 三栏并排各给一条回复，每栏带 `chars` / `dist4` / `tempo` 三项读数。默认 `rep_pen=1.5`、`temperature=0`（贪心）、`max_new=64`，页面可改。生成与读数口径与 `sample.py` 共用 `src/tiny_llm_pipeline/generate.py`。
+
+只绑 `127.0.0.1`、无鉴权、**不落盘**（刷新即清空，要留档用上面的 `--html`）。三段权重启动时一起常驻，约 350 MB，起服务后要等它加载完。
+
 `checkpoints/` 与 `artifacts/data/` 被 gitignore，新机器 `git clone` 拿不到；`artifacts/prefs/` 要随机器搬运（`prefs.jsonl` 需调 API 生成）。完整口径、调参扫描与跨机清单见 [`PROJECT.md`](PROJECT.md)。
