@@ -76,11 +76,11 @@ def train_tokenizer(
     finally:
         if cleanup is not None:
             cleanup.unlink(missing_ok=True)
-    out = dest / "tokenizer.json"
-    tok.save(str(out))
     ids = [tok.token_to_id(token) for token in SPECIAL_TOKENS]
     if ids != list(range(len(SPECIAL_TOKENS))):
         raise RuntimeError(f"special token ids {ids}, expected 0..{len(SPECIAL_TOKENS) - 1}")
+    out = dest / "tokenizer.json"
+    tok.save(str(out))
     return out
 
 

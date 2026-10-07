@@ -60,12 +60,6 @@ class PreferenceExample(TypedDict):
     rejected: str
 
 
-class PretrainBatch(TypedDict):
-    """Stacked pretrain windows. The training loop shifts for next-token loss."""
-
-    input_ids: Tensor
-
-
 class SFTBatch(TypedDict):
     """Shifted SFT batch. Non-assistant labels are -100."""
 
@@ -361,11 +355,6 @@ class PackedDataset:
         start = (index % self._windows) * self.seq
         chunk = np.asarray(self._data[start : start + self.seq], dtype=np.int64)
         return torch.tensor(chunk)
-
-
-def collate_pretrain(windows: list[Tensor]) -> PretrainBatch:
-    """Stack `[T]` windows into `input_ids` of shape `[B, T]`. Do not shift."""
-    return {"input_ids": torch.stack(windows)}
 
 
 def collate_sft(rows: list[SFTExample], tok: Tok, max_seq_len: int) -> SFTBatch:

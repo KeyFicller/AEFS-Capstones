@@ -15,7 +15,6 @@ from tiny_llm_pipeline.data import (
     fetch_minimind,
     prepare_pretrain,
     prepare_sft,
-    read_preferences,
     read_prompts,
     read_sft,
     write_sft_splits,
@@ -195,11 +194,13 @@ def train_dpo_cmd(
     resume: Path | None = typer.Option(None, "--resume"),
     seed: int = typer.Option(42, "--seed"),
     lr: float = typer.Option(DPO_LR, "--lr"),
+    ckpt_every: int = typer.Option(500, "--ckpt-every"),
 ) -> None:
     """DPO on `prefs.jsonl`, with `--ref` frozen as the reference policy.
 
     The policy starts from `--ref` too. `--ref` itself is only ever read.
-    `--lr` defaults to `DPO_LR`, an order below SFT's.
+    `--lr` defaults to `DPO_LR`, an order below SFT's. Ctrl-C finishes the
+    current step and writes a checkpoint; pass that file to `--resume`.
     """
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     tok = load_tokenizer(data)
@@ -215,6 +216,7 @@ def train_dpo_cmd(
         seed=seed,
         resume=resume,
         train_cfg=replace(DEFAULT_TRAIN, lr=lr),
+        ckpt_every=ckpt_every,
     )
     typer.echo(str(ckpt))
 

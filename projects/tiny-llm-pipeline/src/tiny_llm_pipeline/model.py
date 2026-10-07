@@ -184,7 +184,12 @@ def _filter_logits(
     if repetition_penalty != 1.0:
         for row in range(logits.size(0)):
             ids = torch.unique(seen[row])
-            logits[row, ids] = logits[row, ids] / repetition_penalty
+            score = logits[row, ids]
+            # Dividing alone would move negative scores toward zero, which
+            # raises the tokens it is meant to suppress. Match CTRL/HF.
+            logits[row, ids] = torch.where(
+                score < 0, score * repetition_penalty, score / repetition_penalty
+            )
     if top_k > 0:
         kth = torch.topk(logits, k=min(top_k, logits.size(-1)), dim=-1).values[:, -1:]
         logits = logits.masked_fill(logits < kth, float("-inf"))

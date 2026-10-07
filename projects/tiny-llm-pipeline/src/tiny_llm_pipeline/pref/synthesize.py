@@ -8,7 +8,7 @@ skips finished prompts and the API is paid for once.
 
 import json
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from rich import print as rprint
@@ -23,16 +23,18 @@ REJECTED_SYS = "用中性、专业、简洁的助理口吻回答。"
 # reduplication whitelist are both enumerable repetition, so capping them here
 # is what keeps `chosen` from degenerating into a chant. The scorer may lag.
 # The length target is a number, not an adjective: an earlier "keep it tight"
-# wording made the model aim at the 512-token ceiling and fill half the context.
-_BUDGET = (
-    "回答控制在 160 字以内，整条（问题 + 回答）不超过 512 token。"
-    "写之前先挑重点，宁可少说两句，也不要写到一半被截断。"
-)
+# wording made the model aim at the ceiling and fill half the context. The token
+# figure is `max_len`, the same number `_fits` enforces, so the two cannot drift.
+def _budget(max_len: int) -> str:
+    return (
+        f"回答控制在 160 字以内，整条（问题 + 回答）不超过 {max_len} token。"
+        "写之前先挑重点，宁可少说两句，也不要写到一半被截断。"
+    )
 
 
-def chosen_system(guide: str) -> str:
+def chosen_system(guide: str, max_len: int = DEFAULT_MODEL.max_seq_len) -> str:
     """The style guide verbatim, plus the token-budget note."""
-    return f"{CHOSEN_SYS}\n\n{guide.strip()}\n\n{_BUDGET}"
+    return f"{CHOSEN_SYS}\n\n{guide.strip()}\n\n{_budget(max_len)}"
 
 
 REFUSALS = ("无法", "抱歉", "不能")
@@ -74,12 +76,16 @@ def synth_prefs(
     signal and makes half an answer incomparable to the full other side. The
     system prompt is not part of that measurement: only the student's
     `user + assistant` turns have to fit its context.
+    A dropped prompt is written to the `<stem>.skipped.jsonl` sidecar next to
+    `out_jsonl`, and `resume=True` reads that file too: a refusal is never
+    re-paid for on the next run. Use `resume=False` to retry the whole list.
     `sleep` throttles between prompts; retries back off on their own.
     """
     dest = Path(out_jsonl)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    done = _existing_prompts(dest) if resume else set()
-    chosen_sys = chosen_system(guide) if guide else CHOSEN_SYS
+    skipped = _skipped_path(dest)
+    done = _existing_prompts(dest) | _existing_prompts(skipped) if resume else set()
+    chosen_sys = chosen_system(guide, max_len) if guide else CHOSEN_SYS
     client = llm if llm is not None else _client(model)
     dropped = 0
     over_limit = 0
@@ -89,10 +95,12 @@ def synth_prefs(
         chosen, rejected = synth_one(prompt, client, chosen_sys)
         if _drop(chosen, rejected):
             dropped += 1
+            _append(skipped, _skip_record(prompt, "rejected", model))
             rprint(f"[yellow]dropped[/yellow] {dropped} total: {prompt[:40]}")
             continue
         if not _fits(prompt, chosen, rejected, tok, max_len):
             over_limit += 1
+            _append(skipped, _skip_record(prompt, "over_limit", model))
             rprint(f"[yellow]over {max_len} tokens[/yellow] ({over_limit}): {prompt[:40]}")
             continue
         _append(
@@ -102,7 +110,7 @@ def synth_prefs(
                 "chosen": chosen,
                 "rejected": rejected,
                 "model": model,
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": _now(),
             },
         )
         done.add(prompt)
@@ -148,7 +156,6 @@ def _invoke(llm, system: str, prompt: str) -> str:
                 raise
             time.sleep(delay)
             delay *= 2
-    raise AssertionError("retry loop exhausted")
 
 
 def _transient(exc: BaseException) -> bool:
@@ -177,6 +184,26 @@ def _existing_prompts(path: Path) -> set[str]:
         except (json.JSONDecodeError, KeyError):
             continue
     return prompts
+
+
+def _skipped_path(dest: Path) -> Path:
+    """`prefs.jsonl` -> `prefs.skipped.jsonl`, beside the pairs it explains."""
+    return dest.with_suffix(".skipped.jsonl")
+
+
+def _now() -> str:
+    """One `created_at` call site, so both record kinds stamp the same way."""
+    return datetime.now(UTC).isoformat()
+
+
+def _skip_record(prompt: str, reason: str, model: str) -> dict[str, str]:
+    """A dropped prompt, kept so the next run does not pay for it again."""
+    return {
+        "prompt": prompt,
+        "reason": reason,
+        "model": model,
+        "created_at": _now(),
+    }
 
 
 def _append(path: Path, record: dict[str, str]) -> None:

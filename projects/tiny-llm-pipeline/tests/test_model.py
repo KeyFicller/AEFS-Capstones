@@ -24,6 +24,15 @@ def test_causal_mask() -> None:
     assert not torch.allclose(a[0, 5], b[0, 5])
 
 
+def test_repetition_penalty_lowers_seen_tokens_both_signs() -> None:
+    """Dividing alone would raise a negative score, which is the opposite."""
+    from tiny_llm_pipeline.model import _filter_logits
+
+    logits = torch.tensor([[2.0, -2.0, 0.5]])
+    _filter_logits(logits, torch.tensor([[0, 1]]), top_k=0, top_p=1.0, repetition_penalty=2.0)
+    assert torch.allclose(logits, torch.tensor([[1.0, -4.0, 0.5]]))
+
+
 def test_mps_smoke_one_step_loss_decreases() -> None:
     dev = "mps" if torch.backends.mps.is_available() else "cpu"
     m = TinyLM(DEFAULT_MODEL).to(dev)

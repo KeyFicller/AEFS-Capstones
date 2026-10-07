@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+from tiny_llm_pipeline.config import DEFAULT_MODEL
 from tiny_llm_pipeline.pref.synthesize import is_rejected, synth_prefs
 
 
@@ -41,6 +42,28 @@ def test_drops_pairs_over_the_token_budget(tmp_path, tok) -> None:
     p = tmp_path / "prefs.jsonl"
     synth_prefs(["a"], p, n=1, tok=tok, max_len=64, llm=LongLLM())
     assert not p.exists()  # dropped, never truncated
+    skipped = json.loads((tmp_path / "prefs.skipped.jsonl").read_text(encoding="utf-8").strip())
+    assert skipped["prompt"] == "a" and skipped["reason"] == "over_limit"
+
+
+def test_dropped_prompts_are_not_retried(tmp_path, tok) -> None:
+    """A refusal is paid for once: the sidecar keeps it out of the next run."""
+
+    class RefusingLLM:
+        def __init__(self) -> None:
+            self.calls: list = []
+
+        def invoke(self, msgs):
+            self.calls.append(msgs)
+            return type("M", (), {"content": "抱歉，我不能帮你。"})
+
+    llm = RefusingLLM()
+    p = tmp_path / "prefs.jsonl"
+    synth_prefs(["a"], p, n=1, tok=tok, llm=llm)
+    assert len(llm.calls) == 2  # 1 prompt x 2 calls, both rejected
+    synth_prefs(["a", "b"], p, n=2, tok=tok, llm=llm)
+    assert len(llm.calls) == 4  # only "b" is new
+    assert not p.exists()       # nothing usable was produced
 
 
 def test_drops_identical_and_refusals() -> None:
@@ -57,5 +80,6 @@ def test_guide_is_embedded_verbatim_in_the_chosen_prompt(tmp_path, tok) -> None:
 
     chosen_sys = next(m[0][1] for m in llm.calls if "豆包" in m[0][1])
     assert guide in chosen_sys          # verbatim, not a paraphrase
-    assert "512 token" in chosen_sys    # the model is told about the context cap
-    assert "160 字" in chosen_sys        # and given a concrete length target
+    assert "160 字" in chosen_sys        # a concrete length target
+    # The token figure is the cap `_fits` actually enforces, not a stale copy.
+    assert f"{DEFAULT_MODEL.max_seq_len} token" in chosen_sys

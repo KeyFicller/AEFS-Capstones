@@ -4,6 +4,7 @@ import json
 import math
 from pathlib import Path
 
+import pytest
 import torch
 
 from tiny_llm_pipeline.data import collate_dpo
@@ -109,3 +110,69 @@ def test_drops_rows_with_no_completion_tokens(tmp_path, tok, make_ckpt) -> None:
     )
     records = [json.loads(line) for line in (out / "train_log.jsonl").read_text().splitlines()]
     assert records[0]["dropped"] == 1  # only the usable row is scored
+
+
+def test_resume_continues_the_step_counter(tmp_path, tok, make_ckpt, tiny_prefs_jsonl) -> None:
+    """Resuming an existing run reloads AdamW state instead of starting fresh."""
+    ref = make_ckpt("sft")
+    out = tmp_path / "dpo"
+    train_dpo(tiny_prefs_jsonl, out, ref_ckpt=ref, tok_hash=tok.hash, tok=tok, max_steps=1)
+    train_dpo(
+        tiny_prefs_jsonl,
+        out,
+        ref_ckpt=ref,
+        tok_hash=tok.hash,
+        tok=tok,
+        max_steps=3,
+        resume=out / "ckpt.pt",
+    )
+    records = [json.loads(line) for line in (out / "train_log.jsonl").read_text().splitlines()]
+    assert [row["step"] for row in records] == [1, 2, 3]
+    assert load_ckpt(out / "ckpt.pt")["step"] == 3
+
+
+def test_resume_rejects_a_checkpoint_without_optimizer_state(
+    tmp_path, tok, make_ckpt, tiny_prefs_jsonl
+) -> None:
+    """A truncated checkpoint must fail loudly, as it does in pretrain and SFT."""
+    ref = make_ckpt("sft")
+    out = tmp_path / "dpo"
+    train_dpo(tiny_prefs_jsonl, out, ref_ckpt=ref, tok_hash=tok.hash, tok=tok, max_steps=1)
+    ckpt = out / "ckpt.pt"
+    payload = torch.load(ckpt, map_location="cpu", weights_only=False)
+    del payload["optimizer"]
+    torch.save(payload, ckpt)
+    with pytest.raises(RuntimeError, match="no optimizer state"):
+        train_dpo(
+            tiny_prefs_jsonl,
+            out,
+            ref_ckpt=ref,
+            tok_hash=tok.hash,
+            tok=tok,
+            max_steps=2,
+            resume=ckpt,
+        )
+
+
+def test_interrupt_saves_and_stops(tmp_path, tok, make_ckpt, tiny_prefs_jsonl, monkeypatch) -> None:
+    """Ctrl-C finishes the current step and writes a checkpoint, with ckpt_every off."""
+    steps = {"n": 0}
+
+    def _interrupt_after_two() -> bool:
+        steps["n"] += 1
+        return steps["n"] >= 2
+
+    monkeypatch.setattr("tiny_llm_pipeline.train.dpo._interrupt_requested", _interrupt_after_two)
+    out = tmp_path / "dpo"
+    train_dpo(
+        tiny_prefs_jsonl,
+        out,
+        ref_ckpt=make_ckpt("sft"),
+        tok_hash=tok.hash,
+        tok=tok,
+        max_steps=5,
+        ckpt_every=0,
+    )
+    records = [json.loads(line) for line in (out / "train_log.jsonl").read_text().splitlines()]
+    assert [row["step"] for row in records] == [1, 2]
+    assert load_ckpt(out / "ckpt.pt")["step"] == 2
