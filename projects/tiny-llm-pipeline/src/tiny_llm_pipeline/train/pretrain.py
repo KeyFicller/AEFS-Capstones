@@ -350,7 +350,7 @@ def _load_or_init(
 
 def _optimizer(model: TinyLM, train_cfg: TrainConfig) -> torch.optim.Optimizer:
     return torch.optim.AdamW(
-        model.parameters(),
+        [p for p in model.parameters() if p.requires_grad],
         lr=train_cfg.lr,
         weight_decay=train_cfg.weight_decay,
         betas=train_cfg.betas,

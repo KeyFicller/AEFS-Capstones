@@ -3,6 +3,8 @@ import shutil
 import sys
 from pathlib import Path
 
+import torch
+
 from tiny_llm_pipeline.cli import _utf8_stdio, app
 from tiny_llm_pipeline.data import PRETRAIN_FILE, SFT_FILE
 
@@ -163,6 +165,44 @@ def test_train_sft_writes_ckpt(tmp_path, monkeypatch, runner, tok, make_ckpt) ->
     assert result.exit_code == 0, result.output
     assert (out / "ckpt.pt").is_file()
     assert len((out / "train_log.jsonl").read_text(encoding="utf-8").splitlines()) == 2
+
+
+def test_train_sft_lora_writes_an_adapter_ckpt(
+    tmp_path, monkeypatch, runner, tok, make_ckpt
+) -> None:
+    data = tmp_path / "data"
+    data.mkdir()
+    rows = [
+        {
+            "conversations": [
+                {"role": "user", "content": f"问题{i}？"},
+                {"role": "assistant", "content": f"回答{i}。"},
+            ]
+        }
+        for i in range(8)
+    ]
+    (data / "sft_train.jsonl").write_text(
+        "\n".join(json.dumps(row, ensure_ascii=False) for row in rows), encoding="utf-8"
+    )
+    monkeypatch.setattr("tiny_llm_pipeline.cli.load_tokenizer", lambda *_a, **_k: tok)
+    out = tmp_path / "sft-lora"
+
+    result = runner.invoke(
+        app,
+        [
+            "train-sft",
+            "--data", str(data),
+            "--base", str(make_ckpt("pretrain")),
+            "--out", str(out),
+            "--limit", "4",
+            "--max-steps", "2",
+            "--lora-rank", "8",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = torch.load(out / "ckpt.pt", map_location="cpu", weights_only=False)
+    assert "lora" in payload and "model" not in payload
 
 
 def test_train_dpo_writes_ckpt(tmp_path, monkeypatch, runner, tok, make_ckpt, tiny_prefs_jsonl) -> None:

@@ -24,7 +24,8 @@ from torch import nn
 
 from tiny_llm_pipeline.config import DEFAULT_TRAIN, TrainConfig, lr_at
 from tiny_llm_pipeline.data import SFTBundle, collate_sft
-from tiny_llm_pipeline.model import TinyLM, load_ckpt, save_ckpt
+from tiny_llm_pipeline.lora import LoRAConfig, inject_lora
+from tiny_llm_pipeline.model import TinyLM, load_ckpt, load_lora_ckpt, save_ckpt, save_lora_ckpt
 from tiny_llm_pipeline.tokenizer import Tok, encode_chat
 from tiny_llm_pipeline.train import pretrain as _pretrain
 from tiny_llm_pipeline.train.pretrain import (
@@ -58,6 +59,7 @@ def train_sft(
     ckpt_every: int = 500,
     plot_every: int = 10,
     val_every: int = 1000,
+    lora: LoRAConfig | None = None,
 ) -> Path:
     """Fine-tune from `base_ckpt` (or `resume`) and return the checkpoint path.
 
@@ -66,6 +68,9 @@ def train_sft(
     its `step` belongs to a different run and carrying it over would make
     `max_steps` absolute and silently train fewer steps than asked. Optimizer
     and schedule match pretraining.
+
+    `lora` injects adapters into the attention projections and writes adapter
+    checkpoints instead of full weights; `rank <= 0` behaves like `None`.
 
     `resume` continues the saved step, optimizer, token count, and row cursor.
     The first Ctrl-C finishes the current step, writes a checkpoint, and returns.
@@ -81,10 +86,18 @@ def train_sft(
         raise ValueError("sft train split is empty")
     device = _device()
     start = base_ckpt if resume is None else resume
-    loaded = load_ckpt(start, expect_tokenizer_hash=tok_hash)
-    model = loaded["model"].to(device)
+    lora_cfg = lora if (lora is not None and lora.enabled) else None
+    if resume is not None and lora_cfg is not None:
+        model, _ = load_lora_ckpt(resume, expect_tokenizer_hash=tok_hash)
+        step = int(torch.load(Path(resume), map_location="cpu", weights_only=False)["step"])
+    else:
+        loaded = load_ckpt(start, expect_tokenizer_hash=tok_hash)
+        model = loaded["model"]
+        step = int(loaded["step"]) if resume is not None else 0
+        if lora_cfg is not None:
+            inject_lora(model, lora_cfg)
+    model = model.to(device)
     opt = _optimizer(model, train_cfg)
-    step = int(loaded["step"]) if resume is not None else 0
     payload: dict[str, object] | None = None
     saved_tokens: int | None = None
     saved_cursor: int | None = None
@@ -127,6 +140,21 @@ def train_sft(
     )
 
     def _save(to: Path = ckpt_path) -> None:
+        if lora_cfg is not None:
+            save_lora_ckpt(
+                to,
+                model,
+                model.cfg,
+                lora_cfg,
+                base_ckpt,
+                step,
+                tok_hash,
+                optimizer=opt,
+                seed=seed,
+                tokens=tokens,
+                cursor=cursor,
+            )
+            return
         save_ckpt(
             to,
             model,

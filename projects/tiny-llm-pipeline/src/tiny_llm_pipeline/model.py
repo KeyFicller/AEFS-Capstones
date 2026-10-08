@@ -14,6 +14,13 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 
 from tiny_llm_pipeline.config import ModelConfig
+from tiny_llm_pipeline.lora import (
+    LoRAConfig,
+    adapter_state_dict,
+    inject_lora,
+    load_adapter_state,
+    merge_lora,
+)
 
 _ROPE_THETA = 10_000.0
 _RMS_EPS = 1e-5
@@ -242,6 +249,48 @@ def save_ckpt(
     temporary.replace(dest)
 
 
+def save_lora_ckpt(
+    path: Path | str,
+    model: TinyLM,
+    cfg: ModelConfig,
+    lora: LoRAConfig,
+    base: Path | str,
+    step: int,
+    tokenizer_hash: str,
+    optimizer: torch.optim.Optimizer | None = None,
+    seed: int = 42,
+    *,
+    tokens: int | None = None,
+    cursor: int | None = None,
+) -> None:
+    """Write a LoRA adapter: the A/B matrices and the base path, not the weights.
+
+    `base` is stored as given so a moved adapter can still be pointed at a new
+    copy with `load_ckpt(..., base=...)`. Replace the destination only after the
+    temporary file is written, as `save_ckpt` does.
+    """
+    dest = Path(path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, object] = {
+        "cfg": dataclasses.asdict(cfg),
+        "lora": dataclasses.asdict(lora),
+        "base": str(base),
+        "adapter": adapter_state_dict(model),
+        "step": step,
+        "seed": seed,
+        "tokenizer_hash": tokenizer_hash,
+    }
+    if optimizer is not None:
+        payload["optimizer"] = optimizer.state_dict()
+    if tokens is not None:
+        payload["tokens"] = tokens
+    if cursor is not None:
+        payload["cursor"] = cursor
+    temporary = dest.with_suffix(dest.suffix + ".tmp")
+    torch.save(payload, temporary)
+    temporary.replace(dest)
+
+
 class LoadedCheckpoint(TypedDict):
     """What `load_ckpt` returns."""
 
@@ -253,19 +302,29 @@ class LoadedCheckpoint(TypedDict):
 
 
 def load_ckpt(
-    path: Path | str, expect_tokenizer_hash: str | None = None
+    path: Path | str,
+    expect_tokenizer_hash: str | None = None,
+    base: Path | str | None = None,
 ) -> LoadedCheckpoint:
-    """Load a checkpoint.
+    """Load a checkpoint, adapter or plain.
 
-    Raise `ValueError` when `expect_tokenizer_hash` is set and does not match
-    the file.
+    An adapter checkpoint is resolved against its base, injected, merged, and
+    returned as a plain `TinyLM`, so every consumer sees the same shape. `base`
+    overrides the path stored in the adapter. Raise `ValueError` when
+    `expect_tokenizer_hash` is set and does not match the file.
     """
-    payload = torch.load(Path(path), map_location="cpu", weights_only=True)
+    payload = _read_ckpt(path, expect_tokenizer_hash)
     got = str(payload["tokenizer_hash"])
-    if expect_tokenizer_hash is not None and got != expect_tokenizer_hash:
-        raise ValueError(
-            f"tokenizer hash mismatch: checkpoint has {got}, expected {expect_tokenizer_hash}"
-        )
+    if "lora" in payload:
+        model, _ = _build_lora_model(payload, Path(path), base)
+        merge_lora(model)
+        return {
+            "model": model,
+            "cfg": model.cfg,
+            "step": int(payload["step"]),
+            "seed": int(payload["seed"]),
+            "tokenizer_hash": got,
+        }
     cfg = ModelConfig(**payload["cfg"])
     model = TinyLM(cfg)
     model.load_state_dict(payload["model"])
@@ -276,3 +335,57 @@ def load_ckpt(
         "seed": int(payload["seed"]),
         "tokenizer_hash": got,
     }
+
+
+def load_lora_ckpt(
+    path: Path | str,
+    *,
+    base: Path | str | None = None,
+    expect_tokenizer_hash: str | None = None,
+) -> tuple[TinyLM, LoRAConfig]:
+    """Rebuild an injected model from an adapter checkpoint, without merging."""
+    payload = _read_ckpt(path, expect_tokenizer_hash)
+    if "lora" not in payload:
+        raise ValueError(f"not an adapter checkpoint: {path}")
+    return _build_lora_model(payload, Path(path), base)
+
+
+def _read_ckpt(path: Path | str, expect_tokenizer_hash: str | None) -> dict[str, object]:
+    """Load a checkpoint payload and check its tokenizer hash when asked."""
+    payload = torch.load(Path(path), map_location="cpu", weights_only=True)
+    got = str(payload["tokenizer_hash"])
+    if expect_tokenizer_hash is not None and got != expect_tokenizer_hash:
+        raise ValueError(
+            f"tokenizer hash mismatch: checkpoint has {got}, expected {expect_tokenizer_hash}"
+        )
+    return payload
+
+
+def _build_lora_model(
+    payload: dict[str, object], path: Path, base: Path | str | None
+) -> tuple[TinyLM, LoRAConfig]:
+    """Inject the adapter into its base model. Never merges."""
+    raw = base if base is not None else payload.get("base")
+    if raw is None:
+        raise ValueError(f"adapter checkpoint has no base; pass base=: {path}")
+    reference = Path(str(raw))
+    if not reference.is_file():
+        raise FileNotFoundError(f"adapter base checkpoint is missing: {reference}")
+    if reference.resolve() == path.resolve():
+        raise ValueError(f"adapter checkpoint points at itself as its base: {path}")
+    base_payload = _read_ckpt(reference, None)
+    if "lora" in base_payload:
+        raise ValueError(f"base checkpoint is itself an adapter: {reference}")
+    if base_payload["tokenizer_hash"] != payload["tokenizer_hash"]:
+        raise ValueError(
+            f"base tokenizer hash {base_payload['tokenizer_hash']} does not match "
+            f"adapter {payload['tokenizer_hash']}"
+        )
+    if base_payload["cfg"] != payload["cfg"]:
+        raise ValueError("base model config does not match the adapter")
+    model = TinyLM(ModelConfig(**base_payload["cfg"]))
+    model.load_state_dict(base_payload["model"])
+    lora = LoRAConfig(**payload["lora"])
+    inject_lora(model, lora)
+    load_adapter_state(model, payload["adapter"])
+    return model, lora

@@ -20,6 +20,7 @@ from tiny_llm_pipeline.data import (
     write_sft_splits,
     write_tokenizer_sample,
 )
+from tiny_llm_pipeline.lora import LoRAConfig
 from tiny_llm_pipeline.pref.synthesize import synth_prefs
 from tiny_llm_pipeline.tokenizer import load_tokenizer, train_tokenizer
 from tiny_llm_pipeline.train.dpo import train_dpo
@@ -144,6 +145,8 @@ def train_sft_cmd(
     plot_every: int = typer.Option(10, "--plot-every"),
     val_every: int = typer.Option(1000, "--val-every"),
     lr: float = typer.Option(SFT_LR, "--lr"),
+    lora_rank: int = typer.Option(0, "--lora-rank", help="LoRA rank; 0 disables it."),
+    lora_alpha: int = typer.Option(16, "--lora-alpha"),
 ) -> None:
     """Supervised fine-tuning from `--base` on the assistant-only loss mask.
 
@@ -155,6 +158,9 @@ def train_sft_cmd(
     perplexity is recorded on each save and the lowest one so far goes to
     `best.pt`; `--val-every` prints 5 greedy replies drawn from the holdout
     for that step. `--lr` defaults to `SFT_LR`, below pretraining's `1e-3`.
+    `--lora-rank` above zero fine-tunes LoRA adapters on the attention
+    projections and writes adapter checkpoints; the default `0` is full
+    fine-tuning and keeps the current behavior.
     """
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     tok = load_tokenizer(data)
@@ -162,6 +168,7 @@ def train_sft_cmd(
     holdout_path = data / "sft_holdout.jsonl"
     holdout = read_sft(holdout_path) if holdout_path.is_file() else []
     bundle = SFTBundle(train=rows, holdout=holdout, dpo_prompts=[])
+    lora = LoRAConfig(rank=lora_rank, alpha=lora_alpha) if lora_rank > 0 else None
     ckpt = train_sft(
         bundle,
         out,
@@ -176,6 +183,7 @@ def train_sft_cmd(
         ckpt_every=ckpt_every,
         plot_every=plot_every,
         val_every=val_every,
+        lora=lora,
     )
     typer.echo(str(ckpt))
     if plot_every > 0:
