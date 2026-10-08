@@ -1,7 +1,22 @@
-import torch
+from pathlib import Path
+from pickle import UnpicklingError
 
+import pytest
+import torch
 from tiny_llm_pipeline.config import CHINCHILLA_TOKENS_PER_PARAM, DEFAULT_MODEL, PRETRAIN_TOKENS
-from tiny_llm_pipeline.model import TinyLM
+from tiny_llm_pipeline.model import TinyLM, load_ckpt
+
+
+class _NotATensor:
+    """Stands in for any object a hostile pickle would try to construct."""
+
+
+def test_load_ckpt_rejects_pickled_objects(tmp_path: Path) -> None:
+    """A public checkpoint is untrusted: loading it must not run pickle code."""
+    path = tmp_path / "ckpt.pt"
+    torch.save({"tokenizer_hash": "x", "evil": _NotATensor()}, path)
+    with pytest.raises(UnpicklingError):
+        load_ckpt(path)
 
 
 def test_param_count_matches_chinchilla_budget() -> None:

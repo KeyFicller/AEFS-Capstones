@@ -260,7 +260,7 @@ def load_ckpt(
     Raise `ValueError` when `expect_tokenizer_hash` is set and does not match
     the file.
     """
-    payload = torch.load(Path(path), map_location="cpu", weights_only=False)
+    payload = torch.load(Path(path), map_location="cpu", weights_only=True)
     got = str(payload["tokenizer_hash"])
     if expect_tokenizer_hash is not None and got != expect_tokenizer_hash:
         raise ValueError(

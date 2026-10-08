@@ -62,7 +62,7 @@ def read_token() -> None:
 def has_optimizer(path: Path) -> bool:
     import torch
 
-    return "optimizer" in torch.load(path, map_location="cpu", weights_only=False)
+    return "optimizer" in torch.load(path, map_location="cpu", weights_only=True)
 
 
 def stage_weights(src: Path, dst: Path) -> bool:
@@ -77,7 +77,7 @@ def stage_weights(src: Path, dst: Path) -> bool:
     """
     import torch
 
-    payload = torch.load(src, map_location="cpu", weights_only=False)
+    payload = torch.load(src, map_location="cpu", weights_only=True)
     dst.parent.mkdir(parents=True, exist_ok=True)
     if "optimizer" not in payload:
         shutil.copy2(src, dst)
