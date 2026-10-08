@@ -28,9 +28,9 @@
 
 **Stop 落点**：`summary` 节点的 `finally`（`summary.py`）。图内所有终止路径——正常完成 / 预算熔断 / `recover_exhausted` / `recover_no_progress` / 空计划 / 模型异常——都必然写 `{worktree}/.agent/trace.json`；**唯一例外**是 REPL 里被 Ctrl-C 取消的那一轮。
 
-**answer / work 分流**：CLI 注入 `configurable["enable_answer_mode"]=True` 时，planner 的 schema 换成 `RoutingPlan`（`task` / `steps` + 必填 `mode: answer|work`），并注入 `SYSTEM_PROMPTS["planner"]`（此前该键是死代码）。`mode=answer` → `make_plan` 只写 `mode`，路由到新节点 `answer`（一次 executor 调用、带工具，system prompt 要求内容进回复而非写文件），末条 AI 消息写入 `messages`；`summary` 见 `mode=answer` 且末条是内容非空的 AI 消息即**原样转达**，不调用模型，产出为空时降级为 summarize。`mode=work` 走原管线。
+**intent 门（chat / work 分流）**：CLI 注入 `configurable["enable_intent"]=True` 时，图首多一个 `intent` 节点（共享组件 `intent`，`gate.build_intent` 装配，模型同 planner，`work_hint` = 「需计划并在 worktree 里动手」）。它一次结构化调用判该轮是 `chat` 还是 `work`：`chat` → 新节点 `chat`（一次 executor 调用、带工具，system prompt 要求内容进回复而非写文件），末条 AI 消息写入 `messages`，`summary` 见 `intent=chat` 且末条是非空 AI 消息即**原样转达**、不调模型（产出为空则降级 summarize）；`work` → 原 `make_plan` 管线。组件在 `gate.build_intent` 内**懒 import**，Harbor 导入链不依赖它；判失败按「拿不准一律 work」降级并记日志。判据是「是否必须进主流水线」（C 轴），故「写一篇作文」「看一眼 README」属 chat，判据与工作区是否改动无关。分类器**只看最近 3 条有人类文本的 turn**（工具消息 / 纯工具调用的 assistant / 图片 part 都不占额度，单条截 200 字符加 `...`）；整形在组件内完成，故 `tool_calls` 到不了结构化调用——此前喂整份 `messages` 时，模型会照抄历史里的工具名而输出失败（约 1/20），被本节点的 `except` 吞成 `work`、令那些轮的 chat 支静默失效。详见 `components/docs/features/intent-context/design.md`。
 
-**CLI 与 Harbor 的单一图**：CLI 的三个 flag（`enable_answer_mode` / `enable_hitl` / `enable_web_search`）都只从 `configurable` 注入，图上不预置分支。不注入时（即 Harbor 路径）schema / planner 调用 / 节点集 / 路由 / 工具表保持原状（`Plan` 无 `mode`、无 `answer` 节点、无闸门、工具表 7 个），`graph.png` 即该默认拓扑——**同一份图既能被 Harbor 跑批，也能被 CLI 交互使用**，不存在两套实现。
+**CLI 与 Harbor 的单一图**：CLI 的三个 flag（`enable_intent` / `enable_hitl` / `enable_web_search`）都只从 `configurable` 注入，图上不预置分支。不注入时（即 Harbor 路径）planner schema / planner 调用 / 节点集 / 路由 / 工具表保持原状（schema 恒为 `Plan`；`SYSTEM_PROMPTS["planner"]` 只在 `enable_intent` 打开时注入；无 `intent` / `chat` 节点、无闸门、工具表 7 个）——**同一份图既能被 Harbor 跑批，也能被 CLI 交互使用**，不存在两套实现。
 
 **控制台输出**：`graph.py` 的 `_announce_todos` 包装 `make_plan` / `start_task` / `end_task` / `recover` 四个重写 `todo_list` 的节点。打印**必须在装配层**——`replace_todos` 每次写入跑两遍（条件边 + `apply_writes`），装配层每个更新只看到一次。计划版本取自 `state["replan_count"]`。容器内 stdout 由 Harbor `tee` 到 `<trial>/agent/langgraph-run.log`，是跑批时唯一能看到实时进度的通道。
 
@@ -38,7 +38,7 @@
 
 **模块路径**：`graph.py`（装配）· `cli.py`（REPL 入口）· `attachments.py`（`strip_images` / `attached_images`，不 import `repl_console`）· `tools/`（唯一副作用边界）· `ui.py` · `middleware/` · `harbor_tasks/` · `scripts/`（双向验证 + 结果汇总）· `tests/`。
 
-**图产物**：`graph.png` 由 `python -m terminal_coding_agent.graph` 生成（前缀 `ENABLE_HITL=0`），拓扑改了重跑；`example.png` 为手工截图。README 只放这两张。
+**图产物**：`graph.png` 由 `python -m terminal_coding_agent.graph` 生成，默认**开着两个闸门**（`intent` + HITL）以展示 CLI 拓扑；`ENABLE_HITL=0` / `ENABLE_INTENT=0` 可渲染 Harbor 的拓扑。拓扑改了重跑；`example.png` 为手工截图。README 只放这两张。
 
 ## 技术栈
 

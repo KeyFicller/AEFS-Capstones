@@ -4,7 +4,7 @@
 
 ![REPL 实跑](example.png)
 
-循环骨架：`plan` → `retrieve` → `assess ⟲` → `synthesize` → `verify ⟲`。`assess` 判页面池不够、`verify` 判引用不支撑，都把循环打回 `retrieve`；池子空了或轮数用尽走 `recover` 收口。
+循环骨架：`intent` 先判这一轮是 `chat`（直接回、不检索）还是 `work` → `plan` → `retrieve` → `assess ⟲` → `synthesize` → `verify ⟲`。`assess` 判页面池不够、`verify` 判引用不支撑，都把循环打回 `retrieve`；池子空了或轮数用尽走 `recover` 收口。
 
 ![图结构](graph.png)
 

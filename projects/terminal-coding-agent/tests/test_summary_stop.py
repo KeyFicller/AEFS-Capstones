@@ -66,12 +66,12 @@ def test_summary_writes_trace_even_if_the_model_fails(tmp_path: Path) -> None:
     assert (tmp_path / ".agent" / "patch.diff").is_file()
 
 
-def test_summary_relays_the_answer_verbatim(tmp_path: Path) -> None:
-    """Answer mode's last message IS the deliverable: no model call, no summarizing."""
+def test_summary_relays_a_chat_reply_verbatim(tmp_path: Path) -> None:
+    """Chat mode's last message IS the deliverable: no model call, no summarizing."""
     model = _StubModel(AIMessage(content="SUMMARY"))
     node = build_summary(AgentModels(planner=model, executor=model), worktree=tmp_path)
     state = _state(
-        mode="answer",
+        intent="chat",
         messages=[HumanMessage(content="写一篇作文"), AIMessage(content="the essay")],
     )
 
@@ -81,22 +81,22 @@ def test_summary_relays_the_answer_verbatim(tmp_path: Path) -> None:
     assert updates["turns"] == 0, "no summary call may run"
 
 
-def test_summary_summarizes_when_answer_mode_produced_nothing(tmp_path: Path) -> None:
-    """A failed answer node leaves the user's own message last; that is no reply to relay."""
+def test_summary_summarizes_when_chat_produced_nothing(tmp_path: Path) -> None:
+    """A failed chat node leaves the user's own message last; that is no reply to relay."""
     model = _StubModel(AIMessage(content="SUMMARY"))
     node = build_summary(AgentModels(planner=model, executor=model), worktree=tmp_path)
-    state = _state(mode="answer", messages=[HumanMessage(content="写一篇作文")])
+    state = _state(intent="chat", messages=[HumanMessage(content="写一篇作文")])
 
     updates = node(state, RunnableConfig())
 
     assert updates["messages"][-1].content == "SUMMARY"
 
 
-def test_summary_summarizes_an_empty_answer(tmp_path: Path) -> None:
-    """Empty content is no answer: fall back to summarizing."""
+def test_summary_summarizes_an_empty_chat_reply(tmp_path: Path) -> None:
+    """Empty content is no reply: fall back to summarizing."""
     model = _StubModel(AIMessage(content="SUMMARY"))
     node = build_summary(AgentModels(planner=model, executor=model), worktree=tmp_path)
-    state = _state(mode="answer", messages=[AIMessage(content="")])
+    state = _state(intent="chat", messages=[AIMessage(content="")])
 
     updates = node(state, RunnableConfig())
 
@@ -108,7 +108,7 @@ def test_summary_summarizes_a_work_task(tmp_path: Path) -> None:
     model = _StubModel(AIMessage(content="SUMMARY"))
     node = build_summary(AgentModels(planner=model, executor=model), worktree=tmp_path)
     state = _state(
-        mode="work",
+        intent="work",
         messages=[HumanMessage(content="fix it"), AIMessage(content="I fixed it")],
     )
 
@@ -129,11 +129,11 @@ def test_text_of_extracts_text_blocks_from_multimodal_content() -> None:
     assert _text_of(message) == "what is this"
 
 
-def test_answer_reply_survives_a_multimodal_user_message() -> None:
-    from terminal_coding_agent.summary import _answer_reply
+def test_chat_reply_survives_a_multimodal_user_message() -> None:
+    from terminal_coding_agent.summary import _chat_reply
 
     messages = [
         HumanMessage(content=[{"type": "text", "text": "hi"}]),
         AIMessage(content="the answer"),
     ]
-    assert _answer_reply(messages).content == "the answer"
+    assert _chat_reply(messages).content == "the answer"

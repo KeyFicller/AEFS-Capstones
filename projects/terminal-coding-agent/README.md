@@ -4,7 +4,7 @@
 
 ![REPL 实跑](example.png)
 
-循环骨架：`make_plan` → `start_task` / `run_agent` / `end_task` → `recover` → `summary`。Act 只分派工具，Observe 截断输出回填，Recover 把失败当 Observation 重排计划（上界 3 次），所有终止路径都汇到 `summary` 写 trace。CLI 另有一条直答短路径：planner 判为 `answer` 的请求走 `make_plan` → `answer` → `summary`，不产生 todo；下图 `graph.png` 是**未开该分支**的默认拓扑。
+循环骨架：`make_plan` → `start_task` / `run_agent` / `end_task` → `recover` → `summary`。Act 只分派工具，Observe 截断输出回填，Recover 把失败当 Observation 重排计划（上界 3 次），所有终止路径都汇到 `summary` 写 trace。CLI 另有一条直答短路径：图首 `intent` 节点判为 `chat` 的请求走 `chat` → `summary`，不产生 todo、不动环境；下图 `graph.png` 是**开该分支**的 CLI 拓扑。
 
 ![图结构](graph.png)
 

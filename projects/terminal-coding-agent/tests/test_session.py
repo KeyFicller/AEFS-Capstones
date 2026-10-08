@@ -158,6 +158,6 @@ def test_pending_interrupts_is_empty_when_the_graph_is_not_paused() -> None:
     assert pending_interrupts(_Graph(), {}) == []
 
 
-def test_reset_clears_the_answer_mode() -> None:
-    """A stale 'answer' from a previous turn must not leak into the next turn."""
-    assert reset_updates()["mode"] is None
+def test_reset_clears_the_intent() -> None:
+    """A stale 'chat' from a previous turn must not leak into the next turn."""
+    assert reset_updates()["intent"] is None

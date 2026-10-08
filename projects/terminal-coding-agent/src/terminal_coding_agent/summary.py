@@ -39,8 +39,8 @@ def _text_of(message: Any) -> str:
     return ""
 
 
-def _answer_reply(messages: list) -> AIMessage | None:
-    """Answer mode's deliverable: the last message, when it is non-empty assistant text."""
+def _chat_reply(messages: list) -> AIMessage | None:
+    """Chat mode's deliverable: the last message, when it is non-empty assistant text."""
     if not messages:
         return None
     last = messages[-1]
@@ -58,7 +58,7 @@ def build_summary(
 ) -> Callable[[CodingAgentState, RunnableConfig], dict[str, Any]]:
     """Return the summary node. Its finally block is the Stop hook: it never skips.
 
-    An `answer`-mode run relays its last message instead of summarizing: the content is
+    A `chat`-mode run relays its last message instead of summarizing: the content is
     the deliverable.
     """
 
@@ -70,8 +70,8 @@ def build_summary(
         try:
             with BudgetSession(state) as budget:
                 reply = (
-                    _answer_reply(list(state["messages"]))
-                    if state.get("mode") == "answer"
+                    _chat_reply(list(state["messages"]))
+                    if state.get("intent") == "chat"
                     else None
                 )
                 if reply is not None:

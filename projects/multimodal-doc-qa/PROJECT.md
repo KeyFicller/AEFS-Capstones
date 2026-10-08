@@ -2,7 +2,7 @@
 
 - **项目**：multimodal-doc-qa（Agentic RAG）/ 所属 Phase：Phase19 / Capstone 04
 - **spec**：[Capstone 04 — Multimodal Document QA](https://aieng-zh.cn/lessons/19-capstone-projects/04-multimodal-document-qa/)
-- **状态**：`maxsim`（多向量后期交互）与 `ocr` 两条主线都已跑通——**同一张 agentic 图，只换 retriever**；`--mode` 现有九条检索臂；CLI 入口齐备（`ingest` / `ask` / `eval` / REPL）；单测 `287 passed`。`eval` 逐题出 `recall_at_k`（裸检索器单趟）与 `pool_recall`（agent 循环累积池）；gold 取自公开数据集 MMLongBench-Doc 的一个小子集，由 `python -m multimodal_doc_qa.eval.prepare_gold` 转换为 `questions.json`。**未实现**：答案准确率（`answer_containment`）、bytes/page、index p95。**已评测**：`hybrid-maxsim` 19 题（`eval/results-hybrid-maxsim-19q-1007.jsonl`）nDCG@5 0.6953 / recall@5 0.8421 / IoU@0.5 0.8158，对比 `maxsim` 基线（0.7359 / 0.8947 / 0.7895）——召回略降、bbox 定位略升，RRF 未带来检索增益。**未验证**：`lexical` 与其余三条 `hybrid-<dense>` 的端到端评测。**必须记住**：索引不记录写它的编码器，换 checkpoint 后必须重新 `ingest`。
+- **状态**：`maxsim`（多向量后期交互）与 `ocr` 两条主线都已跑通——**同一张 agentic 图，只换 retriever**；`--mode` 现有九条检索臂；CLI 入口齐备（`ingest` / `ask` / `eval` / REPL）；单测 `291 passed`。`eval` 逐题出 `recall_at_k`（裸检索器单趟）与 `pool_recall`（agent 循环累积池）；gold 取自公开数据集 MMLongBench-Doc 的一个小子集，由 `python -m multimodal_doc_qa.eval.prepare_gold` 转换为 `questions.json`。**未实现**：答案准确率（`answer_containment`）、bytes/page、index p95。**已评测**：`hybrid-maxsim` 19 题（`eval/results-hybrid-maxsim-19q-1007.jsonl`）nDCG@5 0.6953 / recall@5 0.8421 / IoU@0.5 0.8158，对比 `maxsim` 基线（0.7359 / 0.8947 / 0.7895）——召回略降、bbox 定位略升，RRF 未带来检索增益。**未验证**：`lexical` 与其余三条 `hybrid-<dense>` 的端到端评测。**必须记住**：索引不记录写它的编码器，换 checkpoint 后必须重新 `ingest`。
 
 ## 目标与范围
 
@@ -51,6 +51,8 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 
 | 节点 | 作用 |
 | --- | --- |
+| `intent` | 前置分类（共享组件 `intent`）：这一轮是 `chat` 还是 `work`。仅 `ask` / `chat` / REPL 注入 `classifier` 时挂载；`eval` 传 `classifier=None`，**该节点不挂、图与改动前逐字一致**，指标可比。分类器只看最近 3 条有人类文本的 turn（工具消息 / 图片不占额度，单条截 200 字符），整形在组件内完成 |
+| `chat` | `chat` 轮：一次普通回答调用，**不检索**、`citations=[]`（由代码保证，不靠模型）→ `END` |
 | `plan` | 结构化输出把问题分解成 1..N 个子查询（多跳题 → 多条链） |
 | `retrieve` | 每个子查询调 retriever（`MultiVectorRetriever` / `TextRetriever`）→ top-k，去重并入页面池 |
 | `assess` | 自省：页面池够不够答？不够 → 产出追问子查询，回 `retrieve` |
@@ -61,6 +63,7 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 - **有界性**：`rounds` 随 state 持久化，**只在 `retrieve` 自增一次**（= 检索轮数）。`assess` 与 `verify` 只能各把循环推回 `retrieve`，且进 `retrieve` 前一律先判 `rounds < MAX_ROUNDS`，故 `rounds` 恒 `<= MAX_ROUNDS`。若两处各 +1，两处守卫都只按单次自增判断，**实测会冲到 `MAX_ROUNDS + 1`**。
 - **零检索不进 `synthesize`**：页面池为空时无页可送，直接走 `recover`——否则答出来的只能是编造。
 - **`stop_reason` 只在非正常终止时写**：正常跑完留空。另有三值——`recover_exhausted` / `recover_empty` 由 `recover` 写（**关于语料**），`budget_exhausted` 由节点边界写（撞到调用数 / token / 墙钟任一档，**关于钱包**）。空串即「正常完成」，评测据此归因（难题 vs 索引坏了 vs 预算不够）。
+- **`intent` 的 `work_hint` 是承重的**：判据轴是「回复是否需要落地在语料上」，不是「模型是否知道答案」。hint 若只写「需要检索语料库」，模型对**自己能凭参数知识作答**的语料题会判 `chat`（「Where was Gestalt psychology concieved?」实测 8 次 6 次判 `chat` → 静默跳过检索、`citations=[]`、答的是模型记忆而非文档，且与文档口径不同）。显式否定「模型自身知识」并枚举「解释 / 总结 / 翻译 / 比较 / 陈述文档事实」都算 `work` 后，同组题 72/72 判对。**缩句会退化**：语义等价的短句实测 4/8 判错，改这段文字必须重跑判据抽查。
 - **state 只放可安全往返的值**（query / 子查询 / page id / 答案文本 / `rounds` / 标量）；页面图像与 torch 张量**不进 state**，以路径或 id 传递。
 
 ### 模块边界
@@ -74,16 +77,16 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 | `index/` | torch 张量多向量存储 + MaxSim | torch |
 | `retrievers/` | LangChain `BaseRetriever` + 声明式装配：`assembly.py`（臂表 `Index` / `Component` / `Arm`，`MODES` 派生自 `ARMS`）· `multivector.py`（`maxsim`）· `pool.py`（按 patch 平均池化）· `text.py`（`ocr` / `abstract`）· `bm25.py`（手写 BM25 词法臂）· `hybrid.py`（RRF 融合）· `rerank.py`（可选重排） | langchain-core, index |
 | `agent/` | `plan` / `assess` / `verify` 的 prompt 与结构化 schema | langchain |
-| `graph.py` | LangGraph 装配，维护页面池与 `rounds` | langgraph, langchain |
+| `graph.py` | LangGraph 装配（`intent` / `chat` / `plan` / `retrieve` / …），维护页面池与 `rounds`；`classifier=None` 时前置两节点不挂 | langgraph, langchain |
 | `limits.py` | `from_settings`。账本在共享组件 `budget`：调用次数、token、墙钟 | budget |
-| `synth/` | 合成 + 引用 / bbox 抽取 | langchain |
+| `synth/` | 合成 + 引用 / bbox 抽取；`reply()` 为 `chat` 轮的一次普通回答调用（不绑 schema，`citations=[]`） | langchain |
 | `abstract.py` | `abstract` 臂：入库时视觉模型写页描述，供文本检索 | — |
 | `baseline/` | OCR-first 文本抽取 + 分块 | pymupdf, pytesseract, sentence-transformers |
 | `eval/` | 指标、runner、结果落盘 | — |
 | `ui/` | `viewer.py`（Streamlit 查看器）· `console.py`（REPL 渲染） | streamlit, repl-console |
-| `cli.py` | `ingest` / `ask` / `eval` / `chat` 入口 | typer |
+| `cli.py` | `ingest` / `ask` / `eval` / `chat` 入口；`_load_deps(..., enable_intent=True)` 注入共享组件 `intent` 的 `Classifier`（模型随 `answerer_model`） | typer, intent |
 
-**图产物**：`graph.png` 由 `python -m multimodal_doc_qa.graph` 生成，拓扑改了重跑；`example.png` 为手工截图。README 只放这两张图。
+**图产物**：`graph.png` 由 `python -m multimodal_doc_qa.graph` 生成（`__main__` 给 `GraphDeps` 传非 `None` 的 `classifier` 占位，故图含 `intent` / `chat` 两节点）；拓扑改了重跑；`example.png` 为手工截图。README 只放这两张图。
 
 ## 技术栈
 
@@ -101,7 +104,7 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 
 ## 交付物
 
-- **CLI**：`doc-qa`（无子命令 → 加载 artifacts 后进 REPL）· `doc-qa chat [--mode]` · `doc-qa ingest <corpus_dir>` · `doc-qa ask "<question>" [--mode]` · `doc-qa eval --questions <questions.json> [--mode] [--out] [--iou-threshold] [--max-tokens] [--max-seconds]`。
+- **CLI**：`doc-qa`（无子命令 → 加载 artifacts 后进 REPL）· `doc-qa chat [--mode]` · `doc-qa ingest <corpus_dir>` · `doc-qa ask "<question>" [--mode]` · `doc-qa eval --questions <questions.json> [--mode] [--out] [--iou-threshold] [--max-tokens] [--max-seconds]`。`ask` / `chat` / REPL 在 `START` 后先过 `intent` 门：`chat` 轮**不检索、不产生引用**（控制台 `sources none`），`work` 轮照常进 `plan → retrieve → …`；`eval` 不挂门。
 - **九条检索臂**（`--mode` 或 `MDQ_MODE`，默认 `maxsim`）：`maxsim` 多向量后期交互 · `pool` 同一份多向量按 patch 平均池化 · `ocr` 页文本 · `abstract` 入库时视觉模型写的页描述 + 文本检索 · `lexical` 手写 BM25（读 `ocr_index` 的块，零嵌入） · `hybrid-ocr` / `hybrid-abstract` / `hybrid-pool` / `hybrid-maxsim` 各把 BM25（恒读 `ocr_index`）与该 dense 臂按 RRF 融合，两路各取 `4 × top_k` 后归并到页。检索臂由 `retrievers/assembly.py` 的声明表装配，`MODES` 派生自臂表，CLI 与状态栏不再各存一份。会话内切换与状态栏由共享组件 `repl-console` 提供（见根 `README.md` 组件表）。
 - **`ingest`**：接受 `pdf` / 图片（`png` / `jpg` / `jpeg` / `webp`）/ `txt` / `md`。PDF 与图片走 `encode_images`；纯文本按块切、用同一视觉编码器的 `encode_texts` 进视觉索引，**不光栅化**。字节相同的后一份文件跳过。视觉索引落 `multivector_index.pt`（`maxsim` / `pool` 共用，由 `vision_index.pt` 改名——升级时把旧文件改名即可，不必重跑 `ingest`）。`abstract` 臂的描述只在 `MDQ_MODE=abstract` 或 `MDQ_ABSTRACTS=1` 时随 `ingest` 写入 `abstract_index.pt`，缓存键是图片字节的 `sha256`。`MDQ_RERANK=1` 时检索后按视觉模型重排，默认关。
 - **查看器**：`streamlit run .../ui/viewer.py`——证据框叠加 + vision / OCR 并排，并把金标答案、金标证据页、模型引用（`page_id` + 是否给了 bbox）分别列出。`ask` / REPL 把每一轮写进 `artifacts/turns.jsonl`，**没有 `questions.json` 也能看红框**；蓝框只在那份金标文件存在、且题目 id 对得上时画。

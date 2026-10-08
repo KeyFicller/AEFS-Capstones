@@ -14,5 +14,6 @@ AEFS capstone 项目的 monorepo：一个项目一个顶层目录，评测互相
 | [`repl-console`](components/repl-console/) | 共享 REPL：循环、基本显示，以及 `@` / `!` / `/` | `repl_console` |
 | [`budget`](components/budget/) | 可选上限的花费账本 | `budget` |
 | [`telemetry`](components/telemetry/) | OpenTelemetry 与 Langfuse 的共享安装 | `telemetry` |
+| [`intent`](components/intent/) | 前置 chat/work 意图判定（一个结构化调用） | `intent` |
 
 环境是仓库级共享的，统一入口是根目录 `./start.sh`（见 skill `start`）。新增项目或组件时在对应表里加一行；`./start.sh new` 的脚手架模板在 [`examples/hello-agent/`](examples/hello-agent/)，不是 capstone、不进上表。

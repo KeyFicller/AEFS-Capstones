@@ -6,8 +6,8 @@ from langchain_core.messages import AIMessage
 from terminal_coding_agent import graph as graph_module
 from terminal_coding_agent.graph import (
     _after_end_task,
+    _after_intent,
     _after_make_plan,
-    _after_make_plan_gated,
     _after_recover,
     _after_recover_gated,
     make_graph,
@@ -344,22 +344,25 @@ def test_after_recover_gated_only_diverts_a_live_replan() -> None:
     )
 
 
-def test_answer_mode_routes_to_the_answer_node() -> None:
-    assert _after_make_plan(_state([], mode="answer")) == "answer"
-    assert _after_make_plan_gated(_state([], mode="answer")) == "answer"
+def test_after_intent_routes_chat_to_the_chat_node() -> None:
+    assert _after_intent(_state([], intent="chat")) == "chat"
+    assert _after_intent(_state([], intent="work")) == "work"
+    assert _after_intent(_state([])) == "work", "an absent verdict defaults to work"
 
 
-def test_answer_node_is_wired_only_when_enabled(tmp_path: Path) -> None:
+def test_intent_gate_is_wired_only_when_enabled(tmp_path: Path) -> None:
     os.environ["DEEPSEEK_API_KEY"] = "test"
     off = make_graph({"configurable": {"worktree": tmp_path}})
-    on = make_graph({"configurable": {"worktree": tmp_path, "enable_answer_mode": True}})
+    on = make_graph({"configurable": {"worktree": tmp_path, "enable_intent": True}})
     os.environ.pop("DEEPSEEK_API_KEY")
 
-    assert "answer" not in off.builder.nodes, "Harbor parity: node set unchanged"
-    assert "answer" in on.builder.nodes
+    assert "intent" not in off.builder.nodes, "Harbor parity: node set unchanged"
+    assert "chat" not in off.builder.nodes
+    assert "intent" in on.builder.nodes
+    assert "chat" in on.builder.nodes
 
 
-def test_make_graph_forwards_the_answer_flag_to_the_planner(tmp_path: Path, monkeypatch) -> None:
+def test_make_graph_forwards_the_prompt_flag_to_the_planner(tmp_path: Path, monkeypatch) -> None:
     captured: dict = {}
     real = graph_module.build_planner
 
@@ -370,7 +373,7 @@ def test_make_graph_forwards_the_answer_flag_to_the_planner(tmp_path: Path, monk
     monkeypatch.setattr(graph_module, "build_planner", spy)
     os.environ["DEEPSEEK_API_KEY"] = "test"
     make_graph({"configurable": {"worktree": tmp_path}})
-    make_graph({"configurable": {"worktree": tmp_path, "enable_answer_mode": True}})
+    make_graph({"configurable": {"worktree": tmp_path, "enable_intent": True}})
     os.environ.pop("DEEPSEEK_API_KEY")
 
-    assert captured["enable_answer"] is True
+    assert captured["with_system_prompt"] is True

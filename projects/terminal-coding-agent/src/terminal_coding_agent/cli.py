@@ -33,7 +33,7 @@ def _session_config(*, worktree: Path, session: str) -> dict[str, Any]:
             "todo_renderer": ui.TodoPanel(),
             "tool_renderer": ui.ToolLog(),
             "enable_hitl": True,
-            "enable_answer_mode": True,
+            "enable_intent": True,
             "enable_web_search": True,
             # "local_model": "qwen3:8b"
         }

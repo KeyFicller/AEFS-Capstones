@@ -160,7 +160,7 @@ def build_execute_nodes(
             updates["messages"] = [final]
         return updates
 
-    def answer(state: CodingAgentState, config: RunnableConfig) -> dict[str, Any]:
+    def chat(state: CodingAgentState, config: RunnableConfig) -> dict[str, Any]:
         if state.get("stop_reason"):
             return {}
 
@@ -177,7 +177,7 @@ def build_execute_nodes(
         agent = create_agent(
             model=models.executor,
             tools=tools,
-            system_prompt=SYSTEM_PROMPTS["executor"] + "\n\n" + SYSTEM_PROMPTS["answer"],
+            system_prompt=SYSTEM_PROMPTS["executor"] + "\n\n" + SYSTEM_PROMPTS["chat"],
             middleware=middleware,
         )
         try:
@@ -185,7 +185,7 @@ def build_execute_nodes(
         except GraphBubbleUp:
             raise
         except Exception as exc:  # noqa: BLE001 - an error is an observation, not a crash
-            logger.exception("answer failed")
+            logger.exception("chat failed")
             return {
                 **budget_updates(ledger),
                 "stop_reason": f"executor_error:{type(exc).__name__}",
@@ -230,5 +230,5 @@ def build_execute_nodes(
         "start_task": start_task,
         "run_agent": run_agent,
         "end_task": end_task,
-        "answer": answer,
+        "chat": chat,
     }

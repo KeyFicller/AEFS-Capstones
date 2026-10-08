@@ -265,3 +265,35 @@ def test_synthesizer_disables_thinking_mode_on_the_chat_model(
     assert captured["args"] == ("deepseek:deepseek-flash",)
     assert "model_provider" not in captured
     assert captured["extra_body"] == {"thinking": {"type": "disabled"}}
+
+
+def test_reply_answers_without_pages_and_without_citations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A chat turn has no retrieved pages: the text is the deliverable, citations are empty."""
+    from langchain_core.messages import AIMessage
+
+    class _ChattyModel:
+        def __init__(self) -> None:
+            self.calls: list[list] = []
+
+        def with_structured_output(self, schema: object):  # noqa: ARG002
+            class _Never:
+                def invoke(self, messages):  # noqa: ARG002
+                    raise AssertionError("reply must not use structured output")
+
+            return _Never()
+
+        def invoke(self, messages: list) -> AIMessage:
+            self.calls.append(messages)
+            return AIMessage(content="hello!")
+
+    model = _ChattyModel()
+    monkeypatch.setattr("langchain.chat_models.init_chat_model", lambda *a, **k: model)
+    synthesizer = AnswerSynthesizer(Settings())
+
+    answer = synthesizer.reply([HumanMessage(content="hi")])
+
+    assert answer.text == "hello!"
+    assert answer.citations == []
+    assert [m.type for m in model.calls[0]] == ["system", "human"]

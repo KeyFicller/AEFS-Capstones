@@ -388,12 +388,32 @@ def _open_retriever(settings: Settings, mode: str):
         raise typer.Exit(code=1) from exc
 
 
-def _load_deps(settings: Settings, retriever: object, budget: Budget) -> GraphDeps:
+def _load_deps(
+    settings: Settings, retriever: object, budget: Budget, *, enable_intent: bool = False
+) -> GraphDeps:
     """Wire the graph's models. One chat model serves the three nodes and the answerer."""
     from multimodal_doc_qa.agent.nodes import Followups, Subqueries, Unsupported
     from multimodal_doc_qa.synth.answer import AnswerSynthesizer, build_chat_model
 
     chat = build_chat_model(settings)
+    classifier = None
+    if enable_intent:
+        from intent import Classifier
+
+        # This hint is deliberately explicit: a short hint ("requires retrieving the
+        # corpus") lets the model call a corpus question `chat` whenever it already
+        # knows the answer, so the turn silently skips retrieval and answers ungrounded.
+        # Measured 72/72 correct here vs 5/10 on a knowledge-answerable question.
+        classifier = Classifier(
+            chat,
+            work_hint=(
+                "the reply must be grounded in the document corpus, never in the model's "
+                "own knowledge. This includes every request to explain, summarize, "
+                "translate, compare, or state facts about the documents, and anything "
+                "answerable from them. Only pure greetings, thanks, and questions about "
+                "what the assistant can do are chat"
+            ),
+        )
     catalog = documents_path(settings.artifacts_dir)
     documents = load_documents(catalog) if catalog.is_file() else None
     render_dir = artifact_paths(settings.artifacts_dir)[0]
@@ -416,6 +436,7 @@ def _load_deps(settings: Settings, retriever: object, budget: Budget) -> GraphDe
         documents=documents,
         budget=budget,
         rerank=rerank,
+        classifier=classifier,
     )
 
 
@@ -430,7 +451,7 @@ def ask(
 
     retriever = _open_retriever(settings, mode)
     budget = Budget.from_settings(settings)
-    deps = _load_deps(settings, retriever, budget)
+    deps = _load_deps(settings, retriever, budget, enable_intent=True)
 
     with ui.working():
         out = build_graph(deps, settings).invoke(initial_state(question))
@@ -703,7 +724,7 @@ def _run_turn(
     """One ask. A failure is printed and the session stays up."""
     try:
         budget = Budget.from_settings(settings)
-        deps = _load_deps(settings, retriever, budget)
+        deps = _load_deps(settings, retriever, budget, enable_intent=True)
         with ui.working():
             out = build_graph(deps, settings).invoke(initial_state(question, history))
     except KeyboardInterrupt:

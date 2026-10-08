@@ -40,6 +40,12 @@ _artifacts/
 # exception at the bottom dead.
 projects/*/artifacts/*
 
+# `doc-qa eval`'s default output path (`RESULTS_PATH`) — an append target, so it is
+# scratch. Curated mdq runs are committed under explicit names instead
+# (`results-<mode>-<n>q*.jsonl`). Deliberately not `projects/*/eval/results.jsonl`:
+# tca's eval/results.jsonl is a tracked result.
+projects/multimodal-doc-qa/eval/results.jsonl
+
 .DS_Store
 
 # Anchored with the full path: a bare `checkpoints/` would exclude the directory

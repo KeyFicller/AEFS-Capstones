@@ -54,6 +54,7 @@ class _FakeSynth:
     def __init__(self, cited: bool = True) -> None:
         self.cited = cited
         self.pools: list[list[str]] = []
+        self.replies: list = []
 
     def synthesize(
         self, messages: object, page_ids: list[str], render_dir: Path, documents: object = None
@@ -61,6 +62,10 @@ class _FakeSynth:
         self.pools.append(list(page_ids))
         citations = [Citation(doc_id="doc000", page=0)] if self.cited else []
         return Answer(text="16.8%", citations=citations)
+
+    def reply(self, messages: object) -> Answer:
+        self.replies.append(messages)
+        return Answer(text="hello! (chat)", citations=[])
 
 
 def _pages(tmp_path: Path, *page_ids: str) -> None:
@@ -83,6 +88,7 @@ def _deps(
     model: _StubModel,
     synth: _FakeSynth | None = None,
     budget: Budget | None = None,
+    classifier: object = None,
 ) -> GraphDeps:
     return GraphDeps(
         retriever=retriever,
@@ -92,6 +98,7 @@ def _deps(
         synth=synth or _FakeSynth(),
         render_dir=tmp_path,
         budget=budget,
+        classifier=classifier,
     )
 
 
@@ -439,3 +446,54 @@ def test_a_new_answer_invalidates_the_previous_verification(tmp_path: Path) -> N
 
     assert out["stop_reason"] == "budget_exhausted"
     assert out["unsupported"] == []
+
+
+# ------------------------------------------------------------------- intent gate
+
+
+class _Verdict:
+    def __init__(self, intent: str) -> None:
+        self.intent = intent
+
+
+class _StubClassifier:
+    """Returns a fixed verdict; the graph only reads ``.intent``."""
+
+    def __init__(self, intent: str) -> None:
+        self.intent = intent
+
+    def classify(self, messages: object) -> _Verdict:
+        return _Verdict(self.intent)
+
+
+def test_a_chat_turn_never_retrieves(tmp_path: Path) -> None:
+    retriever = _Retriever("doc000/p000")
+    synth = _FakeSynth()
+    deps = _deps(tmp_path, retriever, _StubModel(), synth, classifier=_StubClassifier("chat"))
+
+    out = _run(tmp_path, deps)
+
+    assert retriever.queries == [], "a chat turn must not hit the retriever"
+    assert Answer.model_validate(out["answer"]).citations == []
+    assert out["rounds"] == 0
+
+
+def test_a_work_turn_enters_the_pipeline(tmp_path: Path) -> None:
+    _pages(tmp_path, "doc000/p000")
+    retriever = _Retriever("doc000/p000")
+    deps = _deps(tmp_path, retriever, _StubModel(), classifier=_StubClassifier("work"))
+
+    out = _run(tmp_path, deps)
+
+    assert retriever.queries == ["sub"]
+    assert out["rounds"] == 1
+
+
+def test_without_a_classifier_the_gate_is_absent(tmp_path: Path) -> None:
+    """Eval passes no classifier, so the topology must stay plan-first."""
+    _pages(tmp_path, "doc000/p000")
+
+    out = _run(tmp_path, _deps(tmp_path, _Retriever("doc000/p000"), _StubModel()))
+
+    assert out["intent"] == ""
+    assert out["rounds"] == 1

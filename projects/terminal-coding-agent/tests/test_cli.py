@@ -400,10 +400,10 @@ def test_repl_keeps_rejecting_a_declined_plan_prompt(tmp_path, monkeypatch) -> N
     assert graph.payloads[-1].resume == "reject"
 
 
-def test_session_config_enables_answer_mode(tmp_path: Path) -> None:
+def test_session_config_enables_intent(tmp_path: Path) -> None:
     config = cli._session_config(worktree=tmp_path, session="s1")
 
-    assert config["configurable"]["enable_answer_mode"] is True
+    assert config["configurable"]["enable_intent"] is True
 
 
 class _CapturingGraph(_FakeGraph):

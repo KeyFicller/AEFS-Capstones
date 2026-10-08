@@ -21,6 +21,23 @@ _SYSTEM = (
     "(x0, y0 top-left; x1, y1 bottom-right); omit bbox for a text passage or when you cannot."
 )
 
+_CHAT_SYSTEM = (
+    "Answer the user directly in your reply. This is not a document question: do not "
+    "cite pages and do not write to a file."
+)
+
+
+def _content_text(message: BaseMessage) -> str:
+    """Text of a chat reply; multimodal content contributes only its text blocks."""
+    content = message.content
+    if isinstance(content, str):
+        return content
+    return "\n".join(
+        part["text"]
+        for part in content
+        if isinstance(part, dict) and part.get("type") == "text"
+    )
+
 
 def build_page_blocks(
     page_ids: list[str],
@@ -123,3 +140,8 @@ class AnswerSynthesizer:
             *build_page_blocks(page_ids, render_dir, documents),
         ]
         return self._structured.invoke(prompt_messages(_SYSTEM, messages, content))
+
+    def reply(self, messages: Sequence[BaseMessage]) -> Answer:
+        """Answer a chat turn with no retrieval; citations are empty by construction."""
+        response = self._model.invoke(prompt_messages(_CHAT_SYSTEM, messages))
+        return Answer(text=_content_text(response), citations=[])

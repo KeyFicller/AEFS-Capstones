@@ -5,6 +5,7 @@
 ``stop_reason`` stays empty on a normal finish.
 """
 
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +20,8 @@ from multimodal_doc_qa.config import Settings
 from multimodal_doc_qa.limits import Budget
 from multimodal_doc_qa.schemas import Answer, Document
 
+logger = logging.getLogger(__name__)
+
 
 class AskState(MessagesState):
     """One ask. ``messages`` is the conversation; the other fields are this loop only."""
@@ -29,6 +32,7 @@ class AskState(MessagesState):
     answer: dict | None
     unsupported: list[str]
     stop_reason: str
+    intent: str
 
 
 def initial_state(question: str, history: Sequence[BaseMessage] = ()) -> AskState:
@@ -45,6 +49,7 @@ def initial_state(question: str, history: Sequence[BaseMessage] = ()) -> AskStat
         "answer": None,
         "unsupported": [],
         "stop_reason": "",
+        "intent": "",
     }
 
 
@@ -61,6 +66,7 @@ class GraphDeps:
     documents: dict[str, Document] | None = None
     budget: Budget | None = None
     rerank: Any = None
+    classifier: Any = None
 
 
 def build_graph(deps: GraphDeps, settings: Settings):
@@ -138,6 +144,27 @@ def build_graph(deps: GraphDeps, settings: Settings):
             return {"stop_reason": "recover_empty"}
         return {"stop_reason": "recover_exhausted"}
 
+    def intent_node(state: AskState) -> dict:
+        if budget.exhausted():
+            return {"stop_reason": "budget_exhausted"}
+        budget.spend_call()
+        label = "work"
+        try:
+            label = deps.classifier.classify(state["messages"]).intent
+        except Exception:  # noqa: BLE001 - an unclear turn is work, never a crash
+            logger.exception("intent classification failed; defaulting to work")
+        return {"intent": label}
+
+    def chat_node(state: AskState) -> dict:
+        if budget.exhausted():
+            return {"stop_reason": "budget_exhausted"}
+        budget.spend_call()
+        answer = deps.synth.reply(state["messages"])
+        return {"answer": answer.model_dump()}
+
+    def after_intent(state: AskState) -> str:
+        return "chat" if state["intent"] == "chat" else "plan"
+
     def after_retrieve(state: AskState) -> str:
         return "recover" if not state["page_ids"] else "assess"
 
@@ -170,7 +197,14 @@ def build_graph(deps: GraphDeps, settings: Settings):
     graph.add_node("synthesize", synthesize_node)
     graph.add_node("verify", verify_node)
     graph.add_node("recover", recover_node)
-    graph.add_edge(START, "plan")
+    if deps.classifier is not None:
+        graph.add_node("intent", intent_node)
+        graph.add_node("chat", chat_node)
+        graph.add_edge("chat", END)
+        graph.add_edge(START, "intent")
+        graph.add_conditional_edges("intent", after_intent, {"chat": "chat", "plan": "plan"})
+    else:
+        graph.add_edge(START, "plan")
     graph.add_conditional_edges("plan", after_plan, {"retrieve": "retrieve", END: END})
     graph.add_conditional_edges(
         "retrieve", after_retrieve, {"recover": "recover", "assess": "assess"}
@@ -198,6 +232,8 @@ if __name__ == "__main__":
         verifier_model=None,
         synth=None,
         render_dir=png_path.parent,
+        # Non-None so the diagram shows the intent gate; no call is ever made.
+        classifier=object(),
     )
     png_path.write_bytes(build_graph(structure, settings).get_graph(xray=True).draw_mermaid_png())
     print(f"graph     {png_path}")  # noqa: T201  # noqa: T201

@@ -318,8 +318,8 @@ def test_run_agent_installs_ask_user_only_when_hitl_is_enabled(
     assert bool(installed) is with_hitl
 
 
-def test_answer_node_carries_the_final_reply(tmp_path, monkeypatch) -> None:
-    """Summary relays the last message, so the answer node must end on its reply."""
+def test_chat_node_carries_the_final_reply(tmp_path, monkeypatch) -> None:
+    """Summary relays the last message, so the chat node must end on its reply."""
     from terminal_coding_agent import executor as executor_module
 
     class FakeAgent:
@@ -329,12 +329,12 @@ def test_answer_node_carries_the_final_reply(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(executor_module, "create_agent", lambda **kwargs: FakeAgent())
     nodes = build_execute_nodes(MagicMock(), tools=[], worktree=tmp_path)
 
-    out = nodes["answer"](_base_state([]), {})
+    out = nodes["chat"](_base_state([]), {})
 
     assert out["messages"][0].content == "the essay"
 
 
-def test_answer_node_runs_on_the_conversation_history(tmp_path, monkeypatch) -> None:
+def test_chat_node_runs_on_the_conversation_history(tmp_path, monkeypatch) -> None:
     """Multi-turn memory: a follow-up must see the earlier turns, not a bare step."""
     from terminal_coding_agent import executor as executor_module
 
@@ -351,7 +351,7 @@ def test_answer_node_runs_on_the_conversation_history(tmp_path, monkeypatch) -> 
         [], messages=[HumanMessage(content="first"), AIMessage(content="reply")]
     )
 
-    nodes["answer"](state, {})
+    nodes["chat"](state, {})
 
     assert [m.content for m in captured["payload"]["messages"]] == ["first", "reply"]
 

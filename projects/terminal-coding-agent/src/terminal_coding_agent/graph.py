@@ -28,6 +28,7 @@ from terminal_coding_agent.checkpoint import build_checkpointer
 from terminal_coding_agent.config import ENV_PATH, load_local_env
 from terminal_coding_agent.demo import DEMO_TASK, seed_demo_worktree
 from terminal_coding_agent.executor import build_execute_nodes
+from terminal_coding_agent.gate import build_intent
 from terminal_coding_agent.models import build_models
 from terminal_coding_agent.planner import build_planner
 from terminal_coding_agent.recover import build_recover
@@ -43,8 +44,6 @@ logger = logging.getLogger(__name__)
 def _after_make_plan(state: CodingAgentState) -> str:
     if state.get("stop_reason"):
         return "summary"
-    if state.get("mode") == "answer":
-        return "answer"
     if not state.get("todo_list"):
         return "summary"
     return "start_task"
@@ -53,8 +52,6 @@ def _after_make_plan(state: CodingAgentState) -> str:
 def _after_make_plan_gated(state: CodingAgentState) -> str:
     if state.get("stop_reason"):
         return "summary"
-    if state.get("mode") == "answer":
-        return "answer"
     if not state.get("todo_list"):
         return "summary"
     return "await_plan_approval"
@@ -76,6 +73,10 @@ def _after_plan_approval(state: CodingAgentState) -> str:
     if state.get("stop_reason"):
         return "summary"
     return "start_task"
+
+
+def _after_intent(state: CodingAgentState) -> str:
+    return "chat" if state.get("intent") == "chat" else "work"
 
 
 def _after_start(state: CodingAgentState) -> str:
@@ -190,8 +191,8 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
     setup_tracing(worktree=worktree)
 
     # Plain function node (not a nested StateGraph) so replace_todos does not fire twice.
-    enable_answer = bool(configurable.get("enable_answer_mode"))
-    make_plan = build_planner(models, enable_answer=enable_answer)
+    enable_intent = bool(configurable.get("enable_intent"))
+    make_plan = build_planner(models, with_system_prompt=enable_intent)
     tool_renderer = configurable.get("tool_renderer")
     execute = build_execute_nodes(
         models,
@@ -220,12 +221,17 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
     coding_agent.add_node("summary", summary)
 
     plan_targets = {"start_task": "start_task", "summary": "summary"}
-    if enable_answer:
-        coding_agent.add_node("answer", execute["answer"])
-        coding_agent.add_edge("answer", "summary")
-        plan_targets["answer"] = "answer"
 
-    coding_agent.add_edge(START, "make_plan")
+    if enable_intent:
+        coding_agent.add_node("intent", build_intent(models))
+        coding_agent.add_node("chat", execute["chat"])
+        coding_agent.add_edge("chat", "summary")
+        coding_agent.add_edge(START, "intent")
+        coding_agent.add_conditional_edges(
+            "intent", _after_intent, {"chat": "chat", "work": "make_plan"}
+        )
+    else:
+        coding_agent.add_edge(START, "make_plan")
     if configurable.get("enable_hitl"):
         coding_agent.add_node("await_plan_approval", _await_plan_approval)
         coding_agent.add_conditional_edges(
@@ -292,8 +298,9 @@ if __name__ == "__main__":
                     "worktree": str(worktree),
                     "mermaid_path": str(Path(__file__).resolve().parents[2] / "graph.png"),
                     "sequence_path": str(Path(__file__).resolve().parents[2] / "sequence.png"),
-                    # Default on so graph.png shows the gate; ENABLE_HITL=0 renders Harbor's.
+                    # Both gates on so graph.png shows the CLI topology; 0 renders Harbor's.
                     "enable_hitl": os.environ.get("ENABLE_HITL", "1") != "0",
+                    "enable_intent": os.environ.get("ENABLE_INTENT", "1") != "0",
                 }
             }
         )

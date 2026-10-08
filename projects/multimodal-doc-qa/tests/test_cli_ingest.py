@@ -20,6 +20,8 @@ from pathlib import Path
 import pymupdf
 import pytest
 import torch
+from intent import IntentVerdict
+from langchain_core.messages import AIMessage
 from multimodal_doc_qa.cli import app, cited_materials
 from multimodal_doc_qa.config import Settings, artifact_paths, load_local_env
 from multimodal_doc_qa.index.maxsim import MultiVectorIndex
@@ -69,18 +71,36 @@ class _StubStructured:
 
     Empty means "no follow-ups" and "nothing unsupported", so the run takes the shortest
     honest path: plan falls back to the question, assess is satisfied, verify passes.
+    ``IntentVerdict`` has no default, so the gate's schema gets the "work" verdict that
+    enters the pipeline (the chat branch is exercised in ``test_graph.py`` instead).
+    ``include_raw`` mirrors the component's own binding.
     """
 
-    def __init__(self, schema: object) -> None:
+    def __init__(self, schema: object, include_raw: bool = False) -> None:
         self.schema = schema
+        self.include_raw = include_raw
 
     def invoke(self, messages: list[dict]) -> object:
+        parsed = self._parsed()
+        if not self.include_raw:
+            return parsed
+        raw = AIMessage(
+            content="",
+            usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+        )
+        return {"raw": raw, "parsed": parsed, "parsing_error": None}
+
+    def _parsed(self) -> object:
+        if self.schema is IntentVerdict:
+            return IntentVerdict(intent="work")
         return self.schema()  # type: ignore[operator]
 
 
 class _StubChat:
-    def with_structured_output(self, schema: object) -> _StubStructured:
-        return _StubStructured(schema)
+    def with_structured_output(
+        self, schema: object, include_raw: bool = False
+    ) -> _StubStructured:
+        return _StubStructured(schema, include_raw)
 
 
 class _StubSynth:
