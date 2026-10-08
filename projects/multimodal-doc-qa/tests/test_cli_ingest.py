@@ -12,6 +12,7 @@ what a checkpoint scores. The encoder stub is deliberately trivial: it makes eve
 equally, which is enough to prove the query reached an index that has pages in it.
 """
 
+import json
 import os
 import threading
 import time
@@ -633,12 +634,33 @@ def test_no_command_opens_the_repl(artifacts: Path) -> None:
     assert "ingest" in result.stdout
 
 
-def test_no_command_can_select_the_ocr_path(artifacts: Path) -> None:
-    """The bare CLI takes the same two retrieval paths as ask and chat."""
-    result = _invoke("--mode", "ocr", stdin="/quit\n")
+def test_the_bare_repl_takes_its_arm_from_the_env(
+    artifacts: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The bare CLI has no ``--mode``; ``MDQ_MODE`` is how it picks a path other than maxsim."""
+    monkeypatch.setenv("MDQ_MODE", "ocr")
+
+    result = _invoke(stdin="/quit\n")
 
     assert result.exit_code == 1
     assert "OCR" in result.stdout
+
+
+def test_a_mode_before_the_subcommand_is_rejected_not_silently_dropped(
+    corpus: Path, artifacts: Path, tmp_path: Path
+) -> None:
+    """A callback-level ``--mode`` was accepted for subcommands and then ignored.
+
+    ``doc-qa --mode telepathy eval`` ran maxsim and said nothing, so a mistyped arm produced
+    a plausible-looking result file. The flag is gone: an unknown option is a hard error.
+    """
+    _invoke("ingest", "--corpus", str(corpus))
+    questions = tmp_path / "questions.json"
+    questions.write_text(json.dumps([_gold_row()]))
+
+    result = _invoke("--mode", "lexical", "eval", "--questions", str(questions))
+
+    assert result.exit_code != 0
 
 
 def test_repl_loads_each_encoder_once(
@@ -752,3 +774,79 @@ def test_hybrid_abstract_without_abstracts_reports_it(
 
     assert result.exit_code == 1
     assert "abstract" in result.stdout
+
+
+# ------------------------------------------------------------------ eval
+
+
+def _gold_row() -> dict:
+    return {
+        "qid": "doc000#0",
+        "text": "what was the EMEA margin?",
+        "answer": DOC_TEXT,
+        "evidence": [{"doc_id": "doc000", "page": 0}],
+        "hops": 1,
+    }
+
+
+def _summary_of(path: Path) -> dict:
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    return rows[-1]
+
+
+def test_eval_defaults_to_retrieval_only_without_a_chat_model(
+    corpus: Path, artifacts: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The default eval must not build a chat model at all: no stub is installed."""
+
+    def _no_chat_model(*args: object, **kwargs: object) -> object:
+        raise AssertionError("retrieval-only eval built a chat model")
+
+    monkeypatch.setattr("multimodal_doc_qa.synth.answer.build_chat_model", _no_chat_model)
+    _invoke("ingest", "--corpus", str(corpus))
+    questions = tmp_path / "questions.json"
+    questions.write_text(json.dumps([_gold_row()]))
+    out = tmp_path / "results.jsonl"
+
+    result = _invoke("eval", "--questions", str(questions), "--out", str(out))
+
+    assert result.exit_code == 0, result.stdout
+    summary = _summary_of(out)
+    assert summary["recall_at_k"] == 1.0
+    assert summary["pool_recall"] is None
+
+
+def test_eval_agentic_runs_the_graph(
+    corpus: Path, artifacts: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "multimodal_doc_qa.synth.answer.build_chat_model", lambda *a, **k: _StubChat()
+    )
+    monkeypatch.setattr("multimodal_doc_qa.synth.answer.AnswerSynthesizer", _StubSynth)
+    _invoke("ingest", "--corpus", str(corpus))
+    questions = tmp_path / "questions.json"
+    questions.write_text(json.dumps([_gold_row()]))
+    out = tmp_path / "results.jsonl"
+
+    result = _invoke("eval", "--agentic", "--questions", str(questions), "--out", str(out))
+
+    assert result.exit_code == 0, result.stdout
+    summary = _summary_of(out)
+    assert summary["pool_recall"] == 1.0
+
+
+def test_eval_has_no_iou_threshold_flag(
+    corpus: Path, artifacts: Path, tmp_path: Path
+) -> None:
+    """Gold carries no bbox, so a threshold cannot change the score: the knob was dead.
+
+    ``run_eval`` keeps ``iou_threshold`` as a parameter for a caller that has real boxes;
+    the CLI pins it to the library default.
+    """
+    _invoke("ingest", "--corpus", str(corpus))
+    questions = tmp_path / "questions.json"
+    questions.write_text(json.dumps([_gold_row()]))
+
+    result = _invoke("eval", "--questions", str(questions), "--iou-threshold", "0.7")
+
+    assert result.exit_code != 0

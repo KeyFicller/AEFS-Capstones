@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="generator" content="Answer me with HTML 0.4.9">
-<title>hybrid-maxsim vs maxsim 检索评测对比</title>
+<title>检索臂消融 · 九臂 19 题</title>
 <style>
 html[data-theme="blueprint"], html[data-theme="blueprint"][data-mode="light"] {
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -444,517 +444,330 @@ html[data-theme="shadcn"] .am-kv { border-color: var(--line); border-radius: var
 <button class="am-btn" type="button" data-am="copy" data-done="已复制 ✓">复制源稿</button>
 </div>
 <main class="am-sheet">
-<header class="am-head"><h1>hybrid-maxsim vs maxsim 检索评测对比</h1><p class="am-sub">19 题同题对比，BM25 与 maxsim 经 RRF 融合</p><div class="am-head-meta"><span><b>maxsim</b>commit 508b32a · 2026-10-07T08:17Z · 526s</span><span><b>hybrid</b>commit 22d9a6a · 2026-10-07T13:52Z · 565s</span><span><b>top_k</b>5</span><span><b>iou_threshold</b>0.5</span><span><b>encoders</b>colSmol-500M / bge-small-en-v1.5</span></div><div class="am-intro am-md"><div class="am-md"><p>两跑题集相同，top_k 与 IoU 阈值相同。逐题算术平均与 summary 行一致。</p>
+<header class="am-head"><h1>检索臂消融 · 九臂 19 题</h1><p class="am-sub">maxsim 最优，且已触及这九条臂的上限</p><div class="am-head-meta"><span><b>source</b>ablation-*-19q.jsonl · 纯检索 · top_k=5</span></div><div class="am-intro am-md"><div class="am-md"><p>同一份 gold（19 题 / 24 个 gold 页）、同一批索引，只换检索臂。全程不调 chat 模型。</p>
 </div></div></header>
 <div class="am-frame">
 <div class="am-ruler am-ruler--top" aria-hidden="true"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span></div><div class="am-ruler am-ruler--bottom" aria-hidden="true"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span></div><div class="am-ruler am-ruler--left" aria-hidden="true"><span>A</span><span>B</span><span>C</span><span>D</span></div><div class="am-ruler am-ruler--right" aria-hidden="true"><span>A</span><span>B</span><span>C</span><span>D</span></div>
 <div class="am-grid" style="--cols: 3">
 <section class="am-panel am-span-wide" id="panel-A" style="grid-column: span 3">
 <header class="am-panel-head"><span class="am-panel-id">A</span><h2>结论</h2></header>
-<div class="am-panel-body"><div class="am-callout am-callout--warn" role="note"><div class="am-callout-title">RRF 融合没有带来检索增益</div><div class="am-callout-body am-md"><p>召回与排序双双下降：</p>
-<ul>
-<li>recall@5：0.8947 → 0.8421</li>
-<li>nDCG@5：0.7359 → 0.6953</li>
-<li><a href="mailto:IoU@0.5">IoU@0.5</a>：0.7895 → 0.8158</li>
+<div class="am-panel-body"><div class="am-callout am-callout--ok" role="note"><div class="am-callout-title">maxsim 第一，且已到顶</div><div class="am-callout-body am-md"><ul>
+<li><code>maxsim</code> recall@5 0.8947，nDCG@5 0.7359。</li>
+<li>它只漏 2 题，这 2 题九臂全漏。</li>
+<li>所以这九条臂到不了更高。</li>
+<li>后期交互胜过池化：0.8947 对 0.6579。</li>
+<li>RRF 不是增益：救弱臂，压最强臂。</li>
 </ul>
-</div></div>
-<div class="am-md"><p>净回归集中在少数题。survey#0 完全失手，survey#1 与 paper#3 排名下滑。</p>
-</div></div>
+</div></div></div>
 </section>
 <section class="am-panel am-span-wide" id="panel-B" style="grid-column: span 3">
-<header class="am-panel-head"><span class="am-panel-id">B</span><h2>总览指标</h2></header>
+<header class="am-panel-head"><span class="am-panel-id">B</span><h2>九臂总表</h2></header>
 <div class="am-panel-body"><div class="am-md"><div class="am-table-wrap"><table>
 <thead>
 <tr>
-<th>指标</th>
-<th>maxsim</th>
-<th>hybrid-maxsim</th>
-<th>Δ</th>
-<th>判定</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>nDCG@5</td>
-<td>0.7359</td>
-<td>0.6953</td>
-<td>−0.0406</td>
-<td><span class="am-status am-status--no"><span class="am-status-icon" aria-hidden="true">✗</span>变差</span></td>
-</tr>
-<tr>
-<td>recall@5</td>
-<td>0.8947</td>
-<td>0.8421</td>
-<td>−0.0526</td>
-<td><span class="am-status am-status--no"><span class="am-status-icon" aria-hidden="true">✗</span>变差</span></td>
-</tr>
-<tr>
-<td>pool recall</td>
-<td>0.9474</td>
-<td>0.8947</td>
-<td>−0.0526</td>
-<td><span class="am-status am-status--no"><span class="am-status-icon" aria-hidden="true">✗</span>变差</span></td>
-</tr>
-<tr>
-<td><a href="mailto:IoU@0.5">IoU@0.5</a></td>
-<td>0.7895</td>
-<td>0.8158</td>
-<td>+0.0263</td>
-<td><span class="am-status am-status--ok"><span class="am-status-icon" aria-hidden="true">✓</span>变好</span></td>
-</tr>
-<tr>
-<td>bbox 命中率</td>
-<td>0.7895</td>
-<td>0.8158</td>
-<td>+0.0263</td>
-<td><span class="am-status am-status--ok"><span class="am-status-icon" aria-hidden="true">✓</span>变好</span></td>
-</tr>
-</tbody></table></div>
-<p>19 题算术平均。</p>
-</div></div>
-</section>
-<section class="am-panel" id="panel-C">
-<header class="am-panel-head"><span class="am-panel-id">C</span><h2>逐题 nDCG@5 · maxsim</h2></header>
-<div class="am-panel-body"><div class="am-limits"><div class="am-lim">
-<div class="am-lim-head"><span>slides#0</span><span class="am-lim-val">1 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 50%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>slides#1</span><span class="am-lim-val">1 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 50%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>slides#2</span><span class="am-lim-val">1 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 50%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>slides#3</span><span class="am-lim-val">1 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 50%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>slides#4</span><span class="am-lim-val">1 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 50%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>watch#0</span><span class="am-lim-val">1 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 50%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>watch#1</span><span class="am-lim-val">0.63 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 31.5%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>watch#2</span><span class="am-lim-val">1 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 50%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>watch#3</span><span class="am-lim-val">1 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 50%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>survey#0</span><span class="am-lim-val">0.5 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 25%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>survey#1</span><span class="am-lim-val">1 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 50%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>survey#2</span><span class="am-lim-val">0.5 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 25%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>survey#3</span><span class="am-lim-val">0 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 0%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>survey#4</span><span class="am-lim-val">0 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 0%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>paper#0</span><span class="am-lim-val">0.5 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 25%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>paper#1</span><span class="am-lim-val">0.5 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 25%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>paper#2</span><span class="am-lim-val">0.5 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 25%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>paper#3</span><span class="am-lim-val">1 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 50%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>paper#4</span><span class="am-lim-val">0.85 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 42.5%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div></div>
-<div class="am-md"><p>条长等于该题得分，满分 1.00。</p>
-</div></div>
-</section>
-<section class="am-panel am-span-wide" id="panel-D" style="grid-column: span 2">
-<header class="am-panel-head"><span class="am-panel-id">D</span><h2>逐题 nDCG@5 · hybrid-maxsim</h2></header>
-<div class="am-panel-body"><div class="am-limits"><div class="am-lim">
-<div class="am-lim-head"><span>slides#0</span><span class="am-lim-val">1 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 50%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>slides#1</span><span class="am-lim-val">1 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 50%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>slides#2</span><span class="am-lim-val">1 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 50%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>slides#3</span><span class="am-lim-val">1 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 50%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>slides#4</span><span class="am-lim-val">1 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 50%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>watch#0</span><span class="am-lim-val">1 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 50%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>watch#1</span><span class="am-lim-val">1 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 50%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>watch#2</span><span class="am-lim-val">1 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 50%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>watch#3</span><span class="am-lim-val">0.63 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 31.5%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>survey#0</span><span class="am-lim-val">0 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 0%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>survey#1</span><span class="am-lim-val">0.43 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 21.5%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>survey#2</span><span class="am-lim-val">1 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 50%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>survey#3</span><span class="am-lim-val">0 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 0%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>survey#4</span><span class="am-lim-val">0 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 0%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>paper#0</span><span class="am-lim-val">0.5 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 25%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>paper#1</span><span class="am-lim-val">0.39 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 19.5%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>paper#2</span><span class="am-lim-val">0.63 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 31.5%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>paper#3</span><span class="am-lim-val">0.63 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 31.5%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div><div class="am-lim">
-<div class="am-lim-head"><span>paper#4</span><span class="am-lim-val">1 / max 1</span></div>
-<div class="am-lim-track"><div class="am-lim-fill" style="width: 50%"></div><div class="am-lim-mark" style="left: 50%"></div></div>
-<div class="am-lim-ticks" aria-hidden="true"><span style="left: 0%">0</span><span style="left: 50%">1</span><span style="left: 100%">2</span></div>
-</div></div>
-<div class="am-md"><p>两列面板行序一致，可逐行对读。</p>
-</div></div>
-</section>
-<section class="am-panel am-span-wide" id="panel-E" style="grid-column: span 3">
-<header class="am-panel-head"><span class="am-panel-id">E</span><h2>发生变化的 11 题</h2></header>
-<div class="am-panel-body"><div class="am-md"><p>19 题中有 8 题完全不变。</p>
-<div class="am-table-wrap"><table>
-<thead>
-<tr>
-<th>题目</th>
+<th>臂</th>
 <th>recall@5</th>
 <th>nDCG@5</th>
-<th><a href="mailto:IoU@0.5">IoU@0.5</a></th>
-<th>变化</th>
+<th>p50(ms)</th>
+<th>归类</th>
 </tr>
 </thead>
 <tbody><tr>
-<td>slides#1</td>
-<td>1.0 → 1.0</td>
-<td>1.00 → 1.00</td>
-<td>0.00 → 1.00</td>
-<td><span class="am-status am-status--ok"><span class="am-status-icon" aria-hidden="true">✓</span>定位改善</span></td>
+<td><code>maxsim</code></td>
+<td>0.8947</td>
+<td>0.7359</td>
+<td>66</td>
+<td>视觉 · 后期交互</td>
 </tr>
 <tr>
-<td>watch#1</td>
-<td>1.0 → 1.0</td>
-<td>0.63 → 1.00</td>
-<td>1.00 → 1.00</td>
-<td><span class="am-status am-status--ok"><span class="am-status-icon" aria-hidden="true">✓</span>排名改善</span></td>
+<td><code>hybrid-maxsim</code></td>
+<td>0.8421</td>
+<td>0.6953</td>
+<td>62</td>
+<td>RRF 融合</td>
 </tr>
 <tr>
-<td>watch#3</td>
-<td>1.0 → 1.0</td>
-<td>1.00 → 0.63</td>
-<td>1.00 → 1.00</td>
-<td><span class="am-status am-status--no"><span class="am-status-icon" aria-hidden="true">✗</span>排名下降</span></td>
+<td><code>hybrid-pool</code></td>
+<td>0.7895</td>
+<td>0.6681</td>
+<td>58</td>
+<td>RRF 融合</td>
 </tr>
 <tr>
-<td>survey#0</td>
-<td>1.0 → 0.0</td>
-<td>0.50 → 0.00</td>
-<td>1.00 → 0.00</td>
-<td><span class="am-status am-status--no"><span class="am-status-icon" aria-hidden="true">✗</span>检索失败</span></td>
+<td><code>hybrid-ocr</code></td>
+<td>0.7895</td>
+<td>0.6578</td>
+<td>64</td>
+<td>RRF 融合</td>
 </tr>
 <tr>
-<td>survey#1</td>
-<td>1.0 → 1.0</td>
-<td>1.00 → 0.43</td>
-<td>1.00 → 1.00</td>
-<td><span class="am-status am-status--no"><span class="am-status-icon" aria-hidden="true">✗</span>排名下降</span></td>
+<td><code>lexical</code></td>
+<td>0.7368</td>
+<td>0.6348</td>
+<td>2</td>
+<td>词法 BM25</td>
 </tr>
 <tr>
-<td>survey#2</td>
-<td>1.0 → 1.0</td>
-<td>0.50 → 1.00</td>
-<td>1.00 → 1.00</td>
-<td><span class="am-status am-status--ok"><span class="am-status-icon" aria-hidden="true">✓</span>排名改善</span></td>
+<td><code>abstract</code></td>
+<td>0.7105</td>
+<td>0.5868</td>
+<td>44</td>
+<td>VLM 页描述</td>
 </tr>
 <tr>
-<td>survey#3</td>
-<td>0.0 → 0.0</td>
-<td>0.00 → 0.00</td>
-<td>0.00 → 0.50</td>
-<td><span class="am-status am-status--warn"><span class="am-status-icon" aria-hidden="true">!</span>定位改善</span></td>
+<td><code>hybrid-abstract</code></td>
+<td>0.6842</td>
+<td>0.6486</td>
+<td>54</td>
+<td>RRF 融合</td>
 </tr>
 <tr>
-<td>paper#1</td>
-<td>1.0 → 1.0</td>
-<td>0.50 → 0.39</td>
-<td>0.00 → 1.00</td>
-<td><span class="am-status am-status--warn"><span class="am-status-icon" aria-hidden="true">!</span>一升一降</span></td>
+<td><code>pool</code></td>
+<td>0.6579</td>
+<td>0.5346</td>
+<td>56</td>
+<td>视觉 · 池化</td>
 </tr>
 <tr>
-<td>paper#2</td>
-<td>1.0 → 1.0</td>
-<td>0.50 → 0.63</td>
-<td>1.00 → 0.00</td>
-<td><span class="am-status am-status--warn"><span class="am-status-icon" aria-hidden="true">!</span>一升一降</span></td>
-</tr>
-<tr>
-<td>paper#3</td>
-<td>1.0 → 1.0</td>
-<td>1.00 → 0.63</td>
-<td>1.00 → 1.00</td>
-<td><span class="am-status am-status--no"><span class="am-status-icon" aria-hidden="true">✗</span>排名下降</span></td>
-</tr>
-<tr>
-<td>paper#4</td>
-<td>1.0 → 1.0</td>
-<td>0.85 → 1.00</td>
-<td>1.00 → 1.00</td>
-<td><span class="am-status am-status--ok"><span class="am-status-icon" aria-hidden="true">✓</span>排名改善</span></td>
+<td><code>ocr</code></td>
+<td>0.6053</td>
+<td>0.5022</td>
+<td>43</td>
+<td>OCR 文本</td>
 </tr>
 </tbody></table></div>
-<p>nDCG 逐题合计 13.981 → 13.210。5 题下降合计 −1.921，4 题上升合计 +1.150。</p>
 </div></div>
 </section>
-<section class="am-panel am-span-wide" id="panel-F" style="grid-column: span 3">
-<header class="am-panel-head"><span class="am-panel-id">F</span><h2>成本与循环终止</h2></header>
-<div class="am-panel-body"><div class="am-md"><div class="am-table-wrap"><table>
-<thead>
-<tr>
-<th>指标</th>
-<th>maxsim</th>
-<th>hybrid-maxsim</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>p50 每题延迟</td>
-<td>31.2 s</td>
-<td>20.3 s</td>
-</tr>
-<tr>
-<td>p95 每题延迟</td>
-<td>58.2 s</td>
-<td>99.2 s</td>
-</tr>
-<tr>
-<td>总 token</td>
-<td>1.68 M</td>
-<td>1.58 M</td>
-</tr>
-<tr>
-<td>整轮耗时</td>
-<td>526 s</td>
-<td>565 s</td>
-</tr>
-</tbody></table></div>
+<section class="am-panel am-span-wide" id="panel-C" style="grid-column: span 3">
+<header class="am-panel-head"><span class="am-panel-id">C</span><h2>RRF 的净增益</h2></header>
+<div class="am-panel-body"><div class="am-md"><p>加 BM25 后，弱臂上升，最强的臂下降。</p>
 <div class="am-table-wrap"><table>
 <thead>
 <tr>
-<th>终止原因</th>
-<th>maxsim</th>
-<th>hybrid-maxsim</th>
+<th>臂</th>
+<th>单臂</th>
+<th>加 BM25</th>
+<th>Δ</th>
+<th>结论</th>
 </tr>
 </thead>
 <tbody><tr>
-<td>正常完成</td>
-<td>12</td>
-<td>14</td>
+<td><code>ocr</code></td>
+<td>0.6053</td>
+<td>0.7895</td>
+<td>+0.1842</td>
+<td><span class="am-status am-status--ok"><span class="am-status-icon" aria-hidden="true">✓</span>大幅救回</span></td>
 </tr>
 <tr>
-<td>recover_exhausted</td>
-<td>6</td>
-<td>4</td>
+<td><code>pool</code></td>
+<td>0.6579</td>
+<td>0.7895</td>
+<td>+0.1316</td>
+<td><span class="am-status am-status--ok"><span class="am-status-icon" aria-hidden="true">✓</span>救回</span></td>
 </tr>
 <tr>
-<td>budget_exhausted</td>
-<td>1</td>
-<td>1</td>
+<td><code>abstract</code></td>
+<td>0.7105</td>
+<td>0.6842</td>
+<td>-0.0263</td>
+<td><span class="am-status am-status--no"><span class="am-status-icon" aria-hidden="true">✗</span>略降</span></td>
+</tr>
+<tr>
+<td><code>maxsim</code></td>
+<td>0.8947</td>
+<td>0.8421</td>
+<td>-0.0526</td>
+<td><span class="am-status am-status--no"><span class="am-status-icon" aria-hidden="true">✗</span>被拖低</span></td>
 </tr>
 </tbody></table></div>
-<p>p50 更快，但尾部更长。hybrid 的最慢一题为 survey#1，耗时 99.2 s。</p>
 </div></div>
+</section>
+<section class="am-panel am-span-wide" id="panel-D" style="grid-column: span 3">
+<header class="am-panel-head"><span class="am-panel-id">D</span><h2>后期交互 vs 池化</h2></header>
+<div class="am-panel-body"><dl class="am-kv" style="--kv-cols: 3"><div class="am-kv-cell"><dt>recall@5</dt><dd>0.8947 / 0.6579</dd></div><div class="am-kv-cell"><dt>nDCG@5</dt><dd>0.7359 / 0.5346</dd></div><div class="am-kv-cell"><dt>2023.acl 命中</dt><dd>6 / 6 对 3 / 6</dd></div><div class="am-kv-cell"><dt>同一份多向量</dt><dd>是</dd></div><div class="am-kv-cell"><dt>差异</dt><dd>逐 patch 匹配对均值池化</dd></div></dl></div>
+</section>
+<section class="am-panel am-span-wide" id="panel-E" style="grid-column: span 3">
+<header class="am-panel-head"><span class="am-panel-id">E</span><h2>按文档命中</h2></header>
+<div class="am-panel-body"><div class="am-md"><p>每格是该文档命中的 gold 页数 / 该文档 gold 页数。</p>
+<div class="am-table-wrap"><table>
+<thead>
+<tr>
+<th>臂</th>
+<th>0e94(5)</th>
+<th>2023.acl(6)</th>
+<th>698bba(8)</th>
+<th>watch_d(5)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>maxsim</code></td>
+<td>5/5</td>
+<td>6/6</td>
+<td>3/8</td>
+<td>5/5</td>
+</tr>
+<tr>
+<td><code>hybrid-maxsim</code></td>
+<td>5/5</td>
+<td>6/6</td>
+<td>2/8</td>
+<td>5/5</td>
+</tr>
+<tr>
+<td><code>hybrid-pool</code></td>
+<td>5/5</td>
+<td>5/6</td>
+<td>2/8</td>
+<td>5/5</td>
+</tr>
+<tr>
+<td><code>hybrid-ocr</code></td>
+<td>5/5</td>
+<td>6/6</td>
+<td>1/8</td>
+<td>5/5</td>
+</tr>
+<tr>
+<td><code>lexical</code></td>
+<td>5/5</td>
+<td>5/6</td>
+<td>1/8</td>
+<td>5/5</td>
+</tr>
+<tr>
+<td><code>abstract</code></td>
+<td>5/5</td>
+<td>4/6</td>
+<td>2/8</td>
+<td>5/5</td>
+</tr>
+<tr>
+<td><code>hybrid-abstract</code></td>
+<td>5/5</td>
+<td>4/6</td>
+<td>1/8</td>
+<td>5/5</td>
+</tr>
+<tr>
+<td><code>pool</code></td>
+<td>5/5</td>
+<td>3/6</td>
+<td>2/8</td>
+<td>4/5</td>
+</tr>
+<tr>
+<td><code>ocr</code></td>
+<td>5/5</td>
+<td>2/6</td>
+<td>1/8</td>
+<td>5/5</td>
+</tr>
+</tbody></table></div>
+</div></div>
+</section>
+<section class="am-panel" id="panel-F">
+<header class="am-panel-head"><span class="am-panel-id">F</span><h2>九臂共同漏检</h2></header>
+<div class="am-panel-body"><div class="am-callout am-callout--warn" role="note"><div class="am-callout-title">2 题没有臂召回</div><div class="am-callout-body am-md"><ul>
+<li>都在 <code>698bba…763</code>：<code>#3</code> 与 <code>#4</code>。</li>
+<li>gold 分别 2 页与 3 页。</li>
+<li>这不是表示问题，是语料或 gold 的问题。</li>
+</ul>
+</div></div></div>
+</section>
+<section class="am-panel am-span-wide" id="panel-G" style="grid-column: span 2">
+<header class="am-panel-head"><span class="am-panel-id">G</span><h2>读数边界</h2></header>
+<div class="am-panel-body"><div class="am-callout am-callout--info" role="note"><div class="am-callout-title">别过度解读</div><div class="am-callout-body am-md"><ul>
+<li>gold 只有 19 题 / 24 页，来自 4 篇文档。</li>
+<li><code>0e94</code> 与 <code>watch_d</code> 九臂全对，无区分度。</li>
+<li>区分度几乎全来自 <code>2023.acl</code> 与 <code>698bba</code>。</li>
+<li>只有召回，没有精度；只有单趟，不含循环。</li>
+<li><code>pool_recall</code> 0.9474 来自另一次 <code>--agentic</code> 运行，不并入本表。</li>
+</ul>
+</div></div></div>
 </section>
 </div>
 </div>
 </main>
-<footer class="am-colophon">Generated by Answer me with HTML 0.4.9 · 2026-10-07 22:10</footer>
+<footer class="am-colophon">Generated by Answer me with HTML 0.4.9 · 2026-10-08 14:07</footer>
 <textarea id="am-source" hidden readonly aria-hidden="true">---
-title: hybrid-maxsim vs maxsim 检索评测对比
-subtitle: 19 题同题对比，BM25 与 maxsim 经 RRF 融合
-cols: 3
-maxsim: commit 508b32a · 2026-10-07T08:17Z · 526s
-hybrid: commit 22d9a6a · 2026-10-07T13:52Z · 565s
-top_k: 5
-iou_threshold: 0.5
-encoders: colSmol-500M / bge-small-en-v1.5
+template: sheet
+title: 检索臂消融 · 九臂 19 题
+subtitle: maxsim 最优，且已触及这九条臂的上限
+source: ablation-*-19q.jsonl · 纯检索 · top_k=5
 ---
-两跑题集相同，top_k 与 IoU 阈值相同。逐题算术平均与 summary 行一致。
+同一份 gold（19 题 / 24 个 gold 页）、同一批索引，只换检索臂。全程不调 chat 模型。
 
 ## 结论
-
-```callout warn RRF 融合没有带来检索增益
-召回与排序双双下降：
-- recall@5：0.8947 → 0.8421
-- nDCG@5：0.7359 → 0.6953
-- IoU@0.5：0.7895 → 0.8158
+```callout ok maxsim 第一，且已到顶
+- `maxsim` recall@5 0.8947，nDCG@5 0.7359。
+- 它只漏 2 题，这 2 题九臂全漏。
+- 所以这九条臂到不了更高。
+- 后期交互胜过池化：0.8947 对 0.6579。
+- RRF 不是增益：救弱臂，压最强臂。
 ```
 
-净回归集中在少数题。survey#0 完全失手，survey#1 与 paper#3 排名下滑。
-
-## 总览指标
-
-| 指标 | maxsim | hybrid-maxsim | Δ | 判定 |
+## 九臂总表
+| 臂 | recall@5 | nDCG@5 | p50(ms) | 归类 |
 | --- | --- | --- | --- | --- |
-| nDCG@5 | 0.7359 | 0.6953 | −0.0406 | no 变差 |
-| recall@5 | 0.8947 | 0.8421 | −0.0526 | no 变差 |
-| pool recall | 0.9474 | 0.8947 | −0.0526 | no 变差 |
-| IoU@0.5 | 0.7895 | 0.8158 | +0.0263 | ok 变好 |
-| bbox 命中率 | 0.7895 | 0.8158 | +0.0263 | ok 变好 |
+| `maxsim` | 0.8947 | 0.7359 | 66 | 视觉 · 后期交互 |
+| `hybrid-maxsim` | 0.8421 | 0.6953 | 62 | RRF 融合 |
+| `hybrid-pool` | 0.7895 | 0.6681 | 58 | RRF 融合 |
+| `hybrid-ocr` | 0.7895 | 0.6578 | 64 | RRF 融合 |
+| `lexical` | 0.7368 | 0.6348 | 2 | 词法 BM25 |
+| `abstract` | 0.7105 | 0.5868 | 44 | VLM 页描述 |
+| `hybrid-abstract` | 0.6842 | 0.6486 | 54 | RRF 融合 |
+| `pool` | 0.6579 | 0.5346 | 56 | 视觉 · 池化 |
+| `ocr` | 0.6053 | 0.5022 | 43 | OCR 文本 |
 
-19 题算术平均。
+## RRF 的净增益
+加 BM25 后，弱臂上升，最强的臂下降。
 
-## 逐题 nDCG@5 · maxsim
-
-```limits
-slides#0 | 1.00 / 1.00
-slides#1 | 1.00 / 1.00
-slides#2 | 1.00 / 1.00
-slides#3 | 1.00 / 1.00
-slides#4 | 1.00 / 1.00
-watch#0 | 1.00 / 1.00
-watch#1 | 0.63 / 1.00
-watch#2 | 1.00 / 1.00
-watch#3 | 1.00 / 1.00
-survey#0 | 0.50 / 1.00
-survey#1 | 1.00 / 1.00
-survey#2 | 0.50 / 1.00
-survey#3 | 0.00 / 1.00
-survey#4 | 0.00 / 1.00
-paper#0 | 0.50 / 1.00
-paper#1 | 0.50 / 1.00
-paper#2 | 0.50 / 1.00
-paper#3 | 1.00 / 1.00
-paper#4 | 0.85 / 1.00
-```
-
-条长等于该题得分，满分 1.00。
-
-## 逐题 nDCG@5 · hybrid-maxsim
-
-```limits
-slides#0 | 1.00 / 1.00
-slides#1 | 1.00 / 1.00
-slides#2 | 1.00 / 1.00
-slides#3 | 1.00 / 1.00
-slides#4 | 1.00 / 1.00
-watch#0 | 1.00 / 1.00
-watch#1 | 1.00 / 1.00
-watch#2 | 1.00 / 1.00
-watch#3 | 0.63 / 1.00
-survey#0 | 0.00 / 1.00
-survey#1 | 0.43 / 1.00
-survey#2 | 1.00 / 1.00
-survey#3 | 0.00 / 1.00
-survey#4 | 0.00 / 1.00
-paper#0 | 0.50 / 1.00
-paper#1 | 0.39 / 1.00
-paper#2 | 0.63 / 1.00
-paper#3 | 0.63 / 1.00
-paper#4 | 1.00 / 1.00
-```
-
-两列面板行序一致，可逐行对读。
-
-## 发生变化的 11 题
-
-19 题中有 8 题完全不变。
-
-| 题目 | recall@5 | nDCG@5 | IoU@0.5 | 变化 |
+| 臂 | 单臂 | 加 BM25 | Δ | 结论 |
 | --- | --- | --- | --- | --- |
-| slides#1 | 1.0 → 1.0 | 1.00 → 1.00 | 0.00 → 1.00 | ok 定位改善 |
-| watch#1 | 1.0 → 1.0 | 0.63 → 1.00 | 1.00 → 1.00 | ok 排名改善 |
-| watch#3 | 1.0 → 1.0 | 1.00 → 0.63 | 1.00 → 1.00 | no 排名下降 |
-| survey#0 | 1.0 → 0.0 | 0.50 → 0.00 | 1.00 → 0.00 | no 检索失败 |
-| survey#1 | 1.0 → 1.0 | 1.00 → 0.43 | 1.00 → 1.00 | no 排名下降 |
-| survey#2 | 1.0 → 1.0 | 0.50 → 1.00 | 1.00 → 1.00 | ok 排名改善 |
-| survey#3 | 0.0 → 0.0 | 0.00 → 0.00 | 0.00 → 0.50 | warn 定位改善 |
-| paper#1 | 1.0 → 1.0 | 0.50 → 0.39 | 0.00 → 1.00 | warn 一升一降 |
-| paper#2 | 1.0 → 1.0 | 0.50 → 0.63 | 1.00 → 0.00 | warn 一升一降 |
-| paper#3 | 1.0 → 1.0 | 1.00 → 0.63 | 1.00 → 1.00 | no 排名下降 |
-| paper#4 | 1.0 → 1.0 | 0.85 → 1.00 | 1.00 → 1.00 | ok 排名改善 |
+| `ocr` | 0.6053 | 0.7895 | +0.1842 | ok 大幅救回 |
+| `pool` | 0.6579 | 0.7895 | +0.1316 | ok 救回 |
+| `abstract` | 0.7105 | 0.6842 | -0.0263 | no 略降 |
+| `maxsim` | 0.8947 | 0.8421 | -0.0526 | no 被拖低 |
 
-nDCG 逐题合计 13.981 → 13.210。5 题下降合计 −1.921，4 题上升合计 +1.150。
+## 后期交互 vs 池化
+```kv cols=3
+recall@5: 0.8947 / 0.6579
+nDCG@5: 0.7359 / 0.5346
+2023.acl 命中: 6 / 6 对 3 / 6
+同一份多向量: 是
+差异: 逐 patch 匹配对均值池化
+```
 
-## 成本与循环终止
+## 按文档命中
+每格是该文档命中的 gold 页数 / 该文档 gold 页数。
 
-| 指标 | maxsim | hybrid-maxsim |
-| --- | --- | --- |
-| p50 每题延迟 | 31.2 s | 20.3 s |
-| p95 每题延迟 | 58.2 s | 99.2 s |
-| 总 token | 1.68 M | 1.58 M |
-| 整轮耗时 | 526 s | 565 s |
+| 臂 | 0e94(5) | 2023.acl(6) | 698bba(8) | watch_d(5) |
+| --- | --- | --- | --- | --- |
+| `maxsim` | 5/5 | 6/6 | 3/8 | 5/5 |
+| `hybrid-maxsim` | 5/5 | 6/6 | 2/8 | 5/5 |
+| `hybrid-pool` | 5/5 | 5/6 | 2/8 | 5/5 |
+| `hybrid-ocr` | 5/5 | 6/6 | 1/8 | 5/5 |
+| `lexical` | 5/5 | 5/6 | 1/8 | 5/5 |
+| `abstract` | 5/5 | 4/6 | 2/8 | 5/5 |
+| `hybrid-abstract` | 5/5 | 4/6 | 1/8 | 5/5 |
+| `pool` | 5/5 | 3/6 | 2/8 | 4/5 |
+| `ocr` | 5/5 | 2/6 | 1/8 | 5/5 |
 
-| 终止原因 | maxsim | hybrid-maxsim |
-| --- | --- | --- |
-| 正常完成 | 12 | 14 |
-| recover_exhausted | 6 | 4 |
-| budget_exhausted | 1 | 1 |
+## 九臂共同漏检
+```callout warn 2 题没有臂召回
+- 都在 `698bba…763`：`#3` 与 `#4`。
+- gold 分别 2 页与 3 页。
+- 这不是表示问题，是语料或 gold 的问题。
+```
 
-p50 更快，但尾部更长。hybrid 的最慢一题为 survey#1，耗时 99.2 s。
+## 读数边界
+```callout info 别过度解读
+- gold 只有 19 题 / 24 页，来自 4 篇文档。
+- `0e94` 与 `watch_d` 九臂全对，无区分度。
+- 区分度几乎全来自 `2023.acl` 与 `698bba`。
+- 只有召回，没有精度；只有单趟，不含循环。
+- `pool_recall` 0.9474 来自另一次 `--agentic` 运行，不并入本表。
+```
 </textarea>
 <script>
 (() => {

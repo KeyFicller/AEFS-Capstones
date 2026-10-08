@@ -39,6 +39,10 @@ _artifacts/
 # the directory itself stops git from descending, which would make the `!`
 # exception at the bottom dead.
 projects/*/artifacts/*
+# The ablation sweep's throwaway index (`ingest --out artifacts-ablation`): 100 MB of
+# indices and rendered pages, reproducible with one ingest. Only the JSONL results
+# under `eval/` are worth keeping.
+projects/*/artifacts-ablation/*
 
 # `doc-qa eval`'s default output path (`RESULTS_PATH`) — an append target, so it is
 # scratch. Curated mdq runs are committed under explicit names instead

@@ -48,6 +48,8 @@ _MODE_HELP = (
     "Set MDQ_MODE to change the default."
 )
 
+_IOU_THRESHOLD = 0.5
+
 
 @dataclass(frozen=True)
 class CitedMaterial:
@@ -482,17 +484,22 @@ def eval_questions(
     questions: Path = _EVAL_QUESTIONS,
     mode: str | None = _EVAL_MODE,
     out: Path | None = _EVAL_OUT,
-    iou_threshold: float = typer.Option(
-        0.5, "--iou-threshold", help="IoU above which a citation matches a gold box"
+    retrieval_only: bool = typer.Option(
+        True,
+        "--retrieval-only/--agentic",
+        help="Retrieval only by default; --agentic adds the agent loop and answer generation",
     ),
     max_seconds: float | None = typer.Option(
         None, "--max-seconds", help="Stop the suite after this long and keep the rows so far"
     ),
     max_tokens: int | None = typer.Option(
-        None, "--max-tokens", help="Stop the suite after this many tokens and keep the rows so far"
+        None, "--max-tokens", help="Stop the suite after this many tokens (--agentic only)"
     ),
 ) -> None:
-    """One graph per question. A reused graph would carry the previous ask's budget."""
+    """Retrieval metrics by default. ``--agentic`` runs one graph per question.
+
+    A reused graph would carry the previous ask's budget, so it is built per question.
+    """
     from multimodal_doc_qa.eval.run import RESULTS_PATH, run_eval
 
     settings = Settings()
@@ -502,16 +509,21 @@ def eval_questions(
     written = out or RESULTS_PATH
     summary = run_eval(
         items,
-        lambda question: _eval_one(question, settings, retriever),
+        lambda question: (
+            _eval_retrieval(question, retriever)
+            if retrieval_only
+            else _eval_one(question, settings, retriever)
+        ),
         out_path=written,
         settings=settings,
         mode=mode,
         k=settings.top_k,
-        iou_threshold=iou_threshold,
+        iou_threshold=_IOU_THRESHOLD,
         max_tokens=max_tokens,
         max_seconds=max_seconds,
+        retrieval_only=retrieval_only,
     )
-    _print_eval(summary, settings, mode, iou_threshold, written)
+    _print_eval(summary, settings, mode, _IOU_THRESHOLD, written, retrieval_only=retrieval_only)
 
 
 def _load_questions(questions: Path):
@@ -523,6 +535,21 @@ def _load_questions(questions: Path):
         ui.render_error(f"no questions at {questions}")
         raise typer.Exit(code=1)
     return [Question.model_validate(item) for item in json.loads(questions.read_text())]
+
+
+def _eval_retrieval(question, retriever):
+    """One question's retriever-only outcome. No chat model and no graph are involved."""
+    from multimodal_doc_qa.eval.run import QuestionRun
+
+    return QuestionRun(
+        answer=None,
+        ranked=[doc.metadata["page_id"] for doc in retriever.invoke(question.text)],
+        pool=[],
+        rounds=0,
+        calls=0,
+        tokens=0,
+        stop_reason="",
+    )
 
 
 def _eval_one(question, settings: Settings, retriever):
@@ -544,21 +571,37 @@ def _eval_one(question, settings: Settings, retriever):
 
 
 def _print_eval(
-    summary: dict, settings: Settings, mode: str, iou_threshold: float, written: Path
+    summary: dict,
+    settings: Settings,
+    mode: str,
+    iou_threshold: float,
+    written: Path,
+    *,
+    retrieval_only: bool,
 ) -> None:
     ui.echo(f"[bold]{mode}[/] over {summary['n_done']}/{summary['n_questions']} questions")
-    ui.echo(
-        f"nDCG@{settings.top_k} {summary['ndcg_at_k']:.4f}"
-        f"  IoU@{iou_threshold:g} {summary['iou_at_threshold']:.4f}"
-        f"  (strict containment {summary['bbox_hit_rate']:.4f})"
-    )
-    ui.echo(
-        f"recall@{settings.top_k} {summary['recall_at_k']:.4f}"
-        f"  pool {summary['pool_recall']:.4f}"
-    )
+    if retrieval_only:
+        ui.echo(
+            f"nDCG@{settings.top_k} {summary['ndcg_at_k']:.4f}"
+            f"  recall@{settings.top_k} {summary['recall_at_k']:.4f}"
+        )
+    else:
+        ui.echo(
+            f"nDCG@{settings.top_k} {summary['ndcg_at_k']:.4f}"
+            f"  IoU@{iou_threshold:g} {summary['iou_at_threshold']:.4f}"
+            f"  (strict containment {summary['bbox_hit_rate']:.4f})"
+        )
+        ui.echo(
+            f"recall@{settings.top_k} {summary['recall_at_k']:.4f}"
+            f"  pool {summary['pool_recall']:.4f}"
+        )
     ui.echo(
         f"latency p50/p95 {summary['latency_p50_s']:.2f}s/{summary['latency_p95_s']:.2f}s"
-        f"  tokens {summary['tokens']}  stop_reasons {summary['stop_reasons']}"
+        + (
+            ""
+            if retrieval_only
+            else f"  tokens {summary['tokens']}  stop_reasons {summary['stop_reasons']}"
+        )
     )
     if summary["stopped_after"]:
         ui.echo(f"[yellow]cut short before {summary['stopped_after']}[/]")
@@ -752,17 +795,16 @@ def chat(
 
 
 @app.callback(invoke_without_command=True)
-def main(
-    ctx: typer.Context,
-    mode: str | None = typer.Option(None, "--mode", help=_MODE_HELP),
-) -> None:
+def main(ctx: typer.Context) -> None:
     """Load ``local.env``, then start the REPL when no subcommand is given.
 
-    ``--mode`` selects one of the nine retrieval arms. Omit it to use ``MDQ_MODE``.
+    The bare REPL takes its retrieval arm from ``MDQ_MODE``; ``chat --mode`` picks one
+    per invocation. A ``--mode`` here would be accepted and silently ignored for every
+    subcommand, which would make a mistyped arm look like the default one.
     """
     load_local_env(ENV_PATH)
     if ctx.invoked_subcommand is None:
-        _repl(_resolve_mode(mode, Settings()))
+        _repl(_resolve_mode(None, Settings()))
 
 
 if __name__ == "__main__":

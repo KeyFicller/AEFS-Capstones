@@ -511,3 +511,101 @@ def test_the_summary_averages_both_recalls(tmp_path: Path) -> None:
     summary = _read(out)[-1]
     assert summary["recall_at_k"] == 1.0
     assert summary["pool_recall"] == 1.0
+
+
+# ------------------------------------------------------------------ retrieval-only
+
+
+def test_retrieval_only_nulls_the_graph_side_fields(tmp_path: Path) -> None:
+    """No loop ran, so its fields are ``None``: a ``0`` would read as a loop that failed."""
+    out = tmp_path / "results.jsonl"
+
+    run_eval([_question()], lambda q: _run(), out_path=out, k=5, retrieval_only=True)
+
+    row = _read(out)[1]
+    assert row["ndcg_at_k"] == 1.0
+    assert row["recall_at_k"] == 1.0
+    for key in (
+        "answer",
+        "citations",
+        "pool",
+        "pool_recall",
+        "iou_at_threshold",
+        "bbox_hit_rate",
+        "rounds",
+        "calls",
+        "tokens",
+        "stop_reason",
+    ):
+        assert row[key] is None
+
+
+def test_retrieval_only_nulls_the_graph_side_summary(tmp_path: Path) -> None:
+    out = tmp_path / "results.jsonl"
+
+    summary = run_eval([_question()], lambda q: _run(), out_path=out, k=5, retrieval_only=True)
+
+    assert summary["ndcg_at_k"] == 1.0
+    assert summary["recall_at_k"] == 1.0
+    for key in ("pool_recall", "iou_at_threshold", "bbox_hit_rate", "tokens", "stop_reasons"):
+        assert summary[key] is None
+
+
+def test_the_run_header_says_which_mode_and_nulls_the_graph_provenance(tmp_path: Path) -> None:
+    out = tmp_path / "results.jsonl"
+
+    run_eval(
+        [_question()],
+        lambda q: _run(),
+        out_path=out,
+        settings=_settings(),
+        mode="maxsim",
+        k=5,
+        retrieval_only=True,
+    )
+
+    header = _read(out)[0]
+    assert header["retrieval_only"] is True
+    assert header["answerer_model"] is None
+    assert header["max_rounds"] is None
+    assert header["iou_threshold"] is None
+    # The retriever's own models are still recorded: those did run.
+    assert header["embedder_model"] == "vidore/colSmol-500M"
+
+
+def test_a_graph_run_is_marked_retrieval_only_false(tmp_path: Path) -> None:
+    out = tmp_path / "results.jsonl"
+
+    run_eval([_question()], lambda q: _run(), out_path=out, k=5)
+
+    assert _read(out)[0]["retrieval_only"] is False
+    assert _read(out)[1]["pool_recall"] == 1.0
+
+
+def test_retrieval_only_ignores_the_token_cap(tmp_path: Path) -> None:
+    """No chat models means no token spend; the cap must not truncate a retrieval run."""
+    out = tmp_path / "results.jsonl"
+
+    summary = run_eval(
+        [_question("q1"), _question("q2")],
+        lambda q: _run(),
+        out_path=out,
+        k=5,
+        retrieval_only=True,
+        max_tokens=1,
+    )
+
+    assert summary["n_done"] == 2
+
+
+def test_the_two_evidence_metrics_coincide_when_gold_has_no_box() -> None:
+    """Why the CLI pins the threshold instead of exposing it as a flag.
+
+    ``prepare_gold`` never writes a bbox, so a citation only has to land on the gold page.
+    Both metrics then reduce to that page test and the threshold cannot change either score.
+    """
+    gold = [_citation(1), _citation(2)]
+    cited = [_citation(1, _box(0.1, 0.1, 0.2, 0.2))]
+
+    for threshold in (0.1, 0.5, 1.0):
+        assert iou_at_threshold(cited, gold, threshold=threshold) == bbox_hit_rate(cited, gold) == 0.5
