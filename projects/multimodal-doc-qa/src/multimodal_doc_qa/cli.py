@@ -392,7 +392,7 @@ def _load_deps(
     settings: Settings, retriever: object, budget: Budget, *, enable_intent: bool = False
 ) -> GraphDeps:
     """Wire the graph's models. One chat model serves the three nodes and the answerer."""
-    from multimodal_doc_qa.agent.nodes import Followups, Subqueries, Unsupported
+    from multimodal_doc_qa.agent.nodes import Followups, Unsupported
     from multimodal_doc_qa.synth.answer import AnswerSynthesizer, build_chat_model
 
     chat = build_chat_model(settings)
@@ -428,7 +428,7 @@ def _load_deps(
 
     return GraphDeps(
         retriever=retriever,
-        planner_model=chat.with_structured_output(Subqueries),
+        augment_model=chat,
         assessor_model=chat.with_structured_output(Followups),
         verifier_model=chat.with_structured_output(Unsupported),
         synth=AnswerSynthesizer(settings),

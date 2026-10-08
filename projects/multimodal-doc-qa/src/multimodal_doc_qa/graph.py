@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from augment import build_augment_graph, parse_techniques
 from langchain_core.messages import BaseMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import MessagesState
@@ -19,6 +20,7 @@ from multimodal_doc_qa.agent import nodes
 from multimodal_doc_qa.config import Settings
 from multimodal_doc_qa.limits import Budget
 from multimodal_doc_qa.schemas import Answer, Document
+from multimodal_doc_qa.synth.answer import prompt_messages
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +28,7 @@ logger = logging.getLogger(__name__)
 class AskState(MessagesState):
     """One ask. ``messages`` is the conversation; the other fields are this loop only."""
 
-    subqueries: list[str]
+    queries: list[str]
     page_ids: list[str]
     rounds: int
     answer: dict | None
@@ -43,7 +45,7 @@ def initial_state(question: str, history: Sequence[BaseMessage] = ()) -> AskStat
     """
     return {
         "messages": [*history, HumanMessage(content=question)],
-        "subqueries": [],
+        "queries": [],
         "page_ids": [],
         "rounds": 0,
         "answer": None,
@@ -55,10 +57,14 @@ def initial_state(question: str, history: Sequence[BaseMessage] = ()) -> AskStat
 
 @dataclass
 class GraphDeps:
-    """Everything the nodes need that is not in state. Every model must be schema-bound."""
+    """Everything the nodes need that is not in state.
+
+    Every model must be schema-bound except ``augment_model``: the augment component binds
+    ``Queries`` itself, so it is handed a raw chat model.
+    """
 
     retriever: Any
-    planner_model: Any
+    augment_model: Any
     assessor_model: Any
     verifier_model: Any
     synth: Any
@@ -77,22 +83,16 @@ def build_graph(deps: GraphDeps, settings: Settings):
     """
     budget = deps.budget if deps.budget is not None else Budget.from_settings(settings)
 
-    def plan_node(state: AskState) -> dict:
-        if budget.exhausted():
-            return {"stop_reason": "budget_exhausted"}
-        budget.spend_call()
-        return {"subqueries": nodes.plan(deps.planner_model, state["messages"])}
-
     def retrieve_node(state: AskState) -> dict:
         # The entry hop bypasses the assess/verify guards, so the bound has to hold here too.
         if state["rounds"] >= settings.max_rounds:
             return {}
         pool = list(dict.fromkeys(state["page_ids"]))
-        for subquery in state["subqueries"]:
-            docs = list(deps.retriever.invoke(subquery))
+        for query in state["queries"]:
+            docs = list(deps.retriever.invoke(query))
             if deps.rerank is not None and len(docs) > 1 and not budget.exhausted():
                 budget.spend_call()
-                docs = deps.rerank(subquery, docs)
+                docs = deps.rerank(query, docs)
             for doc in docs:
                 # The retriever is injected; one that omits page_id must not abort the ask.
                 page = doc.metadata.get("page_id")
@@ -111,7 +111,7 @@ def build_graph(deps: GraphDeps, settings: Settings):
             deps.render_dir,
             deps.documents,
         )
-        return {"subqueries": followups}
+        return {"queries": followups}
 
     def synthesize_node(state: AskState) -> dict:
         if budget.exhausted():
@@ -137,7 +137,7 @@ def build_graph(deps: GraphDeps, settings: Settings):
             deps.render_dir,
             deps.documents,
         )
-        return {"unsupported": unsupported, "subqueries": unsupported}
+        return {"unsupported": unsupported, "queries": unsupported}
 
     def recover_node(state: AskState) -> dict:
         if not state["page_ids"]:
@@ -163,18 +163,18 @@ def build_graph(deps: GraphDeps, settings: Settings):
         return {"answer": answer.model_dump()}
 
     def after_intent(state: AskState) -> str:
-        return "chat" if state["intent"] == "chat" else "plan"
+        return "chat" if state["intent"] == "chat" else "augment"
 
     def after_retrieve(state: AskState) -> str:
         return "recover" if not state["page_ids"] else "assess"
 
-    def after_plan(state: AskState) -> str:
+    def after_augment(state: AskState) -> str:
         return END if state["stop_reason"] else "retrieve"
 
     def after_assess(state: AskState) -> str:
         if state["stop_reason"]:
             return END
-        if state["subqueries"] and state["rounds"] < settings.max_rounds:
+        if state["queries"] and state["rounds"] < settings.max_rounds:
             return "retrieve"
         return "synthesize"
 
@@ -191,7 +191,15 @@ def build_graph(deps: GraphDeps, settings: Settings):
         return END
 
     graph = StateGraph(AskState)
-    graph.add_node("plan", plan_node)
+    graph.add_node(
+        "augment",
+        build_augment_graph(
+            deps.augment_model,
+            techniques=parse_techniques(settings.augment),
+            budget=budget,
+            render=prompt_messages,
+        ),
+    )
     graph.add_node("retrieve", retrieve_node)
     graph.add_node("assess", assess_node)
     graph.add_node("synthesize", synthesize_node)
@@ -202,10 +210,12 @@ def build_graph(deps: GraphDeps, settings: Settings):
         graph.add_node("chat", chat_node)
         graph.add_edge("chat", END)
         graph.add_edge(START, "intent")
-        graph.add_conditional_edges("intent", after_intent, {"chat": "chat", "plan": "plan"})
+        graph.add_conditional_edges(
+            "intent", after_intent, {"chat": "chat", "augment": "augment"}
+        )
     else:
-        graph.add_edge(START, "plan")
-    graph.add_conditional_edges("plan", after_plan, {"retrieve": "retrieve", END: END})
+        graph.add_edge(START, "augment")
+    graph.add_conditional_edges("augment", after_augment, {"retrieve": "retrieve", END: END})
     graph.add_conditional_edges(
         "retrieve", after_retrieve, {"recover": "recover", "assess": "assess"}
     )
@@ -222,12 +232,19 @@ def build_graph(deps: GraphDeps, settings: Settings):
     return compiled.with_config({"callbacks": [budget.callback()], "run_name": "mdq-ask"})
 
 
+class _DiagramModel:
+    """A stand-in for the augment model. The component binds it at build time; nothing calls it."""
+
+    def with_structured_output(self, schema: object) -> "_DiagramModel":
+        return self
+
+
 if __name__ == "__main__":
     settings = Settings()
     png_path = Path(__file__).resolve().parents[2] / "graph.png"
     structure = GraphDeps(
         retriever=None,
-        planner_model=None,
+        augment_model=_DiagramModel(),
         assessor_model=None,
         verifier_model=None,
         synth=None,

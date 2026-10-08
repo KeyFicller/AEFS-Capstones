@@ -10,8 +10,8 @@ their jobs at all -- and nothing else in the suite would notice.
 
 from pathlib import Path
 
-from langchain_core.messages import AIMessage, HumanMessage
-from multimodal_doc_qa.agent.nodes import Followups, Subqueries, Unsupported, assess, plan, verify
+from langchain_core.messages import HumanMessage
+from multimodal_doc_qa.agent.nodes import Followups, Unsupported, assess, verify
 from multimodal_doc_qa.schemas import Answer, Citation
 from PIL import Image
 
@@ -61,31 +61,6 @@ def _images(messages: list) -> list[dict]:
 
 def _urls(messages: list[dict]) -> list[str]:
     return [p["image_url"]["url"] for p in _images(messages)]
-
-
-# ---------------------------------------------------------------------------- plan
-
-
-def test_plan_returns_the_subqueries_the_model_produced() -> None:
-    model = _StubModel(Subqueries(subqueries=["EMEA margin", "APAC margin"]))
-
-    assert plan(model, _ask("compare margins")) == ["EMEA margin", "APAC margin"]
-
-
-def test_plan_falls_back_to_the_question_when_nothing_is_decomposed() -> None:
-    """An empty plan would leave ``retrieve`` with nothing to search, stranding the ask."""
-    model = _StubModel(Subqueries(subqueries=[]))
-
-    assert plan(model, _ask("compare margins")) == ["compare margins"]
-
-
-def test_plan_asks_without_any_page() -> None:
-    model = _StubModel(Subqueries(subqueries=["x"]))
-
-    plan(model, _ask("compare margins"))
-
-    assert "compare margins" in _json_text(model.calls[0])
-    assert _images(model.calls[0]) == []
 
 
 # -------------------------------------------------------------------------- assess
@@ -202,22 +177,3 @@ def test_verify_reports_an_answer_that_cites_nothing(tmp_path: Path) -> None:
 
     assert result == ["answer cites no page"]
     assert model.calls == []
-
-
-def test_plan_passes_prior_turns_as_messages() -> None:
-    """History stays a message list. Nothing joins it into the question string."""
-    model = _StubModel(Subqueries(subqueries=["x"]))
-
-    plan(
-        model,
-        [
-            HumanMessage(content="earlier question"),
-            AIMessage(content="earlier answer"),
-            HumanMessage(content="follow up"),
-        ],
-    )
-
-    sent = model.calls[0]
-    assert [message.type for message in sent] == ["system", "human", "ai", "human"]
-    assert sent[-1].content == "follow up"
-    assert all("Earlier turns" not in str(message.content) for message in sent)

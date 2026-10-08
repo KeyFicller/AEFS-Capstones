@@ -1,4 +1,4 @@
-"""Agent nodes: ``plan``, ``assess``, ``verify``. Structured output only; a schema miss is a failure.
+"""Agent nodes: ``assess`` and ``verify``. Structured output only; a schema miss is a failure.
 
 ``assess`` and ``verify`` are shown the retrieved pages, not page ids.
 """
@@ -13,10 +13,6 @@ from pydantic import BaseModel, Field
 from multimodal_doc_qa.schemas import Answer, Document, page_id
 from multimodal_doc_qa.synth.answer import build_page_blocks, prompt_messages, question_text
 
-_PLAN_SYS = (
-    "Decompose the question into the minimal independent sub-queries needed to answer it. "
-    "Each sub-query must stand alone; do not restate the whole question."
-)
 _ASSESS_SYS = (
     "You are shown the pages already retrieved for a question. A page is either an image "
     "or a text passage. List only the follow-up sub-queries still needed to answer it; "
@@ -26,12 +22,6 @@ _VERIFY_SYS = (
     "You are shown the pages an answer cites. List every claim in the answer that those "
     "pages do not support; leave the list empty if all claims are supported."
 )
-
-
-class Subqueries(BaseModel):
-    """``plan`` output: sub-queries that together answer the question."""
-
-    subqueries: list[str] = Field(default_factory=list)
 
 
 class Followups(BaseModel):
@@ -44,12 +34,6 @@ class Unsupported(BaseModel):
     """``verify`` output: claims the cited pages do not support; empty means supported."""
 
     unsupported: list[str] = Field(default_factory=list)
-
-
-def plan(model: Any, messages: Sequence[BaseMessage]) -> list[str]:
-    """Sub-queries for the latest human message. Falls back to that message when the model returns none."""
-    result = model.invoke(prompt_messages(_PLAN_SYS, messages))
-    return list(result.subqueries) or [question_text(messages)]
 
 
 def assess(

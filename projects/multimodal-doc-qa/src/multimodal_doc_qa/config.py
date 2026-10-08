@@ -75,6 +75,7 @@ class Settings(BaseSettings):
     device: str = _device()
     dtype: str = "float16"
     mode: str = "maxsim"
+    augment: str = "rewrite"
     abstracts: bool = False
     rerank: bool = False
     top_k: int = 5

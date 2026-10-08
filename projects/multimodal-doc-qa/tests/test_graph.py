@@ -11,7 +11,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from augment import Queries
 from langchain_core.documents import Document
+from langchain_core.messages import AIMessage, HumanMessage
 from multimodal_doc_qa.config import Settings
 from multimodal_doc_qa.graph import GraphDeps, build_graph, initial_state
 from multimodal_doc_qa.limits import Budget
@@ -36,18 +38,37 @@ class _StubModel:
 
     def __init__(
         self,
-        subqueries: tuple[str, ...] = ("sub",),
+        queries: tuple[str, ...] = ("sub",),
         followups: tuple[str, ...] = (),
         unsupported: tuple[str, ...] = (),
     ) -> None:
-        self.subqueries = list(subqueries)
+        self.queries = list(queries)
         self.followups = list(followups)
         self.unsupported = list(unsupported)
         self.calls: list[list[dict]] = []
 
+    def with_structured_output(self, schema: object) -> "_StubModel":
+        """The augment component binds its own schema; this stub is already shaped like it."""
+        return self
+
     def invoke(self, messages: list[dict]) -> "_StubModel":
         self.calls.append(messages)
         return self
+
+
+class _QueuedModel:
+    """One queued ``Queries`` per call, so a technique can be told apart from its neighbours."""
+
+    def __init__(self, *replies: tuple[str, ...]) -> None:
+        self.replies = [list(reply) for reply in replies]
+        self.calls: list[list] = []
+
+    def with_structured_output(self, schema: object) -> "_QueuedModel":
+        return self
+
+    def invoke(self, messages: list) -> Queries:
+        self.calls.append(messages)
+        return Queries(queries=self.replies.pop(0))
 
 
 class _FakeSynth:
@@ -89,10 +110,11 @@ def _deps(
     synth: _FakeSynth | None = None,
     budget: Budget | None = None,
     classifier: object = None,
+    augment_model: object = None,
 ) -> GraphDeps:
     return GraphDeps(
         retriever=retriever,
-        planner_model=model,
+        augment_model=augment_model if augment_model is not None else model,
         assessor_model=model,
         verifier_model=model,
         synth=synth or _FakeSynth(),
@@ -146,14 +168,53 @@ def test_the_answer_reaches_state_as_a_round_trippable_dict(tmp_path: Path) -> N
     assert Answer.model_validate(out["answer"]).text == "16.8%"
 
 
-def test_retrieval_is_queried_with_every_subquery(tmp_path: Path) -> None:
+def test_retrieval_is_queried_with_every_query_augment_contributed(tmp_path: Path) -> None:
     _pages(tmp_path, "doc000/p000")
     retriever = _Retriever("doc000/p000")
-    model = _StubModel(subqueries=("margin", "coverage"))
+    augmenter = _QueuedModel(("margin",), ("coverage", "revenue"))
 
-    _run(tmp_path, _deps(tmp_path, retriever, model))
+    _run(
+        tmp_path,
+        _deps(tmp_path, retriever, _StubModel(), augment_model=augmenter),
+        augment="rewrite,decompose",
+    )
 
-    assert retriever.queries == ["margin", "coverage"]
+    assert retriever.queries == ["margin", "coverage", "revenue"]
+
+
+def test_the_rewriter_is_given_the_conversation_as_messages(tmp_path: Path) -> None:
+    """A follow-up turn is unresolved on its own, so the history has to reach the rewriter."""
+    _pages(tmp_path, "doc000/p000")
+    retriever = _Retriever("doc000/p000")
+    augmenter = _QueuedModel(("Who founded Gestalt psychology?",))
+    deps = _deps(tmp_path, retriever, _StubModel(), augment_model=augmenter)
+
+    build_graph(deps, Settings(augment="rewrite")).invoke(
+        initial_state(
+            "And who founded it?",
+            [
+                HumanMessage(content="Where was Gestalt psychology conceived?"),
+                AIMessage(content="Germany."),
+            ],
+        )
+    )
+
+    sent = augmenter.calls[0]
+    assert [message.type for message in sent] == ["system", "human", "ai", "human"]
+    assert sent[-1].content == "And who founded it?"
+    assert retriever.queries == ["Who founded Gestalt psychology?"]
+
+
+def test_a_technique_outside_mdq_augment_is_never_entered(tmp_path: Path) -> None:
+    _pages(tmp_path, "doc000/p000")
+    retriever = _Retriever("doc000/p000")
+    augmenter = _QueuedModel(("base",), ("paraphrase",))
+    deps = _deps(tmp_path, retriever, _StubModel(), augment_model=augmenter)
+
+    _run(tmp_path, deps, augment="rewrite,multiquery")
+
+    assert len(augmenter.calls) == 2, "decompose is not in the set and must not be entered"
+    assert retriever.queries == ["base", "paraphrase"]
 
 
 # ------------------------------------------------------------------ empty retrieval
@@ -281,7 +342,7 @@ def _capped(**caps: object) -> Budget:
 
 
 def test_a_spent_budget_never_reaches_the_first_model_call(tmp_path: Path) -> None:
-    """The plan is the first thing that costs money, so it is the first thing to refuse."""
+    """The augment entry is the first thing that costs money, so it is the first thing to refuse."""
     _pages(tmp_path, "doc000/p000")
     retriever = _Retriever("doc000/p000")
     model = _StubModel()
@@ -325,7 +386,7 @@ def test_no_model_call_happens_after_the_call_cap_is_spent(tmp_path: Path) -> No
 
 def test_exhaustion_keeps_the_answer_it_already_paid_for(tmp_path: Path) -> None:
     """A partial answer plus a reason beats nothing plus a reason: three calls buy
-    ``plan`` + ``assess`` + ``synthesize``, and the fourth thing the run wants is ``verify``."""
+    ``augment`` + ``assess`` + ``synthesize``, and the fourth thing the run wants is ``verify``."""
     _pages(tmp_path, "doc000/p000")
 
     out = _run(
@@ -353,7 +414,7 @@ def test_budget_exhaustion_is_not_reported_as_a_retrieval_failure(tmp_path: Path
 def test_the_worst_case_ask_costs_the_default_call_cap(tmp_path: Path) -> None:
     """The number ``max_ask_calls`` exists to cover, measured rather than reasoned about.
 
-    Taking the ``verify`` loop-back every round runs ``plan`` then three full rounds of
+    Taking the ``verify`` loop-back every round runs ``augment`` then three full rounds of
     ``assess`` + ``synthesize`` + ``verify``: ``1 + 3 * 3`` = 10. The ``assess`` loop-back
     is cheaper (6) because once it stops looping the run synthesizes once. Both are pinned
     so that a change to the routing shows up as a call-count change, which is what the cap
@@ -392,7 +453,7 @@ def test_the_worst_case_ask_costs_the_default_call_cap(tmp_path: Path) -> None:
 def test_an_uncapped_run_finishes_normally(tmp_path: Path) -> None:
     """The gate must not turn a healthy run into a truncated one.
 
-    A single-hop ask costs four calls -- ``plan`` + ``assess`` + ``synthesize`` + ``verify``
+    A single-hop ask costs four calls -- ``augment`` + ``assess`` + ``synthesize`` + ``verify``
     -- which is the floor the call cap has to clear before it can be useful.
     """
     _pages(tmp_path, "doc000/p000")
@@ -490,7 +551,7 @@ def test_a_work_turn_enters_the_pipeline(tmp_path: Path) -> None:
 
 
 def test_without_a_classifier_the_gate_is_absent(tmp_path: Path) -> None:
-    """Eval passes no classifier, so the topology must stay plan-first."""
+    """Eval passes no classifier, so the topology must stay augment-first."""
     _pages(tmp_path, "doc000/p000")
 
     out = _run(tmp_path, _deps(tmp_path, _Retriever("doc000/p000"), _StubModel()))
