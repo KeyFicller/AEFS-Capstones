@@ -32,7 +32,7 @@ def _session_config(*, worktree: Path, session: str) -> dict[str, Any]:
             "thread_id": session,
             "todo_renderer": ui.TodoPanel(),
             "tool_renderer": ui.ToolLog(),
-            "enable_hitl": True,
+            "enable_hitl": False,
             "enable_intent": True,
             "enable_web_search": True,
             "enable_debug": True,

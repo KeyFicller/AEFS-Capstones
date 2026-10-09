@@ -34,6 +34,9 @@ SYSTEM_PROMPTS = {
     (`breakpoint set -f main.cpp -l 42`, `run`, `frame variable`, `thread backtrace`,
     `continue`, ...); `run`/`continue` return when the program stops or the timeout
     interrupts them, and the session stays usable either way.
+    `debug_start` on a target that is already open keeps the session (breakpoints and
+    the stopped program survive), so a later turn can keep inspecting it. Do not call
+    `debug_stop` until the debugging is finished.
     """,
 }
 

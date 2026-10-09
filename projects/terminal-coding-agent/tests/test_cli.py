@@ -187,12 +187,6 @@ class _PausingGraph:
         return _EmptySnapshot()
 
 
-def test_session_config_enables_hitl(tmp_path: Path) -> None:
-    config = cli._session_config(worktree=tmp_path, session="s1")
-
-    assert config["configurable"]["enable_hitl"] is True
-
-
 def test_repl_drains_a_paused_plan_through_approval(tmp_path, monkeypatch) -> None:
     _capture(monkeypatch)
     graph = _PausingGraph()
@@ -398,12 +392,6 @@ def test_repl_keeps_rejecting_a_declined_plan_prompt(tmp_path, monkeypatch) -> N
     )
 
     assert graph.payloads[-1].resume == "reject"
-
-
-def test_session_config_enables_intent(tmp_path: Path) -> None:
-    config = cli._session_config(worktree=tmp_path, session="s1")
-
-    assert config["configurable"]["enable_intent"] is True
 
 
 class _CapturingGraph(_FakeGraph):

@@ -35,11 +35,27 @@ class Session:
     def __init__(self) -> None:
         self._debugger: lldb.SBDebugger | None = None
         self._target: lldb.SBTarget | None = None
+        self._binary: str | None = None
+        self._args: list = []
 
     def start(self, binary: str, args: list) -> dict:
+        # Same target and args: keep the session.
+        if self._target is not None and binary == self._binary and list(args) == self._args:
+            return {
+                "ok": True,
+                "output": f"target: {binary} (session kept)",
+                "stop_reason": None,
+            }
         self.stop()
         debugger = lldb.SBDebugger.Create()
         debugger.SetAsync(False)
+        # lldb asks before killing a running process ("kill it and restart?: [Y/n]") and
+        # reads the answer from stdin — which is our JSON pipe, so nobody answers and
+        # HandleCommand blocks forever. The watchdog cannot help: the block is in lldb's
+        # input reader, not in the process run loop. A re-`run` on a kept session hits this.
+        debugger.GetCommandInterpreter().HandleCommand(
+            "settings set auto-confirm true", lldb.SBCommandReturnObject()
+        )
         target = debugger.CreateTarget(binary)
         if not target.IsValid():
             return {
@@ -49,6 +65,8 @@ class Session:
             }
         self._debugger = debugger
         self._target = target
+        self._binary = binary
+        self._args = list(args)
         if args:
             result = lldb.SBCommandReturnObject()
             debugger.GetCommandInterpreter().HandleCommand(
@@ -92,6 +110,8 @@ class Session:
             lldb.SBDebugger.Destroy(self._debugger)
         self._debugger = None
         self._target = None
+        self._binary = None
+        self._args = []
         return {"ok": True, "output": "", "stop_reason": None}
 
 

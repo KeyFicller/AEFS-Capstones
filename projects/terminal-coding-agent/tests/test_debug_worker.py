@@ -2,6 +2,7 @@
 
 import json
 import os
+import select
 import shutil
 import subprocess
 from pathlib import Path
@@ -43,10 +44,13 @@ class RawWorker:
             start_new_session=True,
         )
 
-    def send(self, payload: dict) -> dict:
+    def send(self, payload: dict, *, timeout: float = 30.0) -> dict:
         assert self.proc.stdin is not None and self.proc.stdout is not None
         self.proc.stdin.write((json.dumps(payload) + "\n").encode())
         self.proc.stdin.flush()
+        # Without this a blocked worker hangs the whole test session instead of failing.
+        if not select.select([self.proc.stdout], [], [], timeout)[0]:
+            raise TimeoutError(f"worker did not answer within {timeout}s")
         return json.loads(self.proc.stdout.readline())
 
     def kill(self) -> None:
@@ -89,5 +93,59 @@ def test_unknown_op_does_not_kill_the_worker(tmp_path: Path) -> None:
         assert worker.send({"op": "bogus"})["ok"] is False
         # still answering a second request (no session yet, but the worker is alive)
         assert "no session" in worker.send({"op": "cmd", "command": "help"})["output"]
+    finally:
+        worker.kill()
+
+
+def test_a_second_start_on_the_same_target_keeps_the_session(tmp_path: Path) -> None:
+    (tmp_path / "bug.cc").write_text(SOURCE)
+    subprocess.run(["clang++", "-g", "-O0", "-o", "bug", "bug.cc"], cwd=tmp_path, check=True)
+    worker = RawWorker(tmp_path)
+    try:
+        worker.send({"op": "start", "binary": str(tmp_path / "bug"), "args": []})
+        worker.send({"op": "cmd", "command": "breakpoint set -f bug.cc -l 3"})
+
+        again = worker.send({"op": "start", "binary": str(tmp_path / "bug"), "args": []})
+
+        assert "session kept" in again["output"]
+        # The breakpoint survives, so the second start did not rebuild the target.
+        assert "bug.cc:3" in worker.send({"op": "cmd", "command": "breakpoint list"})["output"]
+    finally:
+        worker.kill()
+
+
+def test_a_second_run_in_a_kept_session_does_not_hang(tmp_path: Path) -> None:
+    (tmp_path / "bug.cc").write_text(SOURCE)
+    subprocess.run(["clang++", "-g", "-O0", "-o", "bug", "bug.cc"], cwd=tmp_path, check=True)
+    worker = RawWorker(tmp_path)
+    try:
+        worker.send({"op": "start", "binary": str(tmp_path / "bug"), "args": []})
+        worker.send({"op": "cmd", "command": "breakpoint set -f bug.cc -l 2"})
+        first = worker.send({"op": "cmd", "command": "run", "timeout": 10})
+        assert first["stop_reason"] == "breakpoint"
+
+        # lldb asks "kill it and restart?" here and reads the answer from stdin; unanswered
+        # it blocks the worker forever, which is what killed the session in the smoke run.
+        second = worker.send({"op": "cmd", "command": "run", "timeout": 10}, timeout=30)
+
+        assert second["ok"] is True
+        assert second["stop_reason"] == "breakpoint"
+    finally:
+        worker.kill()
+
+
+def test_changing_the_run_args_rebuilds_the_session(tmp_path: Path) -> None:
+    (tmp_path / "bug.cc").write_text(SOURCE)
+    subprocess.run(["clang++", "-g", "-O0", "-o", "bug", "bug.cc"], cwd=tmp_path, check=True)
+    worker = RawWorker(tmp_path)
+    try:
+        worker.send({"op": "start", "binary": str(tmp_path / "bug"), "args": []})
+        worker.send({"op": "cmd", "command": "breakpoint set -f bug.cc -l 3"})
+
+        again = worker.send({"op": "start", "binary": str(tmp_path / "bug"), "args": ["x"]})
+
+        assert "session kept" not in again["output"]
+        # A real rebuild: the old breakpoint is gone.
+        assert "bug.cc:3" not in worker.send({"op": "cmd", "command": "breakpoint list"})["output"]
     finally:
         worker.kill()
