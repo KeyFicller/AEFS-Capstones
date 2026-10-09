@@ -6,6 +6,7 @@ from pathlib import Path
 from langchain_core.tools import BaseTool, tool
 
 from terminal_coding_agent.config import SHELL_TIMEOUT_SECONDS
+from terminal_coding_agent.tools.display import exit_code_and_output, tool_output
 from terminal_coding_agent.tools.truncate import truncate
 
 
@@ -47,6 +48,7 @@ def _kill_group(process: subprocess.Popen) -> None:
 
 def build_run_shell(worktree: Path) -> BaseTool:
     @tool
+    @tool_output(lambda params, result: exit_code_and_output(result, line_count=True))
     def run_shell(command: str, timeout_sec: int | None = None) -> str:
         """Run a shell command in the worktree and return the output.
 

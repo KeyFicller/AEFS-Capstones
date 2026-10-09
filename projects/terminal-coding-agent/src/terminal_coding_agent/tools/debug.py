@@ -20,6 +20,7 @@ from pathlib import Path
 from langchain_core.tools import BaseTool, tool
 
 from terminal_coding_agent.config import DEBUG_START_TIMEOUT_SECONDS, DEBUG_TIMEOUT_SECONDS
+from terminal_coding_agent.tools.display import tool_output
 from terminal_coding_agent.tools.path import resolve_in_worktree
 from terminal_coding_agent.tools.truncate import truncate
 
@@ -113,16 +114,57 @@ def _render(response: dict) -> str:
     return truncate(text)
 
 
+def _source_window(worktree: Path, location: dict, *, radius: int = 1) -> str:
+    """The stopped-at line plus `radius` around it, `>` marking the current one."""
+    resolved = resolve_in_worktree(worktree, location["file"])
+    if isinstance(resolved, str):
+        return ""
+    try:
+        source = resolved.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    current = location["line"]
+    first, last = max(1, current - radius), min(len(source), current + radius)
+    return "\n".join(
+        f"{'>' if number == current else ' '} {number:>3}  {source[number - 1]}"
+        for number in range(first, last + 1)
+    )
+
+
 def build_debug(worktree: Path) -> list[BaseTool]:
     worker = Worker(worktree)
+    # The raw response of the last command, for the display hook: the model-facing
+    # string has already rendered `stop_location` away, and one worker runs one
+    # command at a time, so a single slot is enough.
+    last: dict = {}
 
     def send(payload: dict, *, timeout: float) -> str:
         try:
             worker.start()
             response = worker.request(payload, timeout=timeout)
         except (RuntimeError, TimeoutError, OSError) as exc:
+            last.clear()
             return f"Error: {exc}"
+        last.clear()
+        last.update(response)
         return _render(response)
+
+    def _display_cmd(params: dict, result: str) -> tuple[str, str]:
+        summary = ""
+        blocks: list[str] = []
+        reason = last.get("stop_reason")
+        location = last.get("stop_location")
+        if reason:
+            # `_render` repeats the stop reason for the model; in the log it is either
+            # duplicated by the summary below or stale from an earlier stop.
+            result = result.replace(f"\nstop_reason: {reason}", "")
+        if location:
+            summary = f"stop {reason} · {location['file']}:{location['line']}"
+            window = _source_window(worktree, location)
+            if window:
+                blocks.append(f"```c\n{window}\n```")
+        blocks.append(f"```text\n{result}\n```")
+        return summary, "\n\n".join(blocks)
 
     @tool
     def debug_start(binary: str, run_args: list[str] | None = None) -> str:
@@ -144,6 +186,7 @@ def build_debug(worktree: Path) -> list[BaseTool]:
         )
 
     @tool
+    @tool_output(_display_cmd)
     def debug_cmd(command: str, timeout_sec: int | None = None) -> str:
         """Run one lldb command in the live session.
 

@@ -1,6 +1,5 @@
 """rich renderers for the interactive CLI. The only module that writes to the console."""
 
-import re
 import sys
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager, suppress
@@ -8,10 +7,10 @@ from typing import Any
 
 from rich.console import Console, Group, RenderableType
 from rich.live import Live
+from rich.markdown import Markdown
 from rich.markup import escape
 from rich.panel import Panel
 from rich.spinner import Spinner
-from rich.syntax import Syntax
 from rich.text import Text
 
 # Imported for its side effect: it switches input() from the tty's canonical mode
@@ -31,23 +30,8 @@ PLAIN_APPROVAL_PROMPT = "approve? [y/n] › "
 QUESTION_PROMPT = "\001\033[1;36m\002answer › \001\033[0m\002"
 PLAIN_QUESTION_PROMPT = "answer › "
 
-# Tool log: which argument identifies the call, and what its result counts as.
+# Tool output: the framework prints this marker, the tool supplies the rest.
 TOOL_MARKER = "⚙"
-MAX_TARGET_CHARS = 60
-_TOOL_TARGET_ARG = {
-    "read_file": "path",
-    "edit_file": "path",
-    "tree_sitter_symbols": "path",
-    "ripgrep": "pattern",
-    "run_shell": "command",
-    "git": "git_args",
-}
-_TOOL_RESULT_UNIT = {
-    "read_file": "lines",
-    "ripgrep": "hits",
-    "tree_sitter_symbols": "symbols",
-}
-_EXIT_CODE_TOOLS = frozenset({"run_shell", "git"})
 
 WORKING_MESSAGE = "working…"
 TODO_TITLE = "Tasks"
@@ -127,65 +111,6 @@ class TodoPanel:
                 self._live = None
 
 
-def _tool_target(name: str, args: Mapping[str, Any]) -> str:
-    """The one argument worth showing: the file, the pattern, the command."""
-    value = args.get(_TOOL_TARGET_ARG.get(name, ""))
-    if isinstance(value, (list, tuple)):
-        value = " ".join(str(part) for part in value)
-    if value is None:
-        return ""
-    text = str(value).replace("\n", " ⏎ ")
-    return text if len(text) <= MAX_TARGET_CHARS else text[: MAX_TARGET_CHARS - 1] + "…"
-
-
-def _tool_outcome(name: str, result: str) -> str:
-    """Compact descriptor of what a tool produced: exit code, hit count, diff size."""
-    text = result.strip()
-    if not text:
-        return "no hits" if name == "ripgrep" else "no output"
-    if text.startswith("Error:"):
-        return text.splitlines()[0]
-    if name == "edit_file":
-        lines = text.splitlines()
-        # Diff headers always carry a space after the marker; `+++foo` is content.
-        added = sum(1 for line in lines if line.startswith("+") and not line.startswith("+++ "))
-        removed = sum(1 for line in lines if line.startswith("-") and not line.startswith("--- "))
-        return f"+{added} -{removed}"
-    if name in _EXIT_CODE_TOOLS:
-        match = re.match(r"exit_code:\s*(-?\d+)", text)
-        return f"exit {match.group(1)}" if match else "done"
-    count = len(text.splitlines())
-    unit = _TOOL_RESULT_UNIT.get(name, "lines")
-    if count == 1 and unit.endswith("s"):
-        unit = unit[:-1]
-    return f"{count} {unit}"
-
-
-class ToolLog:
-    """`tool_renderer`: one line per executed tool call, so a turn is not a black box.
-
-    Prints while the Tasks panel is live, so the lines scroll above it and the panel
-    stays pinned at the bottom. `edit_file` already returns a unified diff, which is
-    colourised here rather than inside the tool — tools stay free of presentation.
-    """
-
-    def __init__(self, console: Console | None = None) -> None:
-        self._console = console if console is not None else CONSOLE
-
-    def __call__(self, name: str, args: Mapping[str, Any], result: str) -> None:
-        target = _tool_target(name, args)
-        # Target and outcome are model/tool text: a path like `foo[bar].py` would be read
-        # as markup and raise MarkupError, so they are escaped, never interpolated raw.
-        head = f"[cyan]{escape(name)}[/]" + (f"  {escape(target)}" if target else "")
-        outcome = escape(_tool_outcome(name, result))
-        self._console.print(f"[dim]{TOOL_MARKER}[/] {head}  [dim]({outcome})[/]")
-        if name == "edit_file" and result.strip() and not result.lstrip().startswith("Error:"):
-            # background_color="default" keeps each line at its natural width. The
-            # default theme background pads lines to 80 columns, which wraps on a
-            # narrower terminal and desyncs the live panel's height accounting.
-            self._console.print(Syntax(result, "diff", background_color="default", word_wrap=True))
-
-
 def ask_approval(payload: Mapping[str, Any], *, show_plan: bool = True) -> str:
     """Show the plan and read a decision. Distinct prompt from `ask()` on purpose.
 
@@ -242,6 +167,33 @@ def ask_question(payload: Mapping[str, Any]) -> dict[str, Any]:
         if answer.isdecimal() and 1 <= int(answer) <= len(options):
             return {"answer": options[int(answer) - 1], "cancelled": False}
         return {"answer": answer, "cancelled": False}
+
+
+def render_tool_call(
+    *,
+    name: str,
+    target: str,
+    summary: str = "",
+    body: str = "",
+    error: str | None = None,
+    header_only: bool = False,
+) -> None:
+    """One tool call: a single `⚙ name target (summary)` header, then the body.
+
+    The header is always one line — the summary rides in its parentheses. `header_only`
+    is the `simple` level, where the body (the detail) is left out; `detail` prints it,
+    as markdown the tool chose, rendering exactly like an agent reply. An `error` result
+    is printed red instead of the header's parentheses. Name, target, summary and error
+    are tool text, so they are escaped, never interpolated as markup.
+    """
+    head = f"[bold cyan]{escape(name)}[/]" + (f"  {escape(target)}" if target else "")
+    if error is not None:
+        CONSOLE.print(f"[dim]{TOOL_MARKER}[/] {head}  [red]{escape(error)}[/]")
+        return
+    tail = f"  [dim]({escape(summary)})[/]" if summary else ""
+    CONSOLE.print(f"[dim]{TOOL_MARKER}[/] {head}{tail}")
+    if not header_only and body.strip():
+        CONSOLE.print(Markdown(body))
 
 
 def render_budget(state: Mapping[str, Any]) -> None:

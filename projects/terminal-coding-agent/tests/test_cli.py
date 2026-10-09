@@ -4,10 +4,12 @@ from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from langgraph.types import Command
-from repl_console.commands import CommandOutcome, PromptCommand
+from repl_console.commands import CommandContext, CommandOutcome, PromptCommand
 from rich.console import Console
 from terminal_coding_agent import cli, ui
+from terminal_coding_agent.tools import display
 
 
 def _capture(monkeypatch) -> io.StringIO:
@@ -16,6 +18,37 @@ def _capture(monkeypatch) -> io.StringIO:
         ui, "CONSOLE", Console(file=stream, width=100, no_color=True, force_terminal=False)
     )
     return stream
+
+
+@pytest.fixture(autouse=True)
+def _restore_display_level(monkeypatch) -> None:
+    """`main` sets the process-wide tool-output level; keep it out of the other test files."""
+    monkeypatch.setattr(display, "LEVEL", display.LEVEL)
+
+
+def test_tool_output_command_sets_the_level(monkeypatch) -> None:
+    monkeypatch.setattr(display, "LEVEL", "detail")
+    command = cli.ToolOutputCommand()
+    ctx = CommandContext(root=Path("/tmp"))
+
+    assert command.run(ctx, "").message.startswith("tool output detail")
+    assert display.LEVEL == "detail", "a bare invocation only reports"
+
+    assert command.run(ctx, " simple ").message == "tool output simple"
+    assert display.LEVEL == "simple"
+
+    assert command.run(ctx, "off").message == "tool output off"
+    assert display.LEVEL == "off"
+
+
+def test_tool_output_command_ignores_a_bad_argument(monkeypatch) -> None:
+    monkeypatch.setattr(display, "LEVEL", "off")
+    command = cli.ToolOutputCommand()
+
+    message = command.run(CommandContext(root=Path("/tmp")), "on").message
+
+    assert "tool output off" in message and "usage" in message, "the old on/off words are gone"
+    assert display.LEVEL == "off"
 
 
 def _script(monkeypatch, lines: list[str]) -> None:
@@ -75,7 +108,6 @@ def test_session_config_injects_the_renderers(tmp_path: Path, monkeypatch) -> No
     assert config["configurable"]["thread_id"] == "s1"
     assert config["configurable"]["worktree"] == str(tmp_path)
     assert isinstance(config["configurable"]["todo_renderer"], ui.TodoPanel)
-    assert isinstance(config["configurable"]["tool_renderer"], ui.ToolLog)
 
 
 def test_repl_opens_a_todo_region_around_each_turn(tmp_path: Path, monkeypatch) -> None:

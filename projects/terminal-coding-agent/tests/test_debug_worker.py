@@ -149,3 +149,27 @@ def test_changing_the_run_args_rebuilds_the_session(tmp_path: Path) -> None:
         assert "bug.cc:3" not in worker.send({"op": "cmd", "command": "breakpoint list"})["output"]
     finally:
         worker.kill()
+
+
+def test_a_new_stop_reports_its_location(tmp_path: Path) -> None:
+    (tmp_path / "bug.cc").write_text(SOURCE)
+    subprocess.run(["clang++", "-g", "-O0", "-o", "bug", "bug.cc"], cwd=tmp_path, check=True)
+    body_line = next(
+        number for number, text in enumerate(SOURCE.splitlines(), start=1) if "int s = 0" in text
+    )
+    worker = RawWorker(tmp_path)
+    try:
+        worker.send({"op": "start", "binary": str(tmp_path / "bug"), "args": []})
+        worker.send({"op": "cmd", "command": f"breakpoint set -f bug.cc -l {body_line}"})
+        # A breakpoint only arms the debugger; nothing has stopped yet.
+        assert worker.send({"op": "cmd", "command": "breakpoint list"})["stop_location"] is None
+
+        stopped = worker.send({"op": "cmd", "command": "run", "timeout": 10})
+        assert stopped["stop_location"] == {"file": "bug.cc", "line": body_line}
+        # Inspecting the frame does not move the stop point: no location, or every
+        # `frame variable` would re-print the source line.
+        assert worker.send({"op": "cmd", "command": "frame variable"})["stop_location"] is None
+        # The same stop point again (a second run) is not news either.
+        assert worker.send({"op": "cmd", "command": "run", "timeout": 10})["stop_location"] is None
+    finally:
+        worker.kill()

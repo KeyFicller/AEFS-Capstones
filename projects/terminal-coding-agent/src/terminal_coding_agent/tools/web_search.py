@@ -9,6 +9,7 @@ from typing import Any
 from langchain_core.tools import BaseTool, tool
 
 from terminal_coding_agent.config import WEB_SEARCH_MAX_RESULTS, WEB_SEARCH_TIMEOUT_SECONDS
+from terminal_coding_agent.tools.display import tool_output
 from terminal_coding_agent.tools.truncate import truncate
 
 
@@ -48,7 +49,15 @@ def _format(results: list[dict[str, Any]]) -> str:
 
 
 def build_web_search() -> BaseTool:
+    def _display(params: dict, result: str) -> tuple[str, str]:
+        if result.startswith("No results"):
+            return "no results", f"```text\n{result}\n```"
+        count = sum(1 for line in result.splitlines() if line[:1].isdigit() and line[1:2] == ".")
+        unit = "result" if count == 1 else "results"
+        return f"{count} {unit}", f"```text\n{result}\n```"
+
     @tool
+    @tool_output(_display)
     def web_search(query: str, max_results: int = 5) -> str:
         """Search the public web with DuckDuckGo and return titles, URLs and snippets.
 

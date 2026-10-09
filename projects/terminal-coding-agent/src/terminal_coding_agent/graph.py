@@ -193,7 +193,6 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
     # Plain function node (not a nested StateGraph) so replace_todos does not fire twice.
     enable_intent = bool(configurable.get("enable_intent"))
     make_plan = build_planner(models, with_system_prompt=enable_intent)
-    tool_renderer = configurable.get("tool_renderer")
     enable_debug = bool(configurable.get("enable_debug"))
     execute = build_execute_nodes(
         models,
@@ -204,7 +203,6 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
         ),
         worktree=worktree,
         sequence_events=sequence_events,
-        tool_renderer=tool_renderer if callable(tool_renderer) else None,
         enable_debug=enable_debug,
         enable_hitl=bool(configurable.get("enable_hitl")),
     )

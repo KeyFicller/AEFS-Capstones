@@ -1,7 +1,7 @@
 """Execute stage: start_task -> run_agent -> end_task (parent-graph nodes)."""
 
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -29,7 +29,6 @@ from terminal_coding_agent.middleware import (
     ObservabilityMiddleware,
     SafetyMiddleware,
     SequenceMiddleware,
-    ToolLogMiddleware,
 )
 from terminal_coding_agent.models import SYSTEM_PROMPTS, AgentModels
 from terminal_coding_agent.recover import project_evidence
@@ -52,7 +51,6 @@ def build_execute_nodes(
     *,
     worktree: Path,
     sequence_events: list | None = None,
-    tool_renderer: Callable[[str, Mapping[str, Any], str], None] | None = None,
     enable_debug: bool = False,
     enable_hitl: bool = False,
 ) -> dict[str, Callable[[CodingAgentState], dict[str, Any]]]:
@@ -113,9 +111,6 @@ def build_execute_nodes(
             middleware.append(
                 SequenceMiddleware(sequence_events, description=todo_list[task_index].description)
             )
-        if tool_renderer is not None:
-            # Last = innermost, so a guard that short-circuits the call is not logged as output.
-            middleware.append(ToolLogMiddleware(tool_renderer))
 
         base_prompt = SYSTEM_PROMPTS["executor"]
         if enable_debug:
@@ -174,9 +169,6 @@ def build_execute_nodes(
             ObservabilityMiddleware(resolve_model_name(models.executor)),
             SafetyMiddleware(),
         ]
-        if tool_renderer is not None:
-            # Last = innermost, so a guard that short-circuits the call is not logged as output.
-            middleware.append(ToolLogMiddleware(tool_renderer))
 
         agent = create_agent(
             model=models.executor,

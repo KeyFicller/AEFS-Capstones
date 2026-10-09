@@ -4,6 +4,7 @@ from pathlib import Path
 from langchain_core.tools import BaseTool, tool
 
 from terminal_coding_agent.config import SHELL_TIMEOUT_SECONDS
+from terminal_coding_agent.tools.display import exit_code_and_output, tool_output
 from terminal_coding_agent.tools.truncate import truncate
 
 _ALLOWED = frozenset(
@@ -28,6 +29,7 @@ _DENIED = frozenset({"push", "pull", "fetch", "clone", "reset", "config"})
 
 def build_git(worktree: Path) -> BaseTool:
     @tool
+    @tool_output(lambda params, result: exit_code_and_output(result))
     def git(git_args: list[str]) -> str:
         """Run an allowlisted git command in the worktree.
 

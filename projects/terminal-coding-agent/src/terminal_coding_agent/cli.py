@@ -10,6 +10,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 from repl_console import EndSessionError, Repl, render_error, render_reply
+from repl_console.commands import CommandContext, CommandOutcome, LocalCommand
 from telemetry import resolve_model_name
 
 from terminal_coding_agent import ui
@@ -22,16 +23,36 @@ from terminal_coding_agent.config import (
 from terminal_coding_agent.graph import make_graph
 from terminal_coding_agent.models import build_models
 from terminal_coding_agent.session import pending_interrupts, resume_turn, run_task_turn
+from terminal_coding_agent.tools import display
+
+
+class ToolOutputCommand(LocalCommand):
+    """`/tool_output off|simple|detail`: pick how much of each tool call prints.
+
+    The level is the same module-level switch `main` sets, so `off` matches what a
+    Harbor run looks like. It only takes effect at the prompt, hence from the next
+    tool call.
+    """
+
+    name = "tool_output"
+    summary = "tool-call output: off (silent), simple (one line), detail (full)"
+
+    def run(self, ctx: CommandContext, args: str) -> CommandOutcome:  # noqa: ARG002
+        choice = args.strip().lower()
+        usage = "   usage: /tool_output off|simple|detail"
+        if choice not in display.LEVELS:
+            return CommandOutcome(message=f"tool output {display.LEVEL}{usage}")
+        display.LEVEL = choice
+        return CommandOutcome(message=f"tool output {choice}")
 
 
 def _session_config(*, worktree: Path, session: str) -> dict[str, Any]:
-    """One thread per session; renderers are injected here, not hardwired in graph.py."""
+    """One thread per session; the todo renderer is injected here, not in graph.py."""
     return {
         "configurable": {
             "worktree": str(worktree),
             "thread_id": session,
             "todo_renderer": ui.TodoPanel(),
-            "tool_renderer": ui.ToolLog(),
             "enable_hitl": False,
             "enable_intent": True,
             "enable_web_search": True,
@@ -191,11 +212,14 @@ def main(argv: list[str] | None = None) -> int:
             worktree = Path(temp)
         else:
             worktree = Path(args.worktree).resolve()
+        # The one place the interactive CLI picks a tool-log level; Harbor stays at "off".
+        display.LEVEL = "detail"
         config = _session_config(worktree=worktree, session=session)
         repl(
             graph=make_graph(config),
             config=config,
             model_name=resolve_model_name(build_models(config).planner),
+            commands=[ToolOutputCommand()],
         )
     return 0
 

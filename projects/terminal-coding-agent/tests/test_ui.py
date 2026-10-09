@@ -81,68 +81,6 @@ def test_panel_always_shows_the_replan_count(monkeypatch) -> None:
     assert "replan v0" in stream.getvalue()
 
 
-def test_tool_log_summarises_each_call(monkeypatch) -> None:
-    """One line per call: what ran, on what, and how it went."""
-    stream = _capture(monkeypatch)
-    log = ui.ToolLog()
-
-    log("read_file", {"path": "src/a.py"}, "l1\nl2\nl3")
-    log("ripgrep", {"pattern": "TODO"}, "a.py:1:x\nb.py:2:y")
-    log("run_shell", {"command": "pytest -q"}, "exit_code: 0\nstdout:\nok\nstderr:\n")
-    log("git", {"git_args": ["status", "--short"]}, "exit_code: 1\nstdout:\nstderr:\n")
-
-    out = stream.getvalue()
-    assert "read_file" in out and "src/a.py" in out and "3 lines" in out
-    assert "2 hits" in out
-    assert "pytest -q" in out and "exit 0" in out
-    assert "status --short" in out and "exit 1" in out
-
-
-def test_tool_log_surfaces_errors_and_empty_search(monkeypatch) -> None:
-    stream = _capture(monkeypatch)
-    log = ui.ToolLog()
-
-    log("read_file", {"path": "x"}, "Error: path escapes worktree: ../x")
-    log("ripgrep", {"pattern": "zzz"}, "")
-    log("ripgrep", {"pattern": "one"}, "a.py:1:x")
-
-    out = stream.getvalue()
-    assert "path escapes worktree" in out
-    assert "no hits" in out
-    assert "(1 hit)" in out, "a single hit must not read as '1 hits'"
-
-
-def test_tool_log_renders_the_edit_diff(monkeypatch) -> None:
-    stream = _capture(monkeypatch)
-    diff = "--- a.py\n+++ a.py\n@@ -1 +1 @@\n-old\n+new"
-
-    ui.ToolLog()("edit_file", {"path": "a.py"}, diff)
-
-    out = stream.getvalue()
-    assert "a.py" in out and "+1 -1" in out
-    assert "-old" in out and "+new" in out, "the diff body must be shown, not just its size"
-
-
-def test_tool_log_skips_the_diff_when_the_edit_failed(monkeypatch) -> None:
-    stream = _capture(monkeypatch)
-
-    ui.ToolLog()("edit_file", {"path": "a.py"}, "Error: old_str not found in a.py")
-
-    out = stream.getvalue()
-    assert "old_str not found" in out
-    assert "@@" not in out
-
-
-def test_tool_log_keeps_long_arguments_on_one_line(monkeypatch) -> None:
-    stream = _capture(monkeypatch)
-
-    ui.ToolLog()("run_shell", {"command": "echo " + "x" * 200}, "exit_code: 0\nstdout:\n")
-
-    line = next(line for line in stream.getvalue().splitlines() if "run_shell" in line)
-    assert len(line) <= ui.MAX_TARGET_CHARS + 40
-    assert line.count("\n") == 0
-
-
 def test_render_budget_reports_turns_and_stop_reason(monkeypatch) -> None:
     """Token/cost totals must stay off the footer: the accounting is not trustworthy."""
     stream = _capture(monkeypatch)
@@ -269,14 +207,19 @@ def test_tool_lines_scroll_above_the_pinned_todo_panel(monkeypatch) -> None:
     """The CLI contract: question, then tool output, with the Tasks panel pinned last."""
     master, stream, chunks, reader = _open_tty(monkeypatch)
     console = Console(file=stream, width=48)
+    monkeypatch.setattr(ui, "CONSOLE", console)
     todos = ui.TodoPanel(console)
-    tools = ui.ToolLog(console)
 
     console.print("you > fix the typo")
     with todos.region():
         todos("[-] fix the typo", 0)
-        tools("read_file", {"path": "src/a.py"}, "l1\nl2")
-        tools("edit_file", {"path": "src/a.py"}, "--- a.py\n+++ a.py\n@@ -1 +1 @@\n-old\n+new")
+        ui.render_tool_call(name="read_file", target="src/a.py", summary="2 lines", body="l1\nl2")
+        ui.render_tool_call(
+            name="edit_file",
+            target="src/a.py",
+            summary="+1 -1",
+            body="```diff\n--- a.py\n+++ a.py\n@@ -1 +1 @@\n-old\n+new\n```",
+        )
         todos("[✓] fix the typo", 0)
 
     stream.close()
@@ -370,19 +313,6 @@ def test_ask_question_lets_a_dismissal_escape(monkeypatch) -> None:
 
     with pytest.raises(EOFError):
         ui.ask_question({"type": "question", "question": "which?", "options": ["a"]})
-
-
-def test_tool_log_survives_brackets_in_a_path(monkeypatch) -> None:
-    """A path like `foo[bar].py` is markup to rich: unescaped it would raise MarkupError."""
-    stream = _capture(monkeypatch)
-    log = ui.ToolLog()
-
-    log("read_file", {"path": "src/foo[bar].py"}, "l1\nl2")
-    log("read_file", {"path": "x"}, "Error: [red]boom[/red]")
-
-    out = stream.getvalue()
-    assert "foo[bar].py" in out
-    assert "[red]boom[/red]" in out
 
 
 def test_ask_question_handles_a_unicode_digit(monkeypatch) -> None:

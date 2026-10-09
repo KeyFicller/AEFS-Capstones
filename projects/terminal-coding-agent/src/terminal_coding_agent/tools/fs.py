@@ -7,6 +7,7 @@ from langchain_core.tools import BaseTool, tool
 from rich.console import Console
 from rich.syntax import Syntax
 
+from terminal_coding_agent.tools.display import tool_output
 from terminal_coding_agent.tools.path import resolve_in_worktree
 from terminal_coding_agent.tools.truncate import truncate
 
@@ -35,6 +36,7 @@ def _write_atomic(path: Path, content: str) -> None:
 
 def build_read_file(worktree: Path) -> BaseTool:
     @tool
+    @tool_output(lambda params, result: (f"{len(result.splitlines())} lines", ""))
     def read_file(path: str) -> str:
         """Read a UTF-8 text file under the worktree.
 
@@ -56,7 +58,15 @@ def build_read_file(worktree: Path) -> BaseTool:
 
 
 def build_edit_file(worktree: Path) -> BaseTool:
+    def _display(params: dict, result: str) -> tuple[str, str]:
+        lines = result.splitlines()
+        # Diff headers always carry a space after the marker; `+++foo` is content.
+        added = sum(1 for line in lines if line.startswith("+") and not line.startswith("+++ "))
+        removed = sum(1 for line in lines if line.startswith("-") and not line.startswith("--- "))
+        return f"+{added} -{removed}", f"```diff\n{result}\n```"
+
     @tool
+    @tool_output(_display)
     def edit_file(path: str, old_str: str, new_str: str) -> str:
         """Replace a unique old_str with new_str; return unified diff.
 

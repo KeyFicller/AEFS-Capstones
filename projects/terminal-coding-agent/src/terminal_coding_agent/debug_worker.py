@@ -29,6 +29,17 @@ def _stop_reason(process: lldb.SBProcess) -> str | None:
     return _STOP_REASONS.get(thread.GetStopReason())
 
 
+def _stop_location(process: lldb.SBProcess) -> dict | None:
+    """Where the selected frame sits, or None when the process is not stopped."""
+    if not process.IsValid() or process.GetState() != lldb.eStateStopped:
+        return None
+    frame = process.GetSelectedThread().GetSelectedFrame()
+    if not frame.IsValid():
+        return None
+    entry = frame.GetLineEntry()
+    return {"file": entry.GetFileSpec().GetFilename(), "line": entry.GetLine()}
+
+
 class Session:
     """The live debug session. Exactly one per worker process."""
 
@@ -37,6 +48,7 @@ class Session:
         self._target: lldb.SBTarget | None = None
         self._binary: str | None = None
         self._args: list = []
+        self._last_stop: tuple[str, int] | None = None
 
     def start(self, binary: str, args: list) -> dict:
         # Same target and args: keep the session.
@@ -67,6 +79,7 @@ class Session:
         self._target = target
         self._binary = binary
         self._args = list(args)
+        self._last_stop = None
         if args:
             result = lldb.SBCommandReturnObject()
             debugger.GetCommandInterpreter().HandleCommand(
@@ -92,10 +105,20 @@ class Session:
         output = (result.GetOutput() or "") + (result.GetError() or "")
         if interrupted.is_set():
             output += f"\n[interrupted after {timeout:g}s]"
+        location = _stop_location(self._target.GetProcess())
+        if location is None:
+            # Running or exited: forget the last stop, so the next one is reported.
+            self._last_stop = None
+        elif (location["file"], location["line"]) == self._last_stop:
+            # Same place as the previous report: nothing new to show.
+            location = None
+        else:
+            self._last_stop = (location["file"], location["line"])
         return {
             "ok": bool(result.Succeeded()),
             "output": output,
             "stop_reason": _stop_reason(self._target.GetProcess()),
+            "stop_location": location,
         }
 
     def _interrupt(self, interrupted: threading.Event) -> None:
@@ -112,6 +135,7 @@ class Session:
         self._target = None
         self._binary = None
         self._args = []
+        self._last_stop = None
         return {"ok": True, "output": "", "stop_reason": None}
 
 

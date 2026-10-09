@@ -241,32 +241,6 @@ def _spy_on_execute_nodes(monkeypatch) -> dict:
     return captured
 
 
-def test_make_graph_forwards_the_injected_tool_renderer(tmp_path: Path, monkeypatch) -> None:
-    """The renderer travels config -> graph -> execute nodes, like todo_renderer."""
-    os.environ["DEEPSEEK_API_KEY"] = "test"
-    captured = _spy_on_execute_nodes(monkeypatch)
-    def _noop_renderer(*_args: object) -> None:
-        return None
-
-    renderer = _noop_renderer
-
-    make_graph({"configurable": {"worktree": tmp_path, "tool_renderer": renderer}})
-    os.environ.pop("DEEPSEEK_API_KEY")
-
-    assert captured["tool_renderer"] is renderer
-
-
-def test_make_graph_ignores_a_non_callable_tool_renderer(tmp_path: Path, monkeypatch) -> None:
-    """A bad renderer in config must degrade to 'no tool log', not crash the graph."""
-    os.environ["DEEPSEEK_API_KEY"] = "test"
-    captured = _spy_on_execute_nodes(monkeypatch)
-
-    make_graph({"configurable": {"worktree": tmp_path, "tool_renderer": "not callable"}})
-    os.environ.pop("DEEPSEEK_API_KEY")
-
-    assert captured["tool_renderer"] is None
-
-
 def test_make_graph_records_a_sequence_only_when_a_path_is_configured(
     tmp_path: Path, monkeypatch
 ) -> None:

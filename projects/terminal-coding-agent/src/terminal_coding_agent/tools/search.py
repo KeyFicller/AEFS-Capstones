@@ -5,12 +5,19 @@ from pathlib import Path
 from langchain_core.tools import BaseTool, tool
 
 from terminal_coding_agent.config import SHELL_TIMEOUT_SECONDS
+from terminal_coding_agent.tools.display import tool_output
 from terminal_coding_agent.tools.path import resolve_in_worktree
 from terminal_coding_agent.tools.truncate import truncate
 
 
 def build_ripgrep(worktree: Path) -> BaseTool:
+    def _display(params: dict, result: str) -> tuple[str, str]:
+        count = len(result.splitlines())
+        unit = "hit" if count == 1 else "hits"
+        return f"{count} {unit}", f"```text\n{result}\n```"
+
     @tool
+    @tool_output(_display)
     def ripgrep(pattern: str, path: str = ".") -> str:
         """Search for a pattern in a file or directory using ripgrep.
 
@@ -59,7 +66,13 @@ def build_ripgrep(worktree: Path) -> BaseTool:
 
 
 def build_tree_sitter_symbols(worktree: Path) -> BaseTool:
+    def _display(params: dict, result: str) -> tuple[str, str]:
+        count = len(result.splitlines())
+        unit = "symbol" if count == 1 else "symbols"
+        return f"{count} {unit}", f"```text\n{result}\n```"
+
     @tool
+    @tool_output(_display)
     def tree_sitter_symbols(path: str) -> str:
         """List functions/classes in a Python file (MVP: stdlib ast backend).
 
