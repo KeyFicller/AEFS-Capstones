@@ -53,6 +53,7 @@ def build_execute_nodes(
     worktree: Path,
     sequence_events: list | None = None,
     tool_renderer: Callable[[str, Mapping[str, Any], str], None] | None = None,
+    enable_debug: bool = False,
     enable_hitl: bool = False,
 ) -> dict[str, Callable[[CodingAgentState], dict[str, Any]]]:
     """Three parent-graph nodes so IN_PROGRESS is committed (and printed) before the agent runs."""
@@ -116,8 +117,11 @@ def build_execute_nodes(
             # Last = innermost, so a guard that short-circuits the call is not logged as output.
             middleware.append(ToolLogMiddleware(tool_renderer))
 
+        base_prompt = SYSTEM_PROMPTS["executor"]
+        if enable_debug:
+            base_prompt += "\n\n" + SYSTEM_PROMPTS["debug"]
         system_prompt = (
-            SYSTEM_PROMPTS["executor"]
+            base_prompt
             + "\n\nCurrent plan:\n"
             + format_todos(todo_list)
             + f"\n\nYour step: {todo_list[task_index].description}"

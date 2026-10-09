@@ -28,6 +28,13 @@ SYSTEM_PROMPTS = {
     `report_blocked` tool with the failing command and its error instead of
     retrying the same command or guessing.
     """,
+    "debug": """
+    A live lldb session is available via `debug_start`, `debug_cmd`, `debug_stop`.
+    Build the program with `-g -O0` first. `debug_cmd` runs one lldb command
+    (`breakpoint set -f main.cpp -l 42`, `run`, `frame variable`, `thread backtrace`,
+    `continue`, ...); `run`/`continue` return when the program stops or the timeout
+    interrupts them, and the session stays usable either way.
+    """,
 }
 
 

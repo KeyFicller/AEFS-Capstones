@@ -194,12 +194,18 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
     enable_intent = bool(configurable.get("enable_intent"))
     make_plan = build_planner(models, with_system_prompt=enable_intent)
     tool_renderer = configurable.get("tool_renderer")
+    enable_debug = bool(configurable.get("enable_debug"))
     execute = build_execute_nodes(
         models,
-        make_tools(worktree, enable_web_search=bool(configurable.get("enable_web_search"))),
+        make_tools(
+            worktree,
+            enable_web_search=bool(configurable.get("enable_web_search")),
+            enable_debug=enable_debug,
+        ),
         worktree=worktree,
         sequence_events=sequence_events,
         tool_renderer=tool_renderer if callable(tool_renderer) else None,
+        enable_debug=enable_debug,
         enable_hitl=bool(configurable.get("enable_hitl")),
     )
     recover = build_recover(make_plan, worktree=worktree)

@@ -13,6 +13,7 @@
 - `langgraph.json` + `make_graph(config)` 工厂 + 含 `messages` 的 state schema
 - plan / act / observe / recover 四段循环
 - **工具（Harbor 侧 7 个）**：`read_file`、`edit_file`（带 diff 预览）、`ripgrep`、`tree_sitter_symbols`、`run_shell`（带 timeout）、`git`，输出一律截断至 4k tokens；第 7 个 `current_time` 无参数、无条件注册。另有第 8 个 `web_search`，由 `configurable["enable_web_search"]` 开启、**默认关**，不计入 Harbor
+- 另有 3 个可选调试工具 `debug_start` / `debug_cmd` / `debug_stop`（lldb 持久会话），由 `configurable["enable_debug"]` 开启、**默认关** → Harbor 侧仍 7 个
 - **hook 8 个**（spec 要求 ≥4）：`PreToolUse`（破坏性命令守卫）、`PostToolUse`（token 记账）、`SessionStart`（预算初始化）、`SessionEnd`、`UserPromptSubmit`、`Notification`、`Stop`（写 trace）、`PreCompact`
 - 三层预算熔断 + `gen_ai.*` OTel span
 
@@ -36,7 +37,7 @@
 
 **沙箱**：Harbor 侧 graph 与工具都在容器内执行，宿主文件系统不可达 → spec 的 hard reject「不许在宿主机执行 git」自动满足。
 
-**模块路径**：`graph.py`（装配）· `cli.py`（REPL 入口）· `attachments.py`（`strip_images` / `attached_images`，不 import `repl_console`）· `tools/`（唯一副作用边界）· `ui.py` · `middleware/` · `harbor_tasks/` · `scripts/`（双向验证 + 结果汇总）· `tests/`。
+**模块路径**：`graph.py`（装配）· `cli.py`（REPL 入口）· `attachments.py`（`strip_images` / `attached_images`，不 import `repl_console`）· `tools/`（唯一副作用边界）· `debug_worker.py`（lldb 会话 worker，独立 Python 3.9 进程）· `ui.py` · `middleware/` · `harbor_tasks/` · `scripts/`（双向验证 + 结果汇总）· `tests/`。
 
 **图产物**：`graph.png` 由 `python -m terminal_coding_agent.graph` 生成，默认**开着两个闸门**（`intent` + HITL）以展示 CLI 拓扑；`ENABLE_HITL=0` / `ENABLE_INTENT=0` 可渲染 Harbor 的拓扑。拓扑改了重跑；`example.png` 为手工截图。README 只放这两张。
 
@@ -44,6 +45,7 @@
 
 - **Python**：本机共享 venv 3.14.6，**容器内 3.12** → 代码须 3.12 兼容
 - **编排**：LangGraph + LangChain（model / tool / retriever 抽象）
+- **调试**：lldb Python API（随 Xcode Command Line Tools），绑定只支持 Python 3.9 → 会话跑在独立 `python3.9` worker 子进程，经逐行 JSON 协议驱动；**不解析 lldb console**。默认关。
 - **模型**：`langchain-deepseek>=1.1.0`，默认 `deepseek-v4-flash`；provider 与模型名经 `configurable` 注入
 - **搜索**：ripgrep 子进程 + tree-sitter（预编译）；可选 `ddgs`（DuckDuckGo 文本检索，无 API key，仅本地 CLI 开）
 - **可观测性**：OTel `gen_ai.*` → `{worktree}/.agent/otel.jsonl`；Langfuse 主路径为 LangChain `CallbackHandler`（`LANGFUSE_PUBLIC_KEY` / `SECRET_KEY` / `BASE_URL`）；可选 `LANGFUSE_OTLP=1` 挂原始 OTLP（默认关，避免双写）
@@ -57,6 +59,8 @@
 - `--worktree` 缺省为**临时目录**，会话结束即删；要真让 agent 改某个仓库必须显式传 `--worktree <repo>`，续跑同 `--session` 也需连同传。
 - **输入前缀** `@path`（附文件 / 图片，只给 executor）· `!cmd`（本地 shell，不进上下文、不计预算）· `/cmd`（REPL 命令表）。三者由共享组件 `repl-console` 提供（见根 `README.md` 组件表）。
 - `todo_renderer` / `tool_renderer` 经 `configurable` 注入；Harbor 不注入 → todo 走 `_print_todos` 进 `langgraph-run.log`。**Harbor 的图导入链不依赖 `repl_console` / `prompt_toolkit`**，`requirements-harbor.txt` 不增加它们。
+
+**lldb 调试工具（2026-10-09，已交付）**：`debug_start` / `debug_cmd` / `debug_stop` 三件套，agent 在一个活会话里连续设断点、运行、看变量与调用栈。会话住独立 `python3.9` worker（绑定限 3.9），主进程经逐行 JSON 驱动，**不解析 console**；超时由 watchdog 线程 `SBProcess.Stop()` 打断、会话仍可用。由 `enable_debug` 开启、默认关 → Harbor 工具表逐字不变。**只在本地 CLI 交付**（沙箱无 lldb）。
 
 **Harbor 评测证据（已交付，非当前重点）**：`harbor_tasks/` 下 5 题能力集（`l1`–`l5`，按 L2 定位难度递进）+ `greeter-fix` 烟测，配 `langgraph.json` + `requirements-harbor.txt`。
 

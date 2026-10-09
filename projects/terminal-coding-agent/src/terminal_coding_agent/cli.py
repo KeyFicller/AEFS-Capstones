@@ -35,6 +35,7 @@ def _session_config(*, worktree: Path, session: str) -> dict[str, Any]:
             "enable_hitl": True,
             "enable_intent": True,
             "enable_web_search": True,
+            "enable_debug": True,
             # "local_model": "qwen3:8b"
         }
     }
