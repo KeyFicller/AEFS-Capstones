@@ -22,7 +22,12 @@ from multimodal_doc_qa.config import (
 )
 from multimodal_doc_qa.graph import GraphDeps, build_graph, initial_state
 from multimodal_doc_qa.limits import Budget
-from multimodal_doc_qa.retrievers.assembly import MODES, IndexNotFoundError, build_retriever
+from multimodal_doc_qa.retrievers.assembly import (
+    ARMS,
+    MODES,
+    IndexNotFoundError,
+    build_retriever,
+)
 from multimodal_doc_qa.schemas import (
     Answer,
     BBox,
@@ -44,6 +49,7 @@ _MODE_HELP = (
     "ocr: page text embedded with the text encoder. "
     "abstract: a VLM description of each page, embedded as text. "
     "lexical: BM25 over the OCR chunks, no embeddings. "
+    "lexical-kw: BM25 too, but an LLM extracts the query keywords first. "
     "hybrid-<dense>: RRF of the lexical arm with maxsim / pool / ocr / abstract. "
     "Set MDQ_MODE to change the default."
 )
@@ -507,6 +513,8 @@ def eval_questions(
     items = _load_questions(questions)
     retriever = _open_retriever(settings, mode)
     written = out or RESULTS_PATH
+    # Only the keyword arm retrieves with an LLM, so only it records an extractor model.
+    extractor_model = settings.answerer_model if ARMS[mode].needs_llm else None
     summary = run_eval(
         items,
         lambda question: (
@@ -522,6 +530,7 @@ def eval_questions(
         max_tokens=max_tokens,
         max_seconds=max_seconds,
         retrieval_only=retrieval_only,
+        extractor_model=extractor_model,
     )
     _print_eval(summary, settings, mode, _IOU_THRESHOLD, written, retrieval_only=retrieval_only)
 
@@ -614,6 +623,7 @@ def _mode_models(settings: Settings, mode: str) -> str:
         embedder=settings.embedder_model,
         ocr=settings.ocr_embedder_model,
         describer=settings.answerer_model,
+        extractor=settings.answerer_model,
     )
 
 

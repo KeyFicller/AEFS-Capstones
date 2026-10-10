@@ -66,11 +66,14 @@ def provenance(
     n_questions: int,
     iou_threshold: float,
     retrieval_only: bool = False,
+    extractor_model: str | None = None,
 ) -> dict:
     """Commit, models, and the IoU threshold this run used. An IoU number without it is not comparable.
 
     A retrieval-only run builds no chat model and measures no evidence overlap, so those
-    fields are ``None``: a leftover default would be read as the value that was used.
+    fields are ``None``: a leftover default would be read as the value that was used. The
+    exception is ``extractor_model``: the keyword arm retrieves with an LLM even in a
+    retrieval-only run, so the model it used is recorded there.
     """
     return {
         "commit": _git_commit(),
@@ -82,6 +85,7 @@ def provenance(
         "embedder_model": getattr(settings, "embedder_model", None),
         "ocr_embedder_model": getattr(settings, "ocr_embedder_model", None),
         "answerer_model": None if retrieval_only else getattr(settings, "answerer_model", None),
+        "extractor_model": extractor_model,
         "max_rounds": None if retrieval_only else getattr(settings, "max_rounds", None),
         "max_ask_calls": None if retrieval_only else getattr(settings, "max_ask_calls", None),
         "python": platform.python_version(),
@@ -158,12 +162,14 @@ def run_eval(
     max_tokens: int | None = None,
     max_seconds: float | None = None,
     retrieval_only: bool = False,
+    extractor_model: str | None = None,
 ) -> dict:
     """Answer every question, append rows, return the summary.
 
     ``retrieval_only`` runs have no answer and no loop, so the graph-side fields and the
     token cap do not apply. ``max_tokens`` and ``max_seconds`` stop the suite and keep the
     rows already written. ``stopped_after`` names the first question that was not run.
+    ``extractor_model`` is the model the keyword arm retrieved with, or ``None``.
     """
     out_path.parent.mkdir(parents=True, exist_ok=True)
     latencies: list[float] = []
@@ -182,7 +188,15 @@ def run_eval(
             "kind": "run",
             "retrieval_only": retrieval_only,
             **(
-                provenance(settings, mode, k, len(questions), iou_threshold, retrieval_only)
+                provenance(
+                    settings,
+                    mode,
+                    k,
+                    len(questions),
+                    iou_threshold,
+                    retrieval_only,
+                    extractor_model,
+                )
                 if settings
                 else {}
             ),

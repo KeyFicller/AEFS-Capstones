@@ -14,7 +14,7 @@
 ./start.sh setup                          # 共享 .venv + 依赖，只需一次
 brew install tesseract                    # 扫描页的 OCR 臂需要它
 ./start.sh run doc-qa ingest --corpus <pdf_dir>   # 已有 PDF / 图片 / txt / md；视觉索引落 multivector_index.pt（由 vision_index.pt 改名，升级时把旧文件改名即可）
-./start.sh run doc-qa                     # 多轮 REPL；--mode maxsim|pool|ocr|abstract|lexical|hybrid-{ocr,abstract,pool,maxsim}，默认 maxsim
+./start.sh run doc-qa                     # 多轮 REPL；--mode maxsim|pool|ocr|abstract|lexical|lexical-kw|hybrid-{ocr,abstract,pool,maxsim}，默认 maxsim
 ./start.sh run pytest projects/multimodal-doc-qa/tests -m "not slow"   # 单测（slow 会加载真实模型）
 ```
 
@@ -23,7 +23,7 @@ brew install tesseract                    # 扫描页的 OCR 臂需要它
 ```bash
 ./start.sh run doc-qa eval --agentic --mode maxsim --questions <questions.json> --out projects/multimodal-doc-qa/eval/maxsim.jsonl
 ./start.sh run doc-qa eval --agentic --mode ocr    --questions <questions.json> --out projects/multimodal-doc-qa/eval/ocr.jsonl
-# 另有 lexical（手写 BM25）与四条 hybrid-<dense>（BM25 + 语义侧 RRF）臂，取值同上
+# 另有 lexical（手写 BM25）、lexical-kw（BM25 前先让 LLM 抽词）与四条 hybrid-<dense>（BM25 + 语义侧 RRF）臂，取值同上
 ./start.sh run streamlit run projects/multimodal-doc-qa/src/multimodal_doc_qa/ui/viewer.py   # 证据框叠加 + 并排
 ```
 

@@ -60,6 +60,10 @@ def test_mode_models_names_only_that_arms_models() -> None:
     assert mode_models("ocr", embedder="col", ocr="bge", describer="vlm") == "bge"
     assert mode_models("abstract", embedder="col", ocr="bge", describer="vlm") == "vlm  bge"
     assert mode_models("lexical", embedder="col", ocr="bge", describer="vlm") == "bm25"
+    assert (
+        mode_models("lexical-kw", embedder="col", ocr="bge", describer="vlm", extractor="vlm")
+        == "vlm  bm25"
+    )
     assert mode_models("hybrid-ocr", embedder="col", ocr="bge", describer="vlm") == "bge"
     assert mode_models("hybrid-maxsim", embedder="col", ocr="bge", describer="vlm") == "col"
 

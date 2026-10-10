@@ -850,3 +850,40 @@ def test_eval_has_no_iou_threshold_flag(
     result = _invoke("eval", "--questions", str(questions), "--iou-threshold", "0.7")
 
     assert result.exit_code != 0
+
+
+def test_the_status_bar_has_a_label_for_every_arm() -> None:
+    """``_mode_models`` fills each arm's label placeholders from settings.
+
+    An arm whose label names a model the caller does not pass raises ``KeyError`` the moment
+    Shift-Tab reaches it, so every arm has to render.
+    """
+    from multimodal_doc_qa.cli import _mode_models
+    from multimodal_doc_qa.retrievers.assembly import MODES
+
+    settings = Settings()
+    for mode in MODES:
+        assert _mode_models(settings, mode)
+
+
+def test_eval_lexical_kw_is_the_one_arm_that_builds_a_chat_model(
+    corpus: Path, artifacts: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The keyword arm retrieves with an LLM, so its model is recorded in the run header."""
+    monkeypatch.setattr(
+        "multimodal_doc_qa.synth.answer.build_chat_model", lambda *a, **k: _StubChat()
+    )
+    _invoke("ingest", "--corpus", str(corpus))
+    questions = tmp_path / "questions.json"
+    questions.write_text(json.dumps([_gold_row()]))
+    out = tmp_path / "results.jsonl"
+
+    result = _invoke(
+        "eval", "--questions", str(questions), "--mode", "lexical-kw", "--out", str(out)
+    )
+
+    assert result.exit_code == 0, result.stdout
+    header = json.loads(out.read_text().splitlines()[0])
+    assert header["extractor_model"] == "deepseek:deepseek-flash"
+    # Retrieval-only still builds no answerer: the extractor is the only model here.
+    assert header["answerer_model"] is None

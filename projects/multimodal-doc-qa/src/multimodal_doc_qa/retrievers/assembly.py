@@ -47,10 +47,15 @@ class Component:
 
 @dataclass(frozen=True)
 class Arm:
-    """One ``--mode`` value: the stages it runs and how they are fused."""
+    """One ``--mode`` value: the stages it runs and how they are fused.
+
+    ``needs_llm`` marks the arms whose *retrieval* calls a chat model, so the eval run
+    header can record the model that was used.
+    """
 
     stages: tuple[str, ...]
     fusion: str | None = None
+    needs_llm: bool = False
 
 
 INDEXES: dict[str, Index] = {
@@ -124,6 +129,16 @@ def _build_bm25(settings: Settings, k: int, shared: Shared):
     return BM25Retriever(corpus=corpus, k=k, min_score_ratio=settings.min_score_ratio)
 
 
+def _build_bm25_kw(settings: Settings, k: int, shared: Shared):
+    """The same BM25, but the query is the LLM's keywords. The model is built on first use."""
+    from multimodal_doc_qa.retrievers.keywords import KeywordExtractor, KeywordRetriever
+
+    return KeywordRetriever(
+        inner=_build_bm25(settings, k, shared),
+        extractor=KeywordExtractor(settings),
+    )
+
+
 COMPONENTS: dict[str, Component] = {
     "maxsim": Component("multivector", "embedding", "{embedder}", _build_maxsim),
     "pool": Component("multivector", "embedding", "{embedder}", _build_pool),
@@ -132,6 +147,7 @@ COMPONENTS: dict[str, Component] = {
         "abstract", "embedding", "{describer}  {ocr}", lambda s, k, sh: _build_text(s, k, sh, "abstract")
     ),
     "bm25": Component("ocr", "keywords", "bm25", _build_bm25),
+    "bm25_kw": Component("ocr", "keywords", "{extractor}  bm25", _build_bm25_kw),
 }
 
 ARMS: dict[str, Arm] = {
@@ -140,6 +156,7 @@ ARMS: dict[str, Arm] = {
     "ocr": Arm(("ocr",)),
     "abstract": Arm(("abstract",)),
     "lexical": Arm(("bm25",)),
+    "lexical-kw": Arm(("bm25_kw",), needs_llm=True),
     "hybrid-ocr": Arm(("ocr", "bm25"), fusion="rrf"),
     "hybrid-abstract": Arm(("abstract", "bm25"), fusion="rrf"),
     "hybrid-pool": Arm(("pool", "bm25"), fusion="rrf"),

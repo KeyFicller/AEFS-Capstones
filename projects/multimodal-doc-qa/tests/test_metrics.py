@@ -609,3 +609,41 @@ def test_the_two_evidence_metrics_coincide_when_gold_has_no_box() -> None:
 
     for threshold in (0.1, 0.5, 1.0):
         assert iou_at_threshold(cited, gold, threshold=threshold) == bbox_hit_rate(cited, gold) == 0.5
+
+
+# ------------------------------------------------------------------ extractor model
+
+
+def test_the_run_header_records_the_extractor_model(tmp_path: Path) -> None:
+    """The keyword arm calls an LLM during retrieval; the header has to say which one."""
+    out = tmp_path / "results.jsonl"
+
+    run_eval(
+        [_question()],
+        lambda q: _run(),
+        out_path=out,
+        settings=_settings(),
+        mode="lexical-kw",
+        k=5,
+        retrieval_only=True,
+        extractor_model="deepseek:deepseek-flash",
+    )
+
+    assert _read(out)[0]["extractor_model"] == "deepseek:deepseek-flash"
+
+
+def test_the_extractor_model_is_null_without_one(tmp_path: Path) -> None:
+    """Every other arm retrieves without an LLM; a leftover default would misreport it."""
+    out = tmp_path / "results.jsonl"
+
+    run_eval(
+        [_question()],
+        lambda q: _run(),
+        out_path=out,
+        settings=_settings(),
+        mode="lexical",
+        k=5,
+        retrieval_only=True,
+    )
+
+    assert _read(out)[0]["extractor_model"] is None

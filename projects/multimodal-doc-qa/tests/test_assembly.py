@@ -21,6 +21,7 @@ ORDER = (
     "ocr",
     "abstract",
     "lexical",
+    "lexical-kw",
     "hybrid-ocr",
     "hybrid-abstract",
     "hybrid-pool",
@@ -94,3 +95,18 @@ def test_a_missing_index_names_the_index(tmp_path: Path) -> None:
 def test_an_unknown_mode_is_a_key_error() -> None:
     with pytest.raises(KeyError):
         build_retriever(Settings(), "telepathy")
+
+
+def test_the_keyword_arm_wraps_bm25_over_the_ocr_index() -> None:
+    """Same chunks as ``lexical``; only the query that reaches BM25 differs."""
+    arm = ARMS["lexical-kw"]
+
+    assert arm.stages == ("bm25_kw",)
+    assert arm.fusion is None
+    assert COMPONENTS["bm25_kw"].index == "ocr"
+    assert COMPONENTS["bm25_kw"].family == "keywords"
+
+
+def test_only_the_keyword_arm_needs_an_llm() -> None:
+    """This is the one arm whose retrieval path builds a chat model."""
+    assert {name for name, arm in ARMS.items() if arm.needs_llm} == {"lexical-kw"}

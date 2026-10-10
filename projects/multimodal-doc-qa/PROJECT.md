@@ -2,7 +2,7 @@
 
 - **项目**：multimodal-doc-qa（Agentic RAG）/ 所属 Phase：Phase19 / Capstone 04
 - **spec**：[Capstone 04 — Multimodal Document QA](https://aieng-zh.cn/lessons/19-capstone-projects/04-multimodal-document-qa/)
-- **状态**：`maxsim`（多向量后期交互）与 `ocr` 两条主线都已跑通——**同一张 agentic 图，只换 retriever**；`--mode` 现有九条检索臂；CLI 入口齐备（`ingest` / `ask` / `eval` / REPL）；单测 `294 passed`。`eval` 默认只跑检索器（`recall_at_k` / `nDCG@k`，不调 chat 模型），`--agentic` 才跑图并出 `pool_recall`（agent 循环累积池）与答案侧指标；gold 取自公开数据集 MMLongBench-Doc 的一个小子集，由 `python -m multimodal_doc_qa.eval.prepare_gold` 转换为 `questions.json`。**未实现**：答案准确率（`answer_containment`）、bytes/page、index p95。**已评测（检索臂消融）**：九条臂各跑纯检索 19 题（`eval/ablation-<arm>-19q.jsonl`，汇总 `eval/ablation-9arms-19q.html`）——`maxsim` 最高（recall@5 0.8947 / nDCG@5 0.7359），且已是这九条臂的上限（它只漏 2 题，此 2 题九臂全漏）；`lexical` 0.7368 / `abstract` 0.7105 / `pool` 0.6579 / `ocr` 0.6053；四条 `hybrid-*` 的 RRF 只救弱臂（`ocr` +0.18、`pool` +0.13），反拖低最强臂（`maxsim` −0.05）。**必须记住**：索引不记录写它的编码器，换 checkpoint 后必须重新 `ingest`。
+- **状态**：`maxsim`（多向量后期交互）与 `ocr` 两条主线都已跑通——**同一张 agentic 图，只换 retriever**；`--mode` 现有十条检索臂；CLI 入口齐备（`ingest` / `ask` / `eval` / REPL）；单测 `309 passed`。`eval` 默认只跑检索器（`recall_at_k` / `nDCG@k`，不调 chat 模型），`--agentic` 才跑图并出 `pool_recall`（agent 循环累积池）与答案侧指标；gold 取自公开数据集 MMLongBench-Doc 的一个小子集，由 `python -m multimodal_doc_qa.eval.prepare_gold` 转换为 `questions.json`。**未实现**：答案准确率（`answer_containment`）、bytes/page、index p95。**已评测（检索臂消融）**：九条臂各跑纯检索 19 题（`eval/ablation-<arm>-19q.jsonl`，汇总 `eval/ablation-9arms-19q.html`）——`maxsim` 最高（recall@5 0.8947 / nDCG@5 0.7359），且已是这九条臂的上限（它只漏 2 题，此 2 题九臂全漏）；`lexical` 0.7368 / `abstract` 0.7105 / `pool` 0.6579 / `ocr` 0.6053；四条 `hybrid-*` 的 RRF 只救弱臂（`ocr` +0.18、`pool` +0.13），反拖低最强臂（`maxsim` −0.05）。`lexical-kw`（先让 LLM 抽词、再喂同一份 BM25）**不及 `lexical`**：recall@5 0.6842（−0.0526，一题从命中变全漏）、nDCG@5 0.6385（+0.0037，恰被另一题的排序改善抵消），延迟 p50 0.74s 对 `lexical` 的 0.002s——抽词会把问题里的字面线索（如格式要求 `["a","b"]`）改写成泛化短语，丢掉 BM25 赖以命中的判别词。**必须记住**：索引不记录写它的编码器，换 checkpoint 后必须重新 `ingest`。
 
 ## 目标与范围
 
@@ -75,7 +75,7 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 | `render/` | PDF → 页面 PNG | pymupdf |
 | `embed/` | 默认 `ColSmol-500M`，可选 `ColQwen2.5-v0.2` | colpali-engine, torch |
 | `index/` | torch 张量多向量存储 + MaxSim | torch |
-| `retrievers/` | LangChain `BaseRetriever` + 声明式装配：`assembly.py`（臂表 `Index` / `Component` / `Arm`，`MODES` 派生自 `ARMS`）· `multivector.py`（`maxsim`）· `pool.py`（按 patch 平均池化）· `text.py`（`ocr` / `abstract`）· `bm25.py`（手写 BM25 词法臂）· `hybrid.py`（RRF 融合）· `rerank.py`（可选重排） | langchain-core, index |
+| `retrievers/` | LangChain `BaseRetriever` + 声明式装配：`assembly.py`（臂表 `Index` / `Component` / `Arm`，`MODES` 派生自 `ARMS`）· `multivector.py`（`maxsim`）· `pool.py`（按 patch 平均池化）· `text.py`（`ocr` / `abstract`）· `bm25.py`（手写 BM25 词法臂）· `keywords.py`（`lexical-kw`：LLM 先抽词，仍走同一份 BM25）· `hybrid.py`（RRF 融合）· `rerank.py`（可选重排） | langchain-core, index |
 | `agent/` | `plan` / `assess` / `verify` 的 prompt 与结构化 schema | langchain |
 | `graph.py` | LangGraph 装配（`intent` / `chat` / `plan` / `retrieve` / …），维护页面池与 `rounds`；`classifier=None` 时前置两节点不挂 | langgraph, langchain |
 | `limits.py` | `from_settings`。账本在共享组件 `budget`：调用次数、token、墙钟 | budget |
@@ -92,7 +92,7 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 
 - **Python**：共享 venv **3.14.6**；全栈依赖已用 `uv pip install --dry-run` 验证可解析。
 - **编排 / 模型抽象**：**LangGraph** 装配 ask 流水线（`langgraph>=1.2.12`）；**LangChain**（`init_chat_model`、`BaseRetriever`，`langchain>=1.4.2` + `langchain-deepseek>=1.1.0`）。
-- **模型**：回答器默认 `deepseek:deepseek-flash`（原生多模态，图 ≤384 tok/张），provider 与模型名经 `MDQ_ANSWERER_MODEL` 换；凭据放仓库根 `local.env`。
+- **模型**：回答器默认 `deepseek:deepseek-flash`（原生多模态，图 ≤384 tok/张），provider 与模型名经 `MDQ_ANSWERER_MODEL` 换；凭据放仓库根 `local.env`。`lexical-kw` 臂的抽词复用同一个 `MDQ_ANSWERER_MODEL`（不新增模型配置）。
 - **Embedder**：`colpali-engine==0.3.18` + `torch==2.13.0`（**MPS**）+ `transformers==5.18.0`；默认 `vidore/colSmol-500M`。
 - **页面渲染**：`pymupdf==1.28.2`。
 - **索引**：`torch==2.13.0`（张量批量 MaxSim；设备 / 精度可配，与 embedder 共用同一 torch）。
@@ -104,11 +104,11 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 
 ## 交付物
 
-- **CLI**：`doc-qa`（无子命令 → 加载 artifacts 后进 REPL）· `doc-qa chat [--mode]` · `doc-qa ingest <corpus_dir>` · `doc-qa ask "<question>" [--mode]` · `doc-qa eval --questions <questions.json> [--mode] [--out] [--agentic] [--max-tokens] [--max-seconds]`。`ask` / `chat` / REPL 在 `START` 后先过 `intent` 门：`chat` 轮**不检索、不产生引用**（控制台 `sources none`），`work` 轮照常进 `plan → retrieve → …`；`eval` 不挂门；`eval` 默认只跑检索器（`nDCG@k` / `recall@k`，不构造 chat 模型），`--agentic` 才跑完整图并出答案侧指标。
-- **九条检索臂**（`--mode` 或 `MDQ_MODE`，默认 `maxsim`）：`maxsim` 多向量后期交互 · `pool` 同一份多向量按 patch 平均池化 · `ocr` 页文本 · `abstract` 入库时视觉模型写的页描述 + 文本检索 · `lexical` 手写 BM25（读 `ocr_index` 的块，零嵌入） · `hybrid-ocr` / `hybrid-abstract` / `hybrid-pool` / `hybrid-maxsim` 各把 BM25（恒读 `ocr_index`）与该 dense 臂按 RRF 融合，两路各取 `4 × top_k` 后归并到页。检索臂由 `retrievers/assembly.py` 的声明表装配，`MODES` 派生自臂表，CLI 与状态栏不再各存一份。会话内切换与状态栏由共享组件 `repl-console` 提供（见根 `README.md` 组件表）。
+- **CLI**：`doc-qa`（无子命令 → 加载 artifacts 后进 REPL）· `doc-qa chat [--mode]` · `doc-qa ingest <corpus_dir>` · `doc-qa ask "<question>" [--mode]` · `doc-qa eval --questions <questions.json> [--mode] [--out] [--agentic] [--max-tokens] [--max-seconds]`。`ask` / `chat` / REPL 在 `START` 后先过 `intent` 门：`chat` 轮**不检索、不产生引用**（控制台 `sources none`），`work` 轮照常进 `plan → retrieve → …`；`eval` 不挂门；`eval` 默认只跑检索器（`nDCG@k` / `recall@k`，不构造 chat 模型），`--agentic` 才跑完整图并出答案侧指标——唯一例外是 `lexical-kw`：它要在检索时调一次 LLM 抽词，故是纯检索里唯一会建 chat 模型的臂。
+- **十条检索臂**（`--mode` 或 `MDQ_MODE`，默认 `maxsim`）：`maxsim` 多向量后期交互 · `pool` 同一份多向量按 patch 平均池化 · `ocr` 页文本 · `abstract` 入库时视觉模型写的页描述 + 文本检索 · `lexical` 手写 BM25（读 `ocr_index` 的块，零嵌入） · `lexical-kw` 同一份 BM25，但查询先经一次 LLM 抽成关键词（模型惰性建于首次查询） · `hybrid-ocr` / `hybrid-abstract` / `hybrid-pool` / `hybrid-maxsim` 各把 BM25（恒读 `ocr_index`）与该 dense 臂按 RRF 融合，两路各取 `4 × top_k` 后归并到页。检索臂由 `retrievers/assembly.py` 的声明表装配，`MODES` 派生自臂表，CLI 与状态栏不再各存一份。会话内切换与状态栏由共享组件 `repl-console` 提供（见根 `README.md` 组件表）。
 - **`ingest`**：接受 `pdf` / 图片（`png` / `jpg` / `jpeg` / `webp`）/ `txt` / `md`。PDF 与图片走 `encode_images`；纯文本按块切、用同一视觉编码器的 `encode_texts` 进视觉索引，**不光栅化**。字节相同的后一份文件跳过。视觉索引落 `multivector_index.pt`（`maxsim` / `pool` 共用，由 `vision_index.pt` 改名——升级时把旧文件改名即可，不必重跑 `ingest`）。`abstract` 臂的描述只在 `MDQ_MODE=abstract` 或 `MDQ_ABSTRACTS=1` 时随 `ingest` 写入 `abstract_index.pt`，缓存键是图片字节的 `sha256`。`MDQ_RERANK=1` 时检索后按视觉模型重排，默认关。
 - **查看器**：`streamlit run .../ui/viewer.py`——证据框叠加 + vision / OCR 并排，并把金标答案、金标证据页、模型引用（`page_id` + 是否给了 bbox）分别列出。`ask` / REPL 把每一轮写进 `artifacts/turns.jsonl`，**没有 `questions.json` 也能看红框**；蓝框只在那份金标文件存在、且题目 id 对得上时画。
-- **评测**：`eval/results.jsonl`——每次 run 由 `kind="run"` 头（commit / 模型 / 日期 / 配置）开头、逐题 `kind="question"` 明细跟写、`kind="summary"` 收尾，**边跑边 flush**，故中途失败（API 报错、超时）时已得结果仍在文件里。逐题行除指标外留原始材料（`ranked` / `pool` / `answer` / `citations` / `stop_reason` / `rounds` / `calls` / `tokens`），使新增指标**无需重跑模型即可回算**。纯检索（默认）下图侧字段（`answer` / `citations` / `pool` / `pool_recall` / `iou_at_threshold` / `bbox_hit_rate` / `rounds` / `calls` / `tokens` / `stop_reason`）写 `null`（键保留），`run` 头带 `retrieval_only`；gold 无 bbox，故 `--agentic` 下 `iou_at_threshold` 与 `bbox_hit_rate` 退化为同一个数（衡量答案是否引到 gold 页，非框位）。
+- **评测**：`eval/results.jsonl`——每次 run 由 `kind="run"` 头（commit / 模型 / 日期 / 配置）开头、逐题 `kind="question"` 明细跟写、`kind="summary"` 收尾，**边跑边 flush**，故中途失败（API 报错、超时）时已得结果仍在文件里。逐题行除指标外留原始材料（`ranked` / `pool` / `answer` / `citations` / `stop_reason` / `rounds` / `calls` / `tokens`），使新增指标**无需重跑模型即可回算**。纯检索（默认）下图侧字段（`answer` / `citations` / `pool` / `pool_recall` / `iou_at_threshold` / `bbox_hit_rate` / `rounds` / `calls` / `tokens` / `stop_reason`）写 `null`（键保留），`run` 头带 `retrieval_only` 与 `extractor_model`（后者只对 `lexical-kw` 非 `null`，记它抽词用的模型；其余臂为 `null`）；gold 无 bbox，故 `--agentic` 下 `iou_at_threshold` 与 `bbox_hit_rate` 退化为同一个数（衡量答案是否引到 gold 页，非框位）。注意 `lexical-kw` 的 `ranked` 照记、指标可回算，但**抽出的关键词本身不入行**，审计抽词质量需重跑模型。
 - **README.md**：一条命令端到端跑通。
 
 **验证**：单测 `pytest`（MaxSim 对照朴素实现、引用解析、bbox 命中判定、预算熔断、LangGraph 有界性与 state 往返）；冒烟 `transformers 5.18 × colpali-engine 0.3.18` 在 MPS 上跑通一次前向（**落代码前第一件事**）；端到端 `doc-qa ingest` → `doc-qa eval` 跑出非空 `results.jsonl`。
