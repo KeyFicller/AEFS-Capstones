@@ -1,5 +1,4 @@
 import io
-import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -182,9 +181,10 @@ def test_main_shell_anything_sets_the_flag(tmp_path: Path, monkeypatch) -> None:
     assert called["config"]["configurable"]["shell_anything"] is True
 
 
-def test_main_defaults_to_a_throwaway_worktree(monkeypatch) -> None:
-    """Without --worktree the agent must not touch the repo, so .agent/ lands in a temp dir."""
+def test_main_defaults_to_a_persistent_workspace(tmp_path: Path, monkeypatch) -> None:
+    """Without --worktree the agent writes under .agent-workspaces and the edits survive."""
     seen: dict = {}
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "load_local_env", lambda path: None)
     monkeypatch.setattr(cli, "make_graph", lambda config: _FakeGraph())
     monkeypatch.setattr(cli, "build_models", lambda config: SimpleNamespace(planner="stub"))
@@ -194,16 +194,85 @@ def test_main_defaults_to_a_throwaway_worktree(monkeypatch) -> None:
         seen.update(kwargs)
         worktree = Path(kwargs["config"]["configurable"]["worktree"])
         assert worktree.is_dir(), "the worktree must exist while the session runs"
-        (worktree / ".agent").mkdir()  # what a real turn would create
+        (worktree / "notes.txt").write_text("kept", encoding="utf-8")
 
     monkeypatch.setattr(cli, "repl", fake_repl)
 
-    assert cli.main([]) == 0
+    assert cli.main(["--session", "s1"]) == 0
 
     worktree = Path(seen["config"]["configurable"]["worktree"])
-    assert worktree != Path.cwd()
-    assert worktree.is_relative_to(Path(tempfile.gettempdir()))
-    assert not worktree.exists(), "a throwaway worktree must not outlive the session"
+    assert worktree == tmp_path / cli.WORKSPACES_DIRNAME / "s1"
+    assert (worktree / "notes.txt").read_text(encoding="utf-8") == "kept"
+
+
+class _FakeSandbox:
+    instances: list = []
+
+    def __init__(self, *, worktree: Path, image: str, session: str) -> None:
+        self.worktree = worktree
+        self.image = image
+        self.session = session
+        self.log: list[str] = []
+        self.__class__.instances.append(self)
+
+    def start(self) -> None:
+        self.log.append("start")
+
+    def close(self) -> None:
+        self.log.append("close")
+
+
+def _stub_main(monkeypatch, called: dict) -> None:
+    monkeypatch.setattr(cli, "load_local_env", lambda path: None)
+    monkeypatch.setattr(cli, "make_graph", lambda config: _FakeGraph())
+    monkeypatch.setattr(cli, "build_models", lambda config: SimpleNamespace(planner="stub"))
+    monkeypatch.setattr(cli, "resolve_model_name", lambda model: "stub-model")
+    monkeypatch.setattr(cli, "repl", lambda **kwargs: called.update(kwargs))
+
+
+def test_main_docker_starts_a_sandbox_and_closes_it(tmp_path: Path, monkeypatch) -> None:
+    called: dict = {}
+    _stub_main(monkeypatch, called)
+    _FakeSandbox.instances = []
+    monkeypatch.setattr(cli, "require_docker", lambda: None)
+    monkeypatch.setattr(cli, "DockerSandbox", _FakeSandbox)
+
+    assert cli.main(["--worktree", str(tmp_path), "--session", "s1", "--docker"]) == 0
+
+    box = _FakeSandbox.instances[0]
+    assert (box.worktree, box.image, box.session) == (tmp_path, "python:3.13-slim", "s1")
+    assert box.log == ["start", "close"]
+    assert called["config"]["configurable"]["sandbox"] is box
+
+
+def test_main_docker_image_is_configurable(tmp_path: Path, monkeypatch) -> None:
+    called: dict = {}
+    _stub_main(monkeypatch, called)
+    _FakeSandbox.instances = []
+    monkeypatch.setattr(cli, "require_docker", lambda: None)
+    monkeypatch.setattr(cli, "DockerSandbox", _FakeSandbox)
+
+    assert cli.main(["--worktree", str(tmp_path), "--docker", "--docker-image", "img:2"]) == 0
+    assert _FakeSandbox.instances[0].image == "img:2"
+
+
+def test_main_without_docker_has_no_sandbox(tmp_path: Path, monkeypatch) -> None:
+    called: dict = {}
+    _stub_main(monkeypatch, called)
+
+    assert cli.main(["--worktree", str(tmp_path)]) == 0
+    assert called["config"]["configurable"]["sandbox"] is None
+
+
+def test_main_fails_fast_when_docker_is_missing(tmp_path: Path, monkeypatch) -> None:
+    called: dict = {}
+    _stub_main(monkeypatch, called)
+    monkeypatch.setattr(
+        cli, "require_docker", lambda: (_ for _ in ()).throw(cli.SandboxError("no daemon"))
+    )
+
+    assert cli.main(["--worktree", str(tmp_path), "--docker"]) == 1
+    assert called == {}, "the REPL must not open without a working sandbox"
 
 
 class _EmptySnapshot:

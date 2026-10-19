@@ -59,6 +59,25 @@ def test_shell_anything_is_only_run_shell(tmp_path: Path) -> None:
     assert set(tools_by_name(tmp_path, shell_anything=True)) == {"run_shell"}
 
 
+class _FakeSandbox:
+    def run(self, command: str, timeout: int):  # noqa: ARG002
+        return 0, "from-container", ""
+
+
+def test_make_tools_hands_the_sandbox_to_run_shell(tmp_path: Path) -> None:
+    tools = tools_by_name(tmp_path, sandbox=_FakeSandbox())
+
+    out = tools["run_shell"].invoke({"command": "true"})
+
+    assert "from-container" in out
+
+
+def test_shell_anything_keeps_the_sandbox(tmp_path: Path) -> None:
+    tools = tools_by_name(tmp_path, shell_anything=True, sandbox=_FakeSandbox())
+
+    assert "from-container" in tools["run_shell"].invoke({"command": "true"})
+
+
 def test_debug_does_not_disturb_web_search(tmp_path: Path) -> None:
     both = {t.name for t in make_tools(tmp_path, enable_web_search=True, enable_debug=True)}
 

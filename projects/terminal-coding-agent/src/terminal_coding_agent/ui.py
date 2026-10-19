@@ -3,6 +3,7 @@
 import sys
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager, suppress
+from pathlib import Path
 from typing import Any
 
 from rich.console import Console, Group, RenderableType
@@ -205,3 +206,8 @@ def render_budget(state: Mapping[str, Any]) -> None:
     CONSOLE.print(
         f"[bold]turns[/] {state.get('turns', 0)}   [bold]stop[/] {state.get('stop_reason') or 'ok'}"
     )
+
+
+def render_workspace(path: Path) -> None:
+    """Point at the worktree after the session ends so its edits stay findable."""
+    CONSOLE.print(f"[dim]worktree[/] {escape(str(path))}")

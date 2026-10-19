@@ -202,6 +202,7 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
             enable_web_search=bool(configurable.get("enable_web_search")),
             enable_debug=enable_debug,
             shell_anything=shell_anything,
+            sandbox=configurable.get("sandbox"),
         ),
         worktree=worktree,
         sequence_events=sequence_events,

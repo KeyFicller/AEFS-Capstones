@@ -4,6 +4,7 @@ from pathlib import Path
 
 from langchain_core.tools import BaseTool
 
+from terminal_coding_agent.sandbox import DockerSandbox
 from terminal_coding_agent.tools.clock import build_current_time
 from terminal_coding_agent.tools.debug import build_debug
 from terminal_coding_agent.tools.fs import build_edit_file, build_read_file
@@ -19,20 +20,22 @@ def make_tools(
     enable_web_search: bool = False,
     enable_debug: bool = False,
     shell_anything: bool = False,
+    sandbox: DockerSandbox | None = None,
 ) -> list[BaseTool]:
     """The worktree's tools. `web_search` and the lldb tools are opt-in.
 
-    `shell_anything` replaces the set with `run_shell` alone.
+    `shell_anything` replaces the set with `run_shell` alone. `sandbox` moves
+    `run_shell` into a container; every other tool stays on the host.
     """
     root = worktree.resolve()
     if shell_anything:
-        return [build_run_shell(root)]
+        return [build_run_shell(root, sandbox=sandbox)]
     tools = [
         build_read_file(root),
         build_edit_file(root),
         build_ripgrep(root),
         build_tree_sitter_symbols(root),
-        build_run_shell(root),
+        build_run_shell(root, sandbox=sandbox),
         build_git(root),
         build_current_time(),
     ]
@@ -49,6 +52,7 @@ def tools_by_name(
     enable_web_search: bool = False,
     enable_debug: bool = False,
     shell_anything: bool = False,
+    sandbox: DockerSandbox | None = None,
 ) -> dict[str, BaseTool]:
     return {
         tool.name: tool
@@ -57,5 +61,6 @@ def tools_by_name(
             enable_web_search=enable_web_search,
             enable_debug=enable_debug,
             shell_anything=shell_anything,
+            sandbox=sandbox,
         )
     }

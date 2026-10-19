@@ -1,10 +1,9 @@
 """Interactive entry point: a chat REPL over the coding agent graph."""
 
 import argparse
-import tempfile
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from contextlib import AbstractContextManager, ExitStack, nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -22,8 +21,11 @@ from terminal_coding_agent.config import (
 )
 from terminal_coding_agent.graph import make_graph
 from terminal_coding_agent.models import build_models
+from terminal_coding_agent.sandbox import DockerSandbox, SandboxError, require_docker
 from terminal_coding_agent.session import pending_interrupts, resume_turn, run_task_turn
 from terminal_coding_agent.tools import display
+
+WORKSPACES_DIRNAME = ".agent-workspaces"
 
 
 class ToolOutputCommand(LocalCommand):
@@ -47,7 +49,11 @@ class ToolOutputCommand(LocalCommand):
 
 
 def _session_config(
-    *, worktree: Path, session: str, shell_anything: bool = False
+    *,
+    worktree: Path,
+    session: str,
+    shell_anything: bool = False,
+    sandbox: DockerSandbox | None = None,
 ) -> dict[str, Any]:
     """One thread per session; the todo renderer is injected here, not in graph.py."""
     return {
@@ -60,6 +66,7 @@ def _session_config(
             "enable_web_search": True,
             "enable_debug": True,
             "shell_anything": shell_anything,
+            "sandbox": sandbox,
             # "local_model": "qwen3:8b"
         }
     }
@@ -198,7 +205,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--worktree",
         default=None,
-        help="worktree the agent may touch; default: a throwaway temp dir",
+        help=(
+            "worktree the agent may touch; default: ./.agent-workspaces/<session>, kept"
+        ),
     )
     parser.add_argument("--session", default=None, help="thread id; default: random per session")
     parser.add_argument(
@@ -206,31 +215,58 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="bind only run_shell; read, edit, and git go through the shell",
     )
+    parser.add_argument(
+        "--docker",
+        action="store_true",
+        help="run run_shell in a Docker container mounted at the worktree",
+    )
+    parser.add_argument(
+        "--docker-image",
+        default="python:3.13-slim",
+        help="image for --docker; it must provide the commands the tasks run",
+    )
     args = parser.parse_args(argv)
 
     load_local_env(ENV_PATH)
     session = args.session or f"cli-{uuid.uuid4().hex[:8]}"
+    if args.worktree is None:
+        # Kept after the session so edits stay inspectable; never the repo root itself.
+        worktree = Path.cwd() / WORKSPACES_DIRNAME / session
+        worktree.mkdir(parents=True, exist_ok=True)
+    else:
+        worktree = Path(args.worktree).resolve()
 
-    with ExitStack() as stack:
-        if args.worktree is None:
-            # Throwaway default: nothing the agent writes — including .agent/ state —
-            # lands in your repo. It must outlive the whole session, so the stack
-            # owns the cleanup instead of a `with` around just this line.
-            temp = stack.enter_context(tempfile.TemporaryDirectory(prefix="terminal-coding-agent-"))
-            worktree = Path(temp)
-        else:
-            worktree = Path(args.worktree).resolve()
-        # The one place the interactive CLI picks a tool-log level; Harbor stays at "off".
-        display.LEVEL = "detail"
-        config = _session_config(
-            worktree=worktree, session=session, shell_anything=args.shell_anything
-        )
+    sandbox: DockerSandbox | None = None
+    if args.docker:
+        try:
+            require_docker()
+            sandbox = DockerSandbox(
+                worktree=worktree, image=args.docker_image, session=session
+            )
+            sandbox.start()
+        except SandboxError as exc:
+            render_error(str(exc))
+            return 1
+
+    # The one place the interactive CLI picks a tool-log level; Harbor stays at "off".
+    display.LEVEL = "detail"
+    config = _session_config(
+        worktree=worktree,
+        session=session,
+        shell_anything=args.shell_anything,
+        sandbox=sandbox,
+    )
+    try:
         repl(
             graph=make_graph(config),
             config=config,
             model_name=resolve_model_name(build_models(config).planner),
             commands=[ToolOutputCommand()],
         )
+    finally:
+        if sandbox is not None:
+            sandbox.close()
+        ui.render_workspace(worktree)
     return 0
 
 

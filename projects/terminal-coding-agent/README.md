@@ -15,6 +15,9 @@
 ./start.sh run terminal-coding-agent                              # 多轮 REPL；默认只写临时 worktree，退出即删
 ./start.sh run terminal-coding-agent --worktree /path/to/repo     # 真改代码；--session <id> 可续跑
 ./start.sh run terminal-coding-agent --shell_anything             # 只给 run_shell
+./start.sh run terminal-coding-agent --docker                     # run_shell 进容器，工作区挂到 /workspace
+# 不给 --worktree 时工作区是 ./.agent-workspaces/<session>，退出后保留
+# --docker 默认镜像 python:3.13-slim（只有 python3）；需要 git 等命令用 --docker-image
 ./start.sh test projects/terminal-coding-agent                    # 单测
 bash projects/terminal-coding-agent/scripts/verify_harbor_tasks_local.sh   # 任务集双向验证（真 Docker，不用 LLM / Harbor）
 ```

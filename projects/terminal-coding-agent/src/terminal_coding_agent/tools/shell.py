@@ -6,6 +6,7 @@ from pathlib import Path
 from langchain_core.tools import BaseTool, tool
 
 from terminal_coding_agent.config import SHELL_TIMEOUT_SECONDS
+from terminal_coding_agent.sandbox import DockerSandbox, SandboxError
 from terminal_coding_agent.tools.display import exit_code_and_output, tool_output
 from terminal_coding_agent.tools.truncate import truncate
 
@@ -46,7 +47,7 @@ def _kill_group(process: subprocess.Popen) -> None:
     process.communicate()
 
 
-def build_run_shell(worktree: Path) -> BaseTool:
+def build_run_shell(worktree: Path, *, sandbox: DockerSandbox | None = None) -> BaseTool:
     @tool
     @tool_output(lambda params, result: exit_code_and_output(result, line_count=True))
     def run_shell(command: str, timeout_sec: int | None = None) -> str:
@@ -61,8 +62,12 @@ def build_run_shell(worktree: Path) -> BaseTool:
         """
         timeout = timeout_sec if timeout_sec is not None else SHELL_TIMEOUT_SECONDS
         try:
-            result = _run(command, worktree, timeout)
-        except OSError as exc:
+            result = (
+                _run(command, worktree, timeout)
+                if sandbox is None
+                else sandbox.run(command, timeout)
+            )
+        except (OSError, SandboxError) as exc:
             return truncate(f"Error: could not run command: {exc}")
 
         if result is None:
