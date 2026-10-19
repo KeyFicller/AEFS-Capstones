@@ -1,11 +1,11 @@
-"""Aggregate one Harbor job directory into ``eval/results.jsonl``.
+"""Aggregate one Harbor job directory into ``projects/terminal-coding-agent/eval/results.jsonl``.
 
 Harbor's ``result.json`` leaves ``pass_at_k`` empty and ``cost_usd`` null, so the
 numbers are read straight from the trial directories instead: the verifier's
 ``reward.txt``, the agent's ``.agent/trace.json`` (turns / tokens / stop_reason)
 and the artifact manifest.
 
-Usage: python3 scripts/collect_eval_results.py <job-dir> [--out eval/results.jsonl]
+Usage: python3 scripts/collect_eval_results.py <job-dir> [--out <path>]
 """
 
 import argparse
@@ -15,16 +15,14 @@ from pathlib import Path
 
 TRIAL_SUFFIX = re.compile(r"__[A-Za-z0-9]+$")
 
-# Reporting order and the level each task belongs to. `greeter-fix` is the
-# smoke task and is deliberately excluded from the capability score.
+# Reporting order and the level each task belongs to.
 CAPABILITY_LEVELS = {
-    "l1-shipping-average": "L1",
-    "l2-unit-resolution": "L2",
-    "l3-metrics-labels": "L3",
-    "l4-cancelled-orders": "L4",
-    "l5-settings-cache": "L5",
+    "h1-order-desk": "H1",
+    "h2-mail-room": "H2",
+    "h3-stock-sync": "H3",
+    "h4-plan-billing": "H4",
 }
-SMOKE_TASKS = {"greeter-fix"}
+SMOKE_TASKS: set[str] = set()
 
 
 def task_id(trial_dir: Path) -> str:
@@ -110,7 +108,9 @@ def report(rows: list[dict]) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("job_dir", type=Path)
-    parser.add_argument("--out", type=Path, default=Path("eval/results.jsonl"))
+    # Anchored to the project, not the caller's cwd: runs happen from the repo root.
+    default_out = Path(__file__).resolve().parents[1] / "eval" / "results.jsonl"
+    parser.add_argument("--out", type=Path, default=default_out)
     args = parser.parse_args()
 
     rows = collect(args.job_dir)

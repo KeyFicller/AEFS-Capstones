@@ -7,15 +7,15 @@
 #   solve   - reference solution applied, must be reward 1 (the task is solvable)
 #   cheat-* - a plausible-but-wrong fix, must be reward 0 (the hidden tests bite)
 #
-# It also pins the visible-test contract of each level: L1/L2 must show a red
-# visible suite, L4/L5 a green one, L3 has none.
+# Every task must show a red visible suite while broken, and a green one once
+# the reference solution is applied.
 #
 # Usage: bash scripts/verify_harbor_tasks_local.sh [task ...]
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TASKS_DIR="$ROOT/harbor_tasks"
-DEFAULT_TASKS=(l1-shipping-average l2-unit-resolution l3-metrics-labels l4-cancelled-orders l5-settings-cache)
+DEFAULT_TASKS=(h1-order-desk h2-mail-room h3-stock-sync h4-plan-billing)
 
 if [ $# -gt 0 ]; then
   TASKS=("$@")
@@ -108,79 +108,74 @@ SH
 )"
 
   case "$task" in
-    l1-shipping-average|l2-unit-resolution)
+    h1-order-desk|h2-mail-room|h3-stock-sync|h4-plan-billing)
       run_case "$task" broken 0 1
-      run_case "$task" solve 1 0 "$solve_setup"
-      ;;
-    l3-metrics-labels)
-      run_case "$task" broken 0 none
-      run_case "$task" solve 1 none "$solve_setup"
-      ;;
-    l4-cancelled-orders)
-      run_case "$task" broken 0 0
-      run_case "$task" solve 1 0 "$solve_setup"
-      ;;
-    l5-settings-cache)
-      run_case "$task" broken 0 0
       run_case "$task" solve 1 0 "$solve_setup"
       ;;
   esac
 
-  if [ "$task" = "l2-unit-resolution" ]; then
+  # Each cheat turns the visible suite green and still fails the hidden verifier.
+  if [ "$task" = "h1-order-desk" ]; then
     cheat="$(setup_for "$task-cheat" <<'SH'
 python3 - <<'PY'
 from pathlib import Path
 
-# Plausible-but-wrong: patch the caller so the visible test goes green.
-Path("/app/report.py").write_text(
-    '"""Totals table rendering."""\n'
-    "\n"
-    "\n"
-    "def format_total(total: float, settings: dict) -> str:\n"
-    '    """One total line: the number, then the configured unit."""\n'
-    "    return f\"{total:.2f} {settings.get('unit', 'kg')}\"\n"
+source = Path("/app/checkout.py").read_text()
+old = "    tax = tax_on(base)"
+new = "    tax = tax_on(base - discount)"
+assert source.count(old) == 1
+Path("/app/checkout.py").write_text(source.replace(old, new))
+PY
+SH
+)"
+    run_case "$task" cheat-tax-only 0 0 "$cheat"
+  fi
+
+  if [ "$task" = "h2-mail-room" ]; then
+    cheat="$(setup_for "$task-cheat" <<'SH'
+python3 - <<'PY'
+from pathlib import Path
+
+source = Path("/app/dispatcher.py").read_text()
+old = '    key = job.get("subject") or job["id"]'
+new = '    key = job["id"]'
+assert source.count(old) == 1
+Path("/app/dispatcher.py").write_text(source.replace(old, new))
+PY
+SH
+)"
+    run_case "$task" cheat-dedupe-key 0 0 "$cheat"
+  fi
+
+  if [ "$task" = "h3-stock-sync" ]; then
+    cheat="$(setup_for "$task-cheat" <<'SH'
+python3 - <<'PY'
+from pathlib import Path
+
+Path("/app/sku.py").write_text(
+    'def canonical(sku):\n'
+    '    return "".join(str(sku).split()).replace("-", "").upper()\n'
 )
 PY
 SH
 )"
-    run_case "$task" cheat-caller-patch 0 0 "$cheat"
+    run_case "$task" cheat-sku-only 0 0 "$cheat"
   fi
 
-  if [ "$task" = "l5-settings-cache" ]; then
-    cheat_app="$(setup_for "$task-cheat-app" <<'SH'
+  if [ "$task" = "h4-plan-billing" ]; then
+    cheat="$(setup_for "$task-cheat" <<'SH'
 python3 - <<'PY'
 from pathlib import Path
 
-# Plausible-but-wrong: bypass the store inside App, leaving SettingsStore broken.
-source = Path("/app/app.py").read_text()
-old = "        return f\"running in {self.settings.get('mode')} mode\""
-new = "        return f\"running in {self.settings.source.read('mode')} mode\""
+source = Path("/app/billing.py").read_text()
+old = "    if trial_days and today_d <= first_paid:"
+new = "    if trial_days and today_d < first_paid:"
 assert source.count(old) == 1
-Path("/app/app.py").write_text(source.replace(old, new))
+Path("/app/billing.py").write_text(source.replace(old, new))
 PY
 SH
 )"
-    run_case "$task" cheat-app-bypass 0 0 "$cheat_app"
-
-    cheat_cache="$(setup_for "$task-cheat-cache" <<'SH'
-python3 - <<'PY'
-from pathlib import Path
-
-# Plausible-but-wrong: stop reading through the cache altogether.
-source = Path("/app/settings_store.py").read_text()
-old = """        cached = self._cache.read(key)
-        if cached is not None:
-            return cached
-        value = self.source.read(key, default)
-        self._cache.write(key, value)
-        return value"""
-new = "        return self.source.read(key, default)"
-assert source.count(old) == 1
-Path("/app/settings_store.py").write_text(source.replace(old, new))
-PY
-SH
-)"
-    run_case "$task" cheat-drop-cache 0 0 "$cheat_cache"
+    run_case "$task" cheat-trial-day 0 0 "$cheat"
   fi
 done
 

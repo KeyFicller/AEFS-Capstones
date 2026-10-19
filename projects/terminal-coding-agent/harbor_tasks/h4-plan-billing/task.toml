@@ -1,0 +1,31 @@
+schema_version = "1.4"
+artifacts = ["/app/.agent/trace.json", "/app/.agent/patch.diff"]
+
+[task]
+name = "local/h4-plan-billing"
+version = "1.0.0"
+description = "Messy subscription billing: an extra free day, case-sensitive cancel, and February."
+authors = []
+keywords = []
+
+[metadata]
+
+[verifier]
+timeout_sec = 600.0
+collect = []
+
+[verifier.env]
+
+[agent]
+timeout_sec = 900.0
+
+[environment]
+network_mode = "public"
+build_timeout_sec = 900.0
+os = "linux"
+workdir = "/app"
+mcp_servers = []
+
+[environment.env]
+
+[solution.env]
