@@ -28,6 +28,12 @@ SYSTEM_PROMPTS = {
     `report_blocked` tool with the failing command and its error instead of
     retrying the same command or guessing.
     """,
+    "shell_anything": """
+    The only tool you can call to do work is `run_shell`.
+    read_file, edit_file, ripgrep, tree_sitter_symbols, git, web_search, and the
+    debug tools are not available. Read, edit, run, and commit by passing a shell
+    command to `run_shell`.
+    """,
     "debug": """
     A live lldb session is available via `debug_start`, `debug_cmd`, `debug_stop`.
     Build the program with `-g -O0` first. `debug_cmd` runs one lldb command

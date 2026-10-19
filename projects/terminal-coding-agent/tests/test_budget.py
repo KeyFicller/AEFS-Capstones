@@ -69,4 +69,6 @@ def test_ledger_state_roundtrip():
     }
     led = ledger_from_state(state)
     assert led.turns == 2
+    assert led.max_tokens is None
+    assert led.max_cost_rmb is None
     assert budget_updates(led)["input_tokens"] == 8

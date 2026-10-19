@@ -7,7 +7,11 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from terminal_coding_agent import config
-from terminal_coding_agent.executor import _final_agent_message, build_execute_nodes
+from terminal_coding_agent.executor import (
+    _executor_prompt,
+    _final_agent_message,
+    build_execute_nodes,
+)
 from terminal_coding_agent.middleware import SequenceMiddleware
 from terminal_coding_agent.state import ToDoItem, ToDoStatus
 
@@ -58,6 +62,14 @@ def test_start_task_hard_stops_when_turns_exhausted(tmp_path: Path) -> None:
     assert trace["stop_reason"] == "max_turns"
 
 
+def test_shell_anything_prompt_names_only_run_shell() -> None:
+    prompt = _executor_prompt(enable_debug=True, shell_anything=True)
+
+    assert "run_shell" in prompt
+    assert "read_file" in prompt
+    assert "debug_start" not in prompt
+
+
 def test_final_agent_message_keeps_last_plain_ai() -> None:
     messages = [
         HumanMessage(content="do it"),
@@ -71,6 +83,31 @@ def test_final_agent_message_keeps_last_plain_ai() -> None:
     final = _final_agent_message(messages)
     assert final is not None
     assert final.content == "fixed the typo"
+
+
+def test_final_agent_message_drops_a_truncated_tool_call() -> None:
+    messages = [
+        AIMessage(content="earlier"),
+        AIMessage(
+            content="Now the main game module:",
+            invalid_tool_calls=[
+                {
+                    "type": "invalid_tool_call",
+                    "id": "call_1",
+                    "name": "run_shell",
+                    "args": '{"command": "cat',
+                    "error": "Unterminated string",
+                }
+            ],
+        ),
+    ]
+
+    final = _final_agent_message(messages)
+
+    assert final is not None
+    assert final.content == "Now the main game module:"
+    assert not final.invalid_tool_calls
+    assert not final.tool_calls
 
 
 def test_run_agent_blocked_records_evidence_without_transcript(tmp_path, monkeypatch) -> None:

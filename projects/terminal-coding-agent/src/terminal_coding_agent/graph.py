@@ -194,17 +194,20 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
     enable_intent = bool(configurable.get("enable_intent"))
     make_plan = build_planner(models, with_system_prompt=enable_intent)
     enable_debug = bool(configurable.get("enable_debug"))
+    shell_anything = bool(configurable.get("shell_anything"))
     execute = build_execute_nodes(
         models,
         make_tools(
             worktree,
             enable_web_search=bool(configurable.get("enable_web_search")),
             enable_debug=enable_debug,
+            shell_anything=shell_anything,
         ),
         worktree=worktree,
         sequence_events=sequence_events,
         enable_debug=enable_debug,
         enable_hitl=bool(configurable.get("enable_hitl")),
+        shell_anything=shell_anything,
     )
     recover = build_recover(make_plan, worktree=worktree)
 
@@ -332,7 +335,6 @@ if __name__ == "__main__":
         _stdout(f"input_tokens:      {response.get('input_tokens', 0)}")
         _stdout(f"output_tokens:     {response.get('output_tokens', 0)}")
         _stdout(f"cache_read_tokens: {response.get('cache_read_tokens', 0)}")
-        _stdout(f"cost_rmb:          {response.get('cost_rmb', 0.0):.6f}")
         _stdout(f"stop_reason:       {response.get('stop_reason')}")
         _stdout(f"replan_count:      {response.get('replan_count', 0)}")
         _stdout("----------------------")

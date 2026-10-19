@@ -167,6 +167,19 @@ def test_main_goes_straight_to_the_repl(tmp_path: Path, monkeypatch) -> None:
     assert called["model_name"] == "stub-model"
     assert called["config"]["configurable"]["thread_id"] == "s1"
     assert called["config"]["configurable"]["worktree"] == str(tmp_path)
+    assert called["config"]["configurable"]["shell_anything"] is False
+
+
+def test_main_shell_anything_sets_the_flag(tmp_path: Path, monkeypatch) -> None:
+    called: dict = {}
+    monkeypatch.setattr(cli, "load_local_env", lambda path: None)
+    monkeypatch.setattr(cli, "make_graph", lambda config: _FakeGraph())
+    monkeypatch.setattr(cli, "build_models", lambda config: SimpleNamespace(planner="stub"))
+    monkeypatch.setattr(cli, "resolve_model_name", lambda model: "stub-model")
+    monkeypatch.setattr(cli, "repl", lambda **kwargs: called.update(kwargs))
+
+    assert cli.main(["--worktree", str(tmp_path), "--shell_anything"]) == 0
+    assert called["config"]["configurable"]["shell_anything"] is True
 
 
 def test_main_defaults_to_a_throwaway_worktree(monkeypatch) -> None:

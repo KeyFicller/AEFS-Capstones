@@ -264,6 +264,36 @@ def test_make_graph_records_a_sequence_only_when_a_path_is_configured(
     assert captured["sequence_events"] == []
 
 
+def test_shell_anything_binds_only_run_shell(tmp_path: Path, monkeypatch) -> None:
+    os.environ["DEEPSEEK_API_KEY"] = "test"
+    seen: dict = {}
+    real = graph_module.make_tools
+
+    def spy(worktree, **kwargs):
+        tools = real(worktree, **kwargs)
+        seen["names"] = [tool.name for tool in tools]
+        seen["kwargs"] = kwargs
+        return tools
+
+    monkeypatch.setattr(graph_module, "make_tools", spy)
+    captured = _spy_on_execute_nodes(monkeypatch)
+    make_graph(
+        {
+            "configurable": {
+                "worktree": tmp_path,
+                "shell_anything": True,
+                "enable_web_search": True,
+                "enable_debug": True,
+            }
+        }
+    )
+    os.environ.pop("DEEPSEEK_API_KEY")
+
+    assert seen["names"] == ["run_shell"]
+    assert seen["kwargs"]["shell_anything"] is True
+    assert captured["shell_anything"] is True
+
+
 def test_gated_graph_adds_the_approval_node(tmp_path: Path) -> None:
     os.environ["DEEPSEEK_API_KEY"] = "test"
     agent = make_graph({"configurable": {"worktree": tmp_path, "enable_hitl": True}})

@@ -47,6 +47,18 @@ def test_debug_tools_are_opt_in(tmp_path: Path) -> None:
     assert enabled == default | debug_names
 
 
+def test_shell_anything_is_only_run_shell(tmp_path: Path) -> None:
+    names = {
+        t.name
+        for t in make_tools(
+            tmp_path, shell_anything=True, enable_web_search=True, enable_debug=True
+        )
+    }
+
+    assert names == {"run_shell"}
+    assert set(tools_by_name(tmp_path, shell_anything=True)) == {"run_shell"}
+
+
 def test_debug_does_not_disturb_web_search(tmp_path: Path) -> None:
     both = {t.name for t in make_tools(tmp_path, enable_web_search=True, enable_debug=True)}
 

@@ -38,11 +38,28 @@ logger = logging.getLogger(__name__)
 
 
 def _final_agent_message(agent_messages: list) -> AIMessage | None:
-    """Keep only the last AI reply (no tool_calls) for the parent message trail."""
+    """Keep only the last AI reply (no tool_calls) for the parent message trail.
+
+    A truncated call sits in `invalid_tool_calls` with `tool_calls` empty. Leaving
+    it in the parent transcript makes the next model request fail, so the text is
+    kept and the broken call is dropped.
+    """
     for message in reversed(agent_messages):
         if isinstance(message, AIMessage) and not getattr(message, "tool_calls", None):
+            if getattr(message, "invalid_tool_calls", None):
+                return message.model_copy(update={"invalid_tool_calls": []})
             return message
     return None
+
+
+def _executor_prompt(*, enable_debug: bool, shell_anything: bool) -> str:
+    """Executor system prompt. Shell-only mode replaces the debug addendum."""
+    prompt = SYSTEM_PROMPTS["executor"]
+    if shell_anything:
+        return prompt + "\n\n" + SYSTEM_PROMPTS["shell_anything"]
+    if enable_debug:
+        prompt += "\n\n" + SYSTEM_PROMPTS["debug"]
+    return prompt
 
 
 def build_execute_nodes(
@@ -53,6 +70,7 @@ def build_execute_nodes(
     sequence_events: list | None = None,
     enable_debug: bool = False,
     enable_hitl: bool = False,
+    shell_anything: bool = False,
 ) -> dict[str, Callable[[CodingAgentState], dict[str, Any]]]:
     """Three parent-graph nodes so IN_PROGRESS is committed (and printed) before the agent runs."""
 
@@ -112,9 +130,7 @@ def build_execute_nodes(
                 SequenceMiddleware(sequence_events, description=todo_list[task_index].description)
             )
 
-        base_prompt = SYSTEM_PROMPTS["executor"]
-        if enable_debug:
-            base_prompt += "\n\n" + SYSTEM_PROMPTS["debug"]
+        base_prompt = _executor_prompt(enable_debug=enable_debug, shell_anything=shell_anything)
         system_prompt = (
             base_prompt
             + "\n\nCurrent plan:\n"
@@ -173,7 +189,11 @@ def build_execute_nodes(
         agent = create_agent(
             model=models.executor,
             tools=tools,
-            system_prompt=SYSTEM_PROMPTS["executor"] + "\n\n" + SYSTEM_PROMPTS["chat"],
+            system_prompt=(
+                _executor_prompt(enable_debug=False, shell_anything=shell_anything)
+                + "\n\n"
+                + SYSTEM_PROMPTS["chat"]
+            ),
             middleware=middleware,
         )
         try:

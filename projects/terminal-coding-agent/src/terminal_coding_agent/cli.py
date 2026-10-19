@@ -46,7 +46,9 @@ class ToolOutputCommand(LocalCommand):
         return CommandOutcome(message=f"tool output {choice}")
 
 
-def _session_config(*, worktree: Path, session: str) -> dict[str, Any]:
+def _session_config(
+    *, worktree: Path, session: str, shell_anything: bool = False
+) -> dict[str, Any]:
     """One thread per session; the todo renderer is injected here, not in graph.py."""
     return {
         "configurable": {
@@ -57,6 +59,7 @@ def _session_config(*, worktree: Path, session: str) -> dict[str, Any]:
             "enable_intent": True,
             "enable_web_search": True,
             "enable_debug": True,
+            "shell_anything": shell_anything,
             # "local_model": "qwen3:8b"
         }
     }
@@ -198,6 +201,11 @@ def main(argv: list[str] | None = None) -> int:
         help="worktree the agent may touch; default: a throwaway temp dir",
     )
     parser.add_argument("--session", default=None, help="thread id; default: random per session")
+    parser.add_argument(
+        "--shell_anything",
+        action="store_true",
+        help="bind only run_shell; read, edit, and git go through the shell",
+    )
     args = parser.parse_args(argv)
 
     load_local_env(ENV_PATH)
@@ -214,7 +222,9 @@ def main(argv: list[str] | None = None) -> int:
             worktree = Path(args.worktree).resolve()
         # The one place the interactive CLI picks a tool-log level; Harbor stays at "off".
         display.LEVEL = "detail"
-        config = _session_config(worktree=worktree, session=session)
+        config = _session_config(
+            worktree=worktree, session=session, shell_anything=args.shell_anything
+        )
         repl(
             graph=make_graph(config),
             config=config,

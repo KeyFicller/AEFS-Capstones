@@ -14,10 +14,19 @@ from terminal_coding_agent.tools.web_search import build_web_search
 
 
 def make_tools(
-    worktree: Path, *, enable_web_search: bool = False, enable_debug: bool = False
+    worktree: Path,
+    *,
+    enable_web_search: bool = False,
+    enable_debug: bool = False,
+    shell_anything: bool = False,
 ) -> list[BaseTool]:
-    """The worktree's tools. `web_search` and the lldb tools are opt-in."""
+    """The worktree's tools. `web_search` and the lldb tools are opt-in.
+
+    `shell_anything` replaces the set with `run_shell` alone.
+    """
     root = worktree.resolve()
+    if shell_anything:
+        return [build_run_shell(root)]
     tools = [
         build_read_file(root),
         build_edit_file(root),
@@ -35,11 +44,18 @@ def make_tools(
 
 
 def tools_by_name(
-    worktree: Path, *, enable_web_search: bool = False, enable_debug: bool = False
+    worktree: Path,
+    *,
+    enable_web_search: bool = False,
+    enable_debug: bool = False,
+    shell_anything: bool = False,
 ) -> dict[str, BaseTool]:
     return {
         tool.name: tool
         for tool in make_tools(
-            worktree, enable_web_search=enable_web_search, enable_debug=enable_debug
+            worktree,
+            enable_web_search=enable_web_search,
+            enable_debug=enable_debug,
+            shell_anything=shell_anything,
         )
     }

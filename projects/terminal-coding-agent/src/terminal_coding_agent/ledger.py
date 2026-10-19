@@ -25,11 +25,6 @@ def trace_path(worktree: Path) -> Path:
 def ledger_from_state(state: dict[str, Any]) -> Budget:
     return Budget(
         max_turns=config.MAX_TURNS,
-        max_tokens=config.MAX_TOKENS,
-        max_cost_rmb=config.MAX_COST_RMB,
-        price_cache_hit_per_m=config.PRICE_CACHE_HIT_PER_M,
-        price_cache_miss_per_m=config.PRICE_CACHE_MISS_PER_M,
-        price_output_per_m=config.PRICE_OUTPUT_PER_M,
         turns=state.get("turns", 0),
         tokens=state.get("tokens", 0),
         input_tokens=state.get("input_tokens", 0),

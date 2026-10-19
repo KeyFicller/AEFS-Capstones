@@ -14,6 +14,7 @@
 ./start.sh setup                                                  # 共享 .venv + 依赖，只需一次
 ./start.sh run terminal-coding-agent                              # 多轮 REPL；默认只写临时 worktree，退出即删
 ./start.sh run terminal-coding-agent --worktree /path/to/repo     # 真改代码；--session <id> 可续跑
+./start.sh run terminal-coding-agent --shell_anything             # 只给 run_shell
 ./start.sh test projects/terminal-coding-agent                    # 单测
 bash projects/terminal-coding-agent/scripts/verify_harbor_tasks_local.sh   # 任务集双向验证（真 Docker，不用 LLM / Harbor）
 ```

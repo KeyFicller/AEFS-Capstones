@@ -54,11 +54,7 @@ def test_wrap_model_call_hard_stops_without_handler() -> None:
 
 
 def test_wrap_model_call_applies_usage_from_model_response() -> None:
-    ledger = Budget(
-        price_cache_hit_per_m=config.PRICE_CACHE_HIT_PER_M,
-        price_cache_miss_per_m=config.PRICE_CACHE_MISS_PER_M,
-        price_output_per_m=config.PRICE_OUTPUT_PER_M,
-    )
+    ledger = Budget()
     middleware = BudgetMiddleware(ledger)
 
     def handler(request):
@@ -71,7 +67,7 @@ def test_wrap_model_call_applies_usage_from_model_response() -> None:
     assert ledger.input_tokens == 100
     assert ledger.output_tokens == 20
     assert ledger.cache_read_tokens == 40
-    assert ledger.cost_rmb > 0
+    assert ledger.cost_rmb == 0
 
 
 def test_after_agent_does_not_write_trace(tmp_path: Path) -> None:
