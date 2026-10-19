@@ -49,8 +49,8 @@ def worktree_patch(worktree: Path) -> str:
     )
 
 
-def publish_patch(worktree: Path) -> list[Path]:
-    """Write :func:`worktree_patch` to the worktree and, when mounted, to Harbor.
+def publish_patch(worktree: Path, artifacts: Path | None = None) -> list[Path]:
+    """Write :func:`worktree_patch` to the worktree (or `artifacts`) and, when mounted, to Harbor.
 
     Never raises: it runs from the graph's Stop hook, where an exception would
     turn an otherwise finished run into a trial failure. The diff is built inside
@@ -58,7 +58,7 @@ def publish_patch(worktree: Path) -> list[Path]:
     """
     try:
         patch = worktree_patch(worktree)
-        targets = [worktree / PATCH_RELPATH]
+        targets = [(artifacts or worktree / ".agent") / PATCH_FILENAME]
         if HARBOR_ARTIFACTS_DIR.is_dir():
             targets.append(HARBOR_ARTIFACTS_DIR / PATCH_FILENAME)
     except OSError:

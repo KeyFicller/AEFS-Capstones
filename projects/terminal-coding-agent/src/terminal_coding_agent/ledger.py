@@ -16,9 +16,12 @@ def summarize_todos(todo_list: Sequence[ToDoItem]) -> list[dict[str, str]]:
     return [{"description": item.description, "status": item.status.name} for item in todo_list]
 
 
-def trace_path(worktree: Path) -> Path:
-    """Where the Stop trace is written: {worktree}/.agent/trace.json."""
-    return worktree / ".agent" / "trace.json"
+TRACE_FILENAME = "trace.json"
+
+
+def trace_path(worktree: Path, artifacts: Path | None = None) -> Path:
+    """Where the Stop trace is written: `artifacts` if given, else {worktree}/.agent."""
+    return (artifacts or worktree / ".agent") / TRACE_FILENAME
 
 
 def ledger_from_state(state: dict[str, Any]) -> Budget:

@@ -16,7 +16,8 @@ from langgraph.checkpoint.base import (
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.sqlite import SqliteSaver
 
-CHECKPOINT_RELPATH = ".agent/checkpoints.sqlite"
+CHECKPOINT_FILENAME = "checkpoints.sqlite"
+CHECKPOINT_RELPATH = f".agent/{CHECKPOINT_FILENAME}"
 
 # msgpack cannot infer these two app types; allowlist them explicitly.
 _ALLOWED_MSGPACK_MODULES = [
@@ -25,9 +26,9 @@ _ALLOWED_MSGPACK_MODULES = [
 ]
 
 
-def checkpoint_path(worktree: Path) -> Path:
-    """Where the checkpointer lives: {worktree}/.agent/checkpoints.sqlite."""
-    return worktree / CHECKPOINT_RELPATH
+def checkpoint_path(worktree: Path, artifacts: Path | None = None) -> Path:
+    """`artifacts` when a run keeps its state outside the worktree, else {worktree}/.agent."""
+    return (artifacts or worktree / ".agent") / CHECKPOINT_FILENAME
 
 
 def state_serde() -> JsonPlusSerializer:
@@ -81,8 +82,8 @@ class AsyncCapableSqliteSaver(SqliteSaver):
         await asyncio.to_thread(self.put_writes, config, writes, task_id, task_path)
 
 
-def build_checkpointer(worktree: Path) -> AsyncCapableSqliteSaver:
-    path = checkpoint_path(worktree)
+def build_checkpointer(worktree: Path, *, artifacts: Path | None = None) -> AsyncCapableSqliteSaver:
+    path = checkpoint_path(worktree, artifacts)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), check_same_thread=False)
     return AsyncCapableSqliteSaver(conn, serde=state_serde())

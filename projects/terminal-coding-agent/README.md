@@ -22,6 +22,7 @@ bash projects/terminal-coding-agent/scripts/verify_harbor_tasks_local.sh   # 任
 | 参数 | 默认 | 作用 |
 |---|---|---|
 | `--worktree <path>` | `./.agent-workspaces/<session>`，退出后保留 | agent 可改的工作区；指向真实的仓库才会真改代码 |
+| `--repo <path>` | — | 直接在现有 git 仓库里就地工作（与 `--worktree` 互斥）；运行产物写到 `~/.cache/terminal-coding-agent/<session>`，不进仓库 |
 | `--session <id>` | 随机 `cli-xxxxxxxx` | thread id；同一个 id 可续跑 |
 | `--shell_anything` | 关 | 只给 `run_shell`，读/改/git 全走 shell |
 | `--docker` | 关 | `run_shell` 改在容器里执行，工作区 `-v` 挂到 `/workspace` |

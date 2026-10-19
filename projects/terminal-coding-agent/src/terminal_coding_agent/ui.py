@@ -187,3 +187,16 @@ def render_danger_warning(path: Path) -> None:
         f"[bold yellow]dangerous[/] network and command fences are off in the sandbox "
         f"mounted at {escape(str(path))}"
     )
+
+
+def render_repo_warning(path: Path) -> None:
+    """`patch.diff` is `git diff HEAD`, so pre-existing edits will be mixed in."""
+    CONSOLE.print(
+        f"[bold yellow]dirty[/] {escape(str(path))} has uncommitted changes; "
+        "the patch will mix them with the agent's edits"
+    )
+
+
+def render_artifacts(path: Path) -> None:
+    """Point at the run state when it lives outside the worktree, so the trace stays findable."""
+    CONSOLE.print(f"[dim]artifacts[/] {escape(str(path))}")

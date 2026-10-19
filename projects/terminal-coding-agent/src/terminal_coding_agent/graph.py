@@ -105,7 +105,14 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
     sequence_path = Path(sequence_raw) if sequence_raw else None
     sequence_events: list | None = [] if sequence_path else None
 
-    setup_tracing(worktree=worktree)
+    # Run state (checkpoint / trace / otel / patch) lives outside the worktree when the
+    # caller supplies a directory; `--repo` does, so a real repository stays clean.
+    raw_artifacts = configurable.get("artifacts_dir")
+    artifacts = Path(str(raw_artifacts)) if raw_artifacts else None
+    if artifacts is not None:
+        artifacts.mkdir(parents=True, exist_ok=True)
+
+    setup_tracing(worktree=worktree, artifacts=artifacts)
 
     enable_intent = bool(configurable.get("enable_intent"))
     enable_debug = bool(configurable.get("enable_debug"))
@@ -134,12 +141,13 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
     summary = build_summary(
         models,
         worktree=worktree,
+        artifacts=artifacts,
         sequence_events=sequence_events,
         sequence_path=sequence_path,
     )
 
     def _finish(graph: StateGraph) -> CompiledStateGraph:
-        compiled = graph.compile(checkpointer=build_checkpointer(worktree))
+        compiled = graph.compile(checkpointer=build_checkpointer(worktree, artifacts=artifacts))
         # Only pay for the second compile when a diagram was actually asked for.
         inner = execute["diagram_agent"]() if configurable.get("mermaid_path") else None
         _write_mermaid_png(compiled, config, inner)

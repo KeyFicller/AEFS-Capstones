@@ -86,6 +86,17 @@ def test_make_graph_persists_checkpoints(tmp_path: Path) -> None:
     assert (tmp_path / ".agent" / "checkpoints.sqlite").is_file()
 
 
+def test_artifacts_dir_moves_the_checkpoint_out_of_the_worktree(tmp_path: Path) -> None:
+    """`--repo` sets this so a real repository never grows a `.agent` directory."""
+    artifacts = tmp_path / "state"
+    agent = _graph(tmp_path, artifacts_dir=str(artifacts))
+
+    cfg = {"configurable": {"worktree": tmp_path, "thread_id": "t1"}}
+    assert agent.get_state(cfg) is not None
+    assert (artifacts / "checkpoints.sqlite").is_file()
+    assert not (tmp_path / ".agent").exists()
+
+
 def test_invoke_without_thread_id_uses_injected_default(tmp_path: Path) -> None:
     # A checked graph raises without thread_id; with_config must supply a default.
     assert _graph(tmp_path).config["configurable"]["thread_id"]

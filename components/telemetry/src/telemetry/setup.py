@@ -14,14 +14,19 @@ from opentelemetry.sdk.trace.export import (
 )
 from opentelemetry.trace import Tracer
 
-# Relative path under a worktree (string form for callers that concatenate).
-OTEL_JSONL_RELPATH = ".agent/otel.jsonl"
+ARTIFACTS_DIRNAME = ".agent"
+OTEL_JSONL_FILENAME = "otel.jsonl"
 DEFAULT_LANGFUSE_BASE_URL = "https://cloud.langfuse.com"
 
 
-def otel_jsonl_path(worktree: Path | str) -> Path:
-    """Build `{worktree}/.agent/otel.jsonl` via string concat (stable for copy/export)."""
-    return Path(str(worktree).rstrip("/") + "/" + OTEL_JSONL_RELPATH)
+def otel_jsonl_path(worktree: Path | str, artifacts: Path | str | None = None) -> Path:
+    """`{artifacts}/otel.jsonl`, or `{worktree}/.agent/otel.jsonl` when no artifacts dir is given."""
+    root = (
+        Path(artifacts)
+        if artifacts is not None
+        else Path(str(worktree).rstrip("/")) / ARTIFACTS_DIRNAME
+    )
+    return root / OTEL_JSONL_FILENAME
 
 
 def langfuse_env() -> tuple[str, str, str] | None:
@@ -68,9 +73,13 @@ class JSONLSpanExporter(SpanExporter):
             self.file = None
 
 
-def configure_default_exporters(provider: TracerProvider, worktree: Path) -> None:
+def configure_default_exporters(
+    provider: TracerProvider, worktree: Path, artifacts: Path | str | None = None
+) -> None:
     """JSONL always. Optional OTLP only when LANGFUSE_OTLP=1 (CallbackHandler is preferred)."""
-    provider.add_span_processor(SimpleSpanProcessor(JSONLSpanExporter(otel_jsonl_path(worktree))))
+    provider.add_span_processor(
+        SimpleSpanProcessor(JSONLSpanExporter(otel_jsonl_path(worktree, artifacts)))
+    )
     if os.environ.get("LANGFUSE_OTLP", "").strip() != "1":
         return
     creds = langfuse_env()
@@ -88,7 +97,12 @@ def configure_default_exporters(provider: TracerProvider, worktree: Path) -> Non
     )
 
 
-def setup_tracing(*, worktree: Path, exporter: SpanExporter | None = None) -> TracerProvider:
+def setup_tracing(
+    *,
+    worktree: Path,
+    artifacts: Path | str | None = None,
+    exporter: SpanExporter | None = None,
+) -> TracerProvider:
     current = trace.get_tracer_provider()
     if isinstance(current, TracerProvider):
         # Global provider is once-only; attach extra exporters for later callers (tests).
@@ -98,7 +112,7 @@ def setup_tracing(*, worktree: Path, exporter: SpanExporter | None = None) -> Tr
 
     provider = TracerProvider()
     if exporter is None:
-        configure_default_exporters(provider, worktree)
+        configure_default_exporters(provider, worktree, artifacts)
     else:
         provider.add_span_processor(SimpleSpanProcessor(exporter))
 

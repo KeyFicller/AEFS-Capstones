@@ -1,6 +1,8 @@
 """Interactive entry point: a chat REPL over the coding agent graph."""
 
 import argparse
+import os
+import subprocess
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
@@ -26,6 +28,48 @@ from terminal_coding_agent.session import pending_interrupts, resume_turn, run_t
 from terminal_coding_agent.tools import display
 
 WORKSPACES_DIRNAME = ".agent-workspaces"
+CACHE_DIRNAME = "terminal-coding-agent"
+GIT_TIMEOUT_SECONDS = 15
+
+
+class RepoError(RuntimeError):
+    """`--repo` did not point at a usable git repository."""
+
+
+def _git(path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """One read-only git query; a missing git binary is reported like a failed query."""
+    try:
+        return subprocess.run(
+            ["git", "-C", str(path), *args],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=GIT_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RepoError(f"git is not available: {exc}") from exc
+
+
+def repo_root(raw: str) -> Path:
+    """Top level of the git repository containing `raw`; a subdirectory resolves upward."""
+    result = _git(Path(raw), "rev-parse", "--show-toplevel")
+    if result.returncode != 0 or not result.stdout.strip():
+        detail = result.stderr.strip() or "not a git repository"
+        raise RepoError(f"{raw}: {detail}")
+    return Path(result.stdout.strip()).resolve()
+
+
+def has_uncommitted_changes(repo: Path) -> bool:
+    """True when `git diff HEAD` would mix the user's edits into this run's patch."""
+    return bool(_git(repo, "status", "--porcelain").stdout.strip())
+
+
+def artifacts_dir(session: str) -> Path:
+    """Run state for a `--repo` session, kept outside the repository."""
+    cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    path = cache / CACHE_DIRNAME / session
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 class ToolOutputCommand(LocalCommand):
@@ -55,23 +99,25 @@ def _session_config(
     shell_anything: bool = False,
     allow_dangerous: bool = False,
     sandbox: DockerSandbox | None = None,
+    artifacts: Path | None = None,
 ) -> dict[str, Any]:
     """One thread per session; the todo renderer is injected here, not in graph.py."""
-    return {
-        "configurable": {
-            "worktree": str(worktree),
-            "thread_id": session,
-            "todo_renderer": ui.TodoPanel(),
-            "enable_hitl": False,
-            "enable_intent": True,
-            "enable_web_search": True,
-            "enable_debug": True,
-            "shell_anything": shell_anything,
-            "allow_dangerous": allow_dangerous,
-            "sandbox": sandbox,
-            # "local_model": "qwen3:8b"
-        }
+    configurable: dict[str, Any] = {
+        "worktree": str(worktree),
+        "thread_id": session,
+        "todo_renderer": ui.TodoPanel(),
+        "enable_hitl": False,
+        "enable_intent": True,
+        "enable_web_search": True,
+        "enable_debug": True,
+        "shell_anything": shell_anything,
+        "allow_dangerous": allow_dangerous,
+        "sandbox": sandbox,
+        # "local_model": "qwen3:8b"
     }
+    if artifacts is not None:
+        configurable["artifacts_dir"] = str(artifacts)
+    return {"configurable": configurable}
 
 
 def _render_task_result(result: dict[str, Any]) -> None:
@@ -121,6 +167,18 @@ def _drive_approvals(
         if not remaining:
             return result
         pending = remaining[0]
+
+
+def _repl_info(configurable: Mapping[str, Any], *, model_name: str) -> dict[str, str]:
+    """Header lines; `artifacts` only shows up when run state lives outside the worktree."""
+    info = {
+        "session": str(configurable["thread_id"]),
+        "worktree": str(configurable["worktree"]),
+        "model": model_name,
+    }
+    if artifacts := configurable.get("artifacts_dir"):
+        info["artifacts"] = str(artifacts)
+    return info
 
 
 def repl(
@@ -176,11 +234,7 @@ def repl(
 
     Repl(
         title="terminal-coding-agent",
-        info={
-            "session": str(configurable["thread_id"]),
-            "worktree": str(configurable["worktree"]),
-            "model": model_name,
-        },
+        info=_repl_info(configurable, model_name=model_name),
         root=worktree,
         on_task=guarded,
         commands=commands,
@@ -192,10 +246,19 @@ def repl(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="terminal-coding-agent")
-    parser.add_argument(
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument(
         "--worktree",
         default=None,
         help=("worktree the agent may touch; default: ./.agent-workspaces/<session>, kept"),
+    )
+    source.add_argument(
+        "--repo",
+        default=None,
+        help=(
+            "existing git repository to work in, editing it in place; run state "
+            "(checkpoint / trace / otel / patch) goes to the cache dir"
+        ),
     )
     parser.add_argument("--session", default=None, help="thread id; default: random per session")
     parser.add_argument(
@@ -228,7 +291,18 @@ def main(argv: list[str] | None = None) -> int:
 
     load_local_env(ENV_PATH)
     session = args.session or f"cli-{uuid.uuid4().hex[:8]}"
-    if args.worktree is None:
+
+    artifacts: Path | None = None
+    if args.repo:
+        try:
+            worktree = repo_root(args.repo)
+        except RepoError as exc:
+            render_error(str(exc))
+            return 2
+        if has_uncommitted_changes(worktree):
+            ui.render_repo_warning(worktree)
+        artifacts = artifacts_dir(session)
+    elif args.worktree is None:
         # Kept after the session so edits stay inspectable; never the repo root itself.
         worktree = Path.cwd() / WORKSPACES_DIRNAME / session
         worktree.mkdir(parents=True, exist_ok=True)
@@ -260,6 +334,7 @@ def main(argv: list[str] | None = None) -> int:
         shell_anything=args.shell_anything,
         allow_dangerous=args.allow_dangerous,
         sandbox=sandbox,
+        artifacts=artifacts,
     )
     try:
         repl(
@@ -272,6 +347,8 @@ def main(argv: list[str] | None = None) -> int:
         if sandbox is not None:
             sandbox.close()
         ui.render_workspace(worktree)
+        if artifacts is not None:
+            ui.render_artifacts(artifacts)
     return 0
 
 

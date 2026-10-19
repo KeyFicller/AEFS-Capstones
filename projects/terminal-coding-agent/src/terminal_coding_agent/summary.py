@@ -53,6 +53,7 @@ def build_summary(
     models: AgentModels,
     *,
     worktree: Path,
+    artifacts: Path | None = None,
     sequence_events: list | None = None,
     sequence_path: Path | None = None,
 ) -> Callable[[CodingAgentState, RunnableConfig], dict[str, Any]]:
@@ -87,9 +88,9 @@ def build_summary(
         finally:
             # The patch goes first: the Stop hook must publish it even if a
             # later diagnostic write fails.
-            publish_patch(worktree)
+            publish_patch(worktree, artifacts)
             write_trace(
-                trace_path(worktree),
+                trace_path(worktree, artifacts),
                 ledger,
                 todo_list=summarize_todos(state.get("todo_list") or []),
                 stop_reason=state.get("stop_reason") or "completed",
