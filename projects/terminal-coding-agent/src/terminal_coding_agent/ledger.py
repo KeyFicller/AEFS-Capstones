@@ -8,7 +8,6 @@ from typing import Any
 
 from budget import Budget, usage_from_message
 
-from terminal_coding_agent import config
 from terminal_coding_agent.state import ToDoItem
 
 
@@ -23,8 +22,8 @@ def trace_path(worktree: Path) -> Path:
 
 
 def ledger_from_state(state: dict[str, Any]) -> Budget:
+    # No turn cap here: `ModelCallLimitMiddleware` owns that, so it has one authority.
     return Budget(
-        max_turns=config.MAX_TURNS,
         turns=state.get("turns", 0),
         tokens=state.get("tokens", 0),
         input_tokens=state.get("input_tokens", 0),
@@ -76,7 +75,7 @@ class BudgetSession:
         self.ledger = ledger_from_state(state)
         self._messages: list[Any] = []
 
-    def __enter__(self) -> "BudgetSession":
+    def __enter__(self) -> BudgetSession:
         return self
 
     def observe(self, message: Any) -> None:

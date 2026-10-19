@@ -4,7 +4,7 @@
 
 ![REPL 实跑](example.png)
 
-循环骨架：`make_plan` → `start_task` / `run_agent` / `end_task` → `recover` → `summary`。Act 只分派工具，Observe 截断输出回填，Recover 把失败当 Observation 重排计划（上界 3 次），所有终止路径都汇到 `summary` 写 trace。CLI 另有一条直答短路径：图首 `intent` 节点判为 `chat` 的请求走 `chat` → `summary`，不产生 todo、不动环境；下图 `graph.png` 是**开该分支**的 CLI 拓扑。
+循环骨架：单个 `create_agent` 跑完整条请求，计划由原生 `TodoListMiddleware`（`write_todos`）维护 —— 没有独立的 planner / replanner 节点，也没有计划审批门；轮次上限由原生 `ModelCallLimitMiddleware` 执行，所有终止路径汇到 `summary` 写 trace。CLI 另有一条直答短路径：图首 `intent` 节点判为 `chat` 的请求走 `chat` → `summary`，不产生 todo、不动环境；下图 `graph.png` 是**开该分支**的 CLI 拓扑。
 
 ![图结构](graph.png)
 

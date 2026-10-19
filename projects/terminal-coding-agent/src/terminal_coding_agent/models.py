@@ -9,12 +9,6 @@ from langchain_ollama import ChatOllama
 from terminal_coding_agent.config import MODEL
 
 SYSTEM_PROMPTS = {
-    "planner": """
-    You are the planner for a terminal coding agent. Turn the user's request into a plan.
-
-    `steps` must end with the deliverable itself: never append a separate check or report
-    step (fold verification into the producing step). Keep the number of steps minimal.
-    """,
     "chat": """
     Answer the user directly in your reply: the content itself (the essay, the
     explanation, the translation, ...) is the deliverable. Do not write it to a file,
@@ -22,14 +16,24 @@ SYSTEM_PROMPTS = {
     """,
     "executor": """
     You are a helpful assistant that helps the user to execute the task.
-    The user will provide you with a task step and you will need to execute.
+    The user will provide you with a request and you will need to carry it out.
 
-    If the step cannot be completed after a genuine attempt, call the
+    If the task cannot be completed after a genuine attempt, call the
     `report_blocked` tool with the failing command and its error instead of
     retrying the same command or guessing.
     """,
+    "executor_only": """
+    Break the task down yourself, carry it out with the tools, and verify the result
+    by running the project's tests before you finish.
+    """,
+    "planning": """
+    When the request spans several steps — more than one file, or edit → run →
+    verify — write the steps down with `write_todos` (three to six one-line items)
+    and keep their status current as you go. A single command or a single-file
+    read does not need a list.
+    """,
     "shell_anything": """
-    The only tool you can call to do work is `run_shell`.
+    The only tool for doing work is `run_shell`; the todo list is still yours to use.
     read_file, edit_file, ripgrep, tree_sitter_symbols, git, web_search, and the
     debug tools are not available. Read, edit, run, and commit by passing a shell
     command to `run_shell`.

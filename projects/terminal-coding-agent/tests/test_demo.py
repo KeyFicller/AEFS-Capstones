@@ -13,7 +13,7 @@ def test_seed_demo_worktree(tmp_path: Path) -> None:
     assert "SystemExit" in text
     assert "Hello, agent" in DEMO_TASK
     assert "python3 greeter.py" in DEMO_TASK
-    assert "report_blocked" in DEMO_TASK
+    assert "write_todos" not in DEMO_TASK, "planning is the agent's call, not a scripted step"
 
 
 def test_seed_demo_worktree_is_idempotent(tmp_path: Path) -> None:

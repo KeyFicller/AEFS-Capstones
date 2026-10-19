@@ -36,21 +36,24 @@ def _model_response_with_usage(
     )
 
 
-def test_wrap_model_call_hard_stops_without_handler() -> None:
+def test_wrap_model_call_only_counts_spend() -> None:
+    """Enforcement lives in `ModelCallLimitMiddleware`; this layer must not second-guess it."""
     ledger = Budget(max_turns=config.MAX_TURNS, turns=config.MAX_TURNS)
     middleware = BudgetMiddleware(ledger)
     called = {"n": 0}
 
     def handler(request):
         called["n"] += 1
-        return AIMessage(content="should not run")
+        return AIMessage(
+            content="ran",
+            usage_metadata={"input_tokens": 3, "output_tokens": 4, "total_tokens": 7},
+        )
 
     out = middleware.wrap_model_call(request=_dummy_model_request(), handler=handler)
 
-    assert called["n"] == 0
-    assert isinstance(out, AIMessage)
-    assert "budget exceeded" in out.content.lower()
-    assert ledger.stop_reason == "max_turns"
+    assert called["n"] == 1
+    assert out.content == "ran"
+    assert ledger.turns == config.MAX_TURNS + 1
 
 
 def test_wrap_model_call_applies_usage_from_model_response() -> None:

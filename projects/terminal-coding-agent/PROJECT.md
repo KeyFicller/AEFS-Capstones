@@ -2,7 +2,7 @@
 
 - **项目**：terminal-coding-agent / 所属 Phase：Phase19 / Capstone 01
 - **spec**：[Capstone 01 — Terminal-native coding agent](https://aiengineeringfromscratch.com/lesson?path=phases%2F19-capstone-projects%2F01-terminal-native-coding-agent)
-- **状态**：**交付重点在 CLI**。CLI 已交付（多轮 REPL / 输入前缀 / HITL / 8 hook / OTel）；Harbor 评测链路也已跑通（垂直切片 + 5 题任务集，实测 5/5）。**已知降级** 3 处：Ctrl-C 取消的那一轮不写 trace、`!` 无破坏性守卫、`@` 图片不剥离。**未做**：PR 发布、OTel trace 归档、失败报告。
+- **状态**：**交付重点在 CLI**。CLI 已交付（多轮 REPL / 输入前缀 / HITL / 8 hook / OTel）；Harbor 评测链路也已跑通（垂直切片 + 4 题任务集 `h1`–`h4`，四臂 32 trial 零异常）。**已知降级** 3 处：Ctrl-C 取消的那一轮不写 trace、`!` 无破坏性守卫、`@` 图片不剥离。**未做**：PR 发布、OTel trace 归档、失败报告。
 
 ## 目标与范围
 
@@ -62,7 +62,7 @@
 
 **lldb 调试工具（2026-10-09，已交付）**：`debug_start` / `debug_cmd` / `debug_stop` 三件套，agent 在一个活会话里连续设断点、运行、看变量与调用栈。会话住独立 `python3.9` worker（绑定限 3.9），主进程经逐行 JSON 驱动，**不解析 console**；超时由 watchdog 线程 `SBProcess.Stop()` 打断、会话仍可用。由 `enable_debug` 开启、默认关 → Harbor 工具表逐字不变。**只在本地 CLI 交付**（沙箱无 lldb）。
 
-**Harbor 评测证据（已交付，非当前重点）**：`harbor_tasks/` 下 5 题能力集（`l1`–`l5`，按 L2 定位难度递进）+ `greeter-fix` 烟测，配 `langgraph.json` + `requirements-harbor.txt`。
+**Harbor 评测证据（已交付，非当前重点）**：`harbor_tasks/` 下 4 题能力集（`h1-order-desk` / `h2-mail-room` / `h3-stock-sync` / `h4-plan-billing`，均为「表面症状误导 + 隐藏不变量测试」的业务逻辑缺陷），配 `langgraph.json` + `requirements-harbor.txt`。
 
 - **跑批**（cwd = 仓库根，job 落仓库根 `jobs/`）：
 
@@ -72,14 +72,25 @@ set -a; source local.env; set +a
 harbor run -p projects/terminal-coding-agent/harbor_tasks \
   -a langgraph -m deepseek:deepseek-v4-flash \
   --ae DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
-  --allow-agent-host api.deepseek.com -k 1 -n 2 \
+  --allow-agent-host api.deepseek.com -k 2 -n 4 \
   --ak project_path="$(pwd)/projects/terminal-coding-agent"
 ```
 
+- **四臂**：默认（Plan + Executor，全工具 + 围栏）；`--ak 'configurable={"shell_anything": true}'`（只给 `run_shell`）；`--ak 'configurable={"allow_dangerous": true}'`（全工具、去围栏）；`--ak 'configurable={"executor_only": true}'`（去掉 Plan，只留 Executor 一段循环）。
+
 - **模型与凭据可换**：`configurable["planner"]` / `["executor"]` 收 `provider:model` 串（缺省 `deepseek:deepseek-v4-flash`），`configurable["local_model"]` 走本地 Ollama（不取 API key）；上面命令里的 `-m` 与 `--ae` 随所选 provider 一起改。
-- **实测**（job `jobs/<跑批目录>`，8m29s，0.17 元）：能力题 **5/5**，逐档 L1–L5 全 pass；6 trial 零异常，`stop_reason` 全 `completed`，artifact 全 `ok`，`patch.diff` 均非空。本地双向验证 **13/13**（broken→0 / solve→1，L2 与 L5 各含作弊解→0）。
-- **当前无区分度**：`deepseek-v4-flash` 把 5 档全解了。阶梯可证伪（broken 态确实 0 分）但已饱和；下一版在同样 5 档内加深，或换更弱模型当被试。
-- 汇总：`python3 scripts/collect_eval_results.py <job-dir>` → `eval/results.jsonl`（逐题 `reward` / `turns` / in-out tokens / `cost_rmb` / `stop_reason` / artifact 状态）。
+- **实测**（`deepseek-v4-flash`，每题 2 次尝试，共 32 trial，全部 0 异常、`stop_reason` 全 `completed`、artifact 全 `ok`）：
+
+| arm | 通过 | Wilson 95% | 平均轮次 | 平均输入 tok | 平均输出 tok |
+|---|---|---|---|---|---|
+| baseline（Plan + Executor） | 6/8 | 41%–93% | 24.4 | 101,889 | 4,848 |
+| shell-only（只给 `run_shell`） | 8/8 | 68%–100% | 24.4 | 42,183 | 5,002 |
+| allow-dangerous（去围栏） | 7/8 | 53%–98% | 24.0 | 121,135 | 4,833 |
+| executor-only（无 Plan） | 8/8 | 68%–100% | **9.2** | 100,918 | **2,709** |
+
+- **可证伪性**：本地双向验证 **12/12**（4 题 solve→1、broken→0，另 3 个作弊解在可见测试全绿时仍→0），不耗 LLM。
+- **当前无区分度**：四臂 pass@2 均 4/4，Wilson 区间大幅重叠，6/8 与 8/8 的差异不显著（n=2 只能发现大效应）。失败原因均为业务边界没修全或规划漏建修复 todo，非围栏/环境所致。稳定信号只有成本与步数：只给 shell 的输入 token 约为 baseline 的 41%；去掉 Plan 后轮次降到 24.4→9.2、输出 token 减半，通过率反升到 8/8（2 次尝试）。结论：这 4 题对 `deepseek-v4-flash` 已饱和；要区分需换更弱被试或继续加难度。
+- 汇总：`python3 scripts/collect_eval_results.py <job-dir>` → `eval/<arm>.jsonl`（逐题 `reward` / `turns` / in-out tokens / `cost_rmb` / `stop_reason` / artifact 状态）。
 
 **已知降级**：REPL 里被 Ctrl-C 取消的那一轮不写 `trace.json` / `patch.diff`，checkpoint 停在中途，续跑即从该节点 at-least-once 重放；Harbor 跑批非交互，不受影响。rule `30-agent-architecture` 要求的「取消也要走 Stop hook」**未做**。（`!` 无破坏性命令守卫、`@` 图片不剥离，属首版刻意取舍。）
 

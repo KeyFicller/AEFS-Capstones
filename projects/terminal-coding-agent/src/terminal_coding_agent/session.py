@@ -25,16 +25,13 @@ def reset_updates() -> dict[str, Any]:
         "cache_read_tokens": 0,
         "cost_rmb": 0.0,
         "stop_reason": None,
-        "current_task_index": None,
-        "replan_count": 0,
         "blocked_reason": None,
-        "blocked_evidence": [],
         "intent": None,
     }
 
 
 def run_task_turn(*, graph: Any, config: dict, message: HumanMessage) -> dict[str, Any]:
-    """Reset per-turn state, then run one full plan->act->observe->recover pass."""
+    """Reset per-turn state, then run one full plan->act->observe pass."""
     graph.update_state(config, reset_updates())
     return graph.invoke({"messages": [message]}, config)
 

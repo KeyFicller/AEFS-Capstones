@@ -56,7 +56,7 @@ def test_region_keeps_printing_each_state_off_a_terminal(monkeypatch) -> None:
 def test_panel_is_titled_tasks_with_no_ascii_separators(monkeypatch) -> None:
     stream = _capture(monkeypatch)
 
-    ui.TodoPanel()("[✓] wire the repl", 0)
+    ui.TodoPanel()("[✓] wire the repl")
 
     out = stream.getvalue()
     assert ui.TODO_TITLE in out
@@ -64,21 +64,13 @@ def test_panel_is_titled_tasks_with_no_ascii_separators(monkeypatch) -> None:
     assert "#" not in out, "the box is drawn by rich now; the '####' chrome is gone"
 
 
-def test_panel_shows_the_replan_count_as_a_subtitle(monkeypatch) -> None:
+def test_panel_has_no_replan_subtitle(monkeypatch) -> None:
+    """There is no replanner any more; a stale `replan v0` would be a lie."""
     stream = _capture(monkeypatch)
 
-    ui.TodoPanel()("[✓] wire the repl", 2)
+    ui.TodoPanel()("[✓] wire the repl")
 
-    assert "replan v2" in stream.getvalue()
-
-
-def test_panel_always_shows_the_replan_count(monkeypatch) -> None:
-    """It resets every turn, so hiding v0 would make the count effectively invisible."""
-    stream = _capture(monkeypatch)
-
-    ui.TodoPanel()("[✓] wire the repl", 0)
-
-    assert "replan v0" in stream.getvalue()
+    assert "replan" not in stream.getvalue()
 
 
 def test_render_budget_reports_turns_and_stop_reason(monkeypatch) -> None:
@@ -212,7 +204,7 @@ def test_tool_lines_scroll_above_the_pinned_todo_panel(monkeypatch) -> None:
 
     console.print("you > fix the typo")
     with todos.region():
-        todos("[-] fix the typo", 0)
+        todos("[-] fix the typo")
         ui.render_tool_call(name="read_file", target="src/a.py", summary="2 lines", body="l1\nl2")
         ui.render_tool_call(
             name="edit_file",
@@ -220,7 +212,7 @@ def test_tool_lines_scroll_above_the_pinned_todo_panel(monkeypatch) -> None:
             summary="+1 -1",
             body="```diff\n--- a.py\n+++ a.py\n@@ -1 +1 @@\n-old\n+new\n```",
         )
-        todos("[✓] fix the typo", 0)
+        todos("[✓] fix the typo")
 
     stream.close()
     reader.join(timeout=5)
@@ -236,39 +228,6 @@ def _render_to_text(renderable, *, width: int = 60) -> str:
     stream = io.StringIO()
     Console(file=stream, width=width, no_color=True).print(renderable)
     return stream.getvalue()
-
-
-def test_ask_approval_accepts_y(monkeypatch) -> None:
-    stream = _capture(monkeypatch)
-    monkeypatch.setattr("builtins.input", lambda *a: "y")
-
-    assert ui.ask_approval({"plan": "[-]  step-a"}) == "approve"
-    assert "step-a" in stream.getvalue()
-
-
-def test_ask_approval_accepts_n(monkeypatch) -> None:
-    _capture(monkeypatch)
-    monkeypatch.setattr("builtins.input", lambda *a: "n")
-
-    assert ui.ask_approval({"plan": "x"}) == "reject"
-
-
-def test_ask_approval_reasks_on_garbage(monkeypatch) -> None:
-    stream = _capture(monkeypatch)
-    answers = iter(["maybe", "y"])
-    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
-
-    assert ui.ask_approval({"plan": "x"}) == "approve"
-    assert "answer" in stream.getvalue()
-
-
-def test_ask_approval_skips_the_panel_when_the_caller_already_showed_it(monkeypatch) -> None:
-    """The in-turn caller's Tasks panel stays above the prompt; only the prompt is owed."""
-    stream = _capture(monkeypatch)
-    monkeypatch.setattr("builtins.input", lambda *a: "y")
-
-    assert ui.ask_approval({"plan": "[-]  step-a"}, show_plan=False) == "approve"
-    assert "step-a" not in stream.getvalue()
 
 
 def test_ask_question_accepts_a_numbered_choice(monkeypatch) -> None:

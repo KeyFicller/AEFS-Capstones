@@ -85,27 +85,19 @@ class _StdinClosedError(Exception):
     """`input()` saw EOF while a question was pending: no answer can arrive again."""
 
 
-def _answer_prompt(payload: Any, show_plan: bool) -> Any:
-    """Resume value for one pending interrupt, dispatched on the payload's shape.
-
-    A plan gate resumes with a string decision; an `ask_user` question resumes with the
-    answer itself. Dismissal means different things to each, so it is mapped here.
-    """
-    if isinstance(payload, Mapping) and payload.get("type") == "question":
-        try:
-            return ui.ask_question(payload)
-        except EOFError:
-            # Ctrl-D (piped stdin, Harbor log) cannot answer the next question either;
-            # resuming with "carry on" would let the model ask again and loop forever.
-            raise _StdinClosedError from None
-        except KeyboardInterrupt:
-            # A dismissed question is not a rejection: the agent carries on by itself.
-            return {"answer": None, "cancelled": True}
+def _answer_prompt(payload: Any) -> Any:
+    """Resume value for the pending `ask_user` interrupt: the answer itself."""
+    if not (isinstance(payload, Mapping) and payload.get("type") == "question"):
+        raise ValueError(f"unknown interrupt payload: {payload!r}")
     try:
-        return ui.ask_approval(payload, show_plan=show_plan)
-    except (EOFError, KeyboardInterrupt):
-        # A declined plan prompt still walks the Stop hook, instead of leaving a live pause.
-        return "reject"
+        return ui.ask_question(payload)
+    except EOFError:
+        # Ctrl-D (piped stdin, Harbor log) cannot answer the next question either;
+        # resuming with "carry on" would let the model ask again and loop forever.
+        raise _StdinClosedError from None
+    except KeyboardInterrupt:
+        # A dismissed question is not a rejection: the agent carries on by itself.
+        return {"answer": None, "cancelled": True}
 
 
 def _drive_approvals(
@@ -113,18 +105,15 @@ def _drive_approvals(
     graph: Any,
     config: dict[str, Any],
     pending: Any,
-    show_plan: bool = True,
     region: Callable[[], AbstractContextManager[Any]] | None = None,
 ) -> dict[str, Any]:
-    """Answer pending approvals in-turn until the graph stops pausing.
+    """Answer pending questions in-turn until the graph stops pausing.
 
-    `show_plan` applies to the first prompt only; a pause after a resume shows its own plan.
     `region` wraps the resumed graph, not the prompt — `input()` must stay out of the Live's way.
     """
     open_region = region or nullcontext
     while True:
-        decision = _answer_prompt(pending.value, show_plan)
-        show_plan = True
+        decision = _answer_prompt(pending.value)
 
         with open_region():
             result = resume_turn(graph=graph, config=config, decision=decision)
@@ -169,7 +158,6 @@ def repl(
                 graph=graph,
                 config=config,
                 pending=pending[0],
-                show_plan=False,
                 region=todos.region,
             )
         _render_task_result(result)
@@ -207,9 +195,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--worktree",
         default=None,
-        help=(
-            "worktree the agent may touch; default: ./.agent-workspaces/<session>, kept"
-        ),
+        help=("worktree the agent may touch; default: ./.agent-workspaces/<session>, kept"),
     )
     parser.add_argument("--session", default=None, help="thread id; default: random per session")
     parser.add_argument(
@@ -230,15 +216,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--allow-dangerous",
         action="store_true",
-        help=(
-            "with --docker: drop the network and command fences, and allow every git "
-            "subcommand"
-        ),
+        help=("with --docker: drop the network and command fences, and allow every git subcommand"),
     )
     args = parser.parse_args(argv)
 
     if args.allow_dangerous and not args.docker:
-        render_error("--allow-dangerous requires --docker: without a sandbox the fence is all there is")
+        render_error(
+            "--allow-dangerous requires --docker: without a sandbox the fence is all there is"
+        )
         return 2
 
     load_local_env(ENV_PATH)

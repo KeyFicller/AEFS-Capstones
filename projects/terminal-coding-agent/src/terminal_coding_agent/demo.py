@@ -10,20 +10,16 @@ DEMO_TASK = """\
 You are working in an existing git worktree (already `git init`'d).
 
 `python3 greeter.py` should print exactly `Hello, agent` and exit 0. It currently
-raises SystemExit before printing. Keep the steps below separate. Do not merge them.
+raises SystemExit before printing.
 
-1. Verification only. Run `python3 greeter.py` with `run_shell`. Do not read or
-   edit any file in this step. The command will exit non-zero. Call `report_blocked`
-   with that command and its error. Do not retry and do not try to fix it here.
+1. Run `python3 greeter.py` with `run_shell` and read the failure.
 2. Edit `greeter.py` so `greet` returns `Hello, {name}`, and replace the
-   SystemExit with `print(greet("agent"))`. The edit is finished when the file
-   would print `Hello, agent`. Do not call `report_blocked` if the edit succeeds.
+   SystemExit with `print(greet("agent"))`.
 3. Run `python3 greeter.py`. This step is done when stdout is exactly `Hello, agent`
    and the exit code is 0.
 4. Commit `greeter.py` only (`git add greeter.py`, then `git commit`). Untracked
    `.agent/` or `__pycache__/` are expected and are not a failure.
 
-`report_blocked` is only for step 1. Steps 2-4 may read, edit, run, and commit.
 Prefer the dedicated tools over reinventing them in the shell. No network.
 """
 

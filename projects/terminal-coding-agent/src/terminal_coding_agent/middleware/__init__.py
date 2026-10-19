@@ -6,6 +6,7 @@ from terminal_coding_agent.middleware.observability import ObservabilityMiddlewa
 from terminal_coding_agent.middleware.recover import BlockedReportMiddleware
 from terminal_coding_agent.middleware.safety import SafetyMiddleware
 from terminal_coding_agent.middleware.sequence import SequenceMiddleware
+from terminal_coding_agent.middleware.todos import TodoMirrorMiddleware
 
 __all__ = [
     "AskUserMiddleware",
@@ -14,4 +15,5 @@ __all__ = [
     "ObservabilityMiddleware",
     "SafetyMiddleware",
     "SequenceMiddleware",
+    "TodoMirrorMiddleware",
 ]

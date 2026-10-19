@@ -1,25 +1,29 @@
-"""Mocked execute-node wiring: status markers, budget hard-stop, final-message filter."""
+"""Single execute node: middleware composition, blocked handling, budget hand-off."""
 
-import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from langchain.agents.middleware import ModelCallLimitMiddleware, TodoListMiddleware
+from langchain.agents.middleware.model_call_limit import ModelCallLimitExceededError
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from terminal_coding_agent import config
+from terminal_coding_agent import executor as executor_module
 from terminal_coding_agent.executor import (
     _executor_prompt,
     _final_agent_message,
     build_execute_nodes,
 )
 from terminal_coding_agent.middleware import SequenceMiddleware
+from terminal_coding_agent.middleware.ask_user import AskUserMiddleware
+from terminal_coding_agent.middleware.safety import SafetyMiddleware
+from terminal_coding_agent.middleware.todos import TodoMirrorMiddleware
 from terminal_coding_agent.state import ToDoItem, ToDoStatus
 
 
-def _base_state(todos: list[ToDoItem], **extra):
+def _base_state(**extra):
     state = {
         "messages": [],
-        "todo_list": todos,
+        "todo_list": [],
         "turns": 0,
         "tokens": 0,
         "input_tokens": 0,
@@ -27,39 +31,32 @@ def _base_state(todos: list[ToDoItem], **extra):
         "cache_read_tokens": 0,
         "cost_rmb": 0.0,
         "stop_reason": None,
-        "current_task_index": None,
+        "blocked_reason": None,
     }
     state.update(extra)
     return state
 
 
-def test_start_then_end_marks_in_progress_then_done(tmp_path: Path) -> None:
-    nodes = build_execute_nodes(MagicMock(), tools=[], worktree=tmp_path)
-    state = _base_state([ToDoItem(status=ToDoStatus.PENDING, description="fix typo")])
-
-    started = nodes["start_task"](state)
-    assert started["todo_list"][0].status == ToDoStatus.IN_PROGRESS
-    assert started["current_task_index"] == 0
-
-    ended = nodes["end_task"]({**state, **started})
-    assert ended["todo_list"][0].status == ToDoStatus.DONE
-    assert ended["current_task_index"] is None
-    assert (tmp_path / ".agent" / "trace.json").is_file()
+def _nodes(**kwargs):
+    return build_execute_nodes(MagicMock(), tools=[], **kwargs)
 
 
-def test_start_task_hard_stops_when_turns_exhausted(tmp_path: Path) -> None:
-    nodes = build_execute_nodes(MagicMock(), tools=[], worktree=tmp_path)
-    state = _base_state(
-        [ToDoItem(status=ToDoStatus.PENDING, description="never runs")],
-        turns=config.MAX_TURNS,
-    )
+def _fake_agent(monkeypatch, *, result=None, error=None, captured=None):
+    class FakeAgent:
+        def invoke(self, payload, config):
+            if captured is not None:
+                captured["payload"] = payload
+            if error is not None:
+                raise error
+            return result or {"messages": []}
 
-    out = nodes["start_task"](state)
-    assert out["stop_reason"] == "max_turns"
-    assert "todo_list" not in out or out.get("current_task_index") is None
+    def fake_create_agent(**kwargs):
+        if captured is not None:
+            captured["system_prompt"] = kwargs["system_prompt"]
+            captured["middleware"] = kwargs["middleware"]
+        return FakeAgent()
 
-    trace = json.loads((tmp_path / ".agent" / "trace.json").read_text(encoding="utf-8"))
-    assert trace["stop_reason"] == "max_turns"
+    monkeypatch.setattr(executor_module, "create_agent", fake_create_agent)
 
 
 def test_shell_anything_prompt_names_only_run_shell() -> None:
@@ -70,13 +67,35 @@ def test_shell_anything_prompt_names_only_run_shell() -> None:
     assert "debug_start" not in prompt
 
 
+def test_planning_prompt_asks_for_todos_without_forcing_them() -> None:
+    """The model may still skip the list; this only names the workflow."""
+    prompt = _executor_prompt(enable_debug=False, shell_anything=False)
+
+    assert "write_todos" in prompt
+    assert "does not need a list" in prompt
+
+
+def test_planning_prompt_is_absent_where_write_todos_does_not_exist() -> None:
+    """`executor_only` and `chat` drop `TodoListMiddleware`; naming the tool would mislead."""
+    assert "write_todos" not in _executor_prompt(
+        enable_debug=False, shell_anything=False, executor_only=True
+    )
+    assert "write_todos" not in _executor_prompt(
+        enable_debug=False, shell_anything=False, planning=False
+    )
+
+
+def test_shell_anything_does_not_rule_out_the_todo_list() -> None:
+    prompt = _executor_prompt(enable_debug=False, shell_anything=True)
+
+    assert "the todo list is still yours to use" in prompt
+
+
 def test_dangerous_prompt_states_the_sandbox_is_open() -> None:
     """Without this the model will not try installs or network calls on its own."""
     closed = _executor_prompt(enable_debug=False, shell_anything=False)
     opened = _executor_prompt(enable_debug=False, shell_anything=False, allow_dangerous=True)
-    shell_only = _executor_prompt(
-        enable_debug=False, shell_anything=True, allow_dangerous=True
-    )
+    shell_only = _executor_prompt(enable_debug=False, shell_anything=True, allow_dangerous=True)
 
     assert "no command restrictions" not in closed
     assert "no command restrictions" in opened
@@ -125,130 +144,111 @@ def test_final_agent_message_drops_a_truncated_tool_call() -> None:
     assert not final.tool_calls
 
 
-def test_run_agent_blocked_records_evidence_without_transcript(tmp_path, monkeypatch) -> None:
-    from terminal_coding_agent import executor as executor_module
+def test_run_agent_gets_the_whole_conversation(tmp_path: Path, monkeypatch) -> None:
+    """One agent owns the turn, so it sees the turn's messages rather than a bare step."""
+    captured: dict = {}
+    _fake_agent(monkeypatch, captured=captured)
+    state = _base_state(messages=[HumanMessage(content="fix the failing test")])
 
-    blocked_messages = [
-        HumanMessage(content="fix the import"),
-        AIMessage(
-            content="",
-            tool_calls=[{"name": "report_blocked", "args": {"reason": "pytest fails"}, "id": "1"}],
-        ),
-        ToolMessage(content="Blocked reported.", tool_call_id="1", name="report_blocked"),
-        AIMessage(content="Blocked: pytest fails"),
-    ]
+    _nodes()["run_agent"](state, {})
 
-    class FakeAgent:
-        def invoke(self, payload, config):
-            return {"messages": blocked_messages, "blocked_reason": "pytest fails"}
+    assert captured["payload"]["messages"][0].content == "fix the failing test"
+    assert "report_blocked" in captured["system_prompt"]
 
-    monkeypatch.setattr(executor_module, "create_agent", lambda **kwargs: FakeAgent())
-    nodes = executor_module.build_execute_nodes(MagicMock(), tools=[], worktree=tmp_path)
-    state = _base_state(
-        [ToDoItem(status=ToDoStatus.IN_PROGRESS, description="fix the import")],
-        current_task_index=0,
+
+def test_run_agent_turns_a_block_report_into_a_stop_reason(tmp_path: Path, monkeypatch) -> None:
+    _fake_agent(
+        monkeypatch,
+        result={"messages": [AIMessage(content="blocked")], "blocked_reason": "pytest fails"},
     )
 
-    out = nodes["run_agent"](state, {})
+    out = _nodes()["run_agent"](_base_state(), {})
 
+    assert out["stop_reason"] == "blocked"
     assert out["blocked_reason"] == "pytest fails"
-    assert [entry["action"] for entry in out["blocked_evidence"]] == [
-        "report_blocked",
-        "report_blocked",
-    ]
-    assert "messages" not in out
-
-    ended = nodes["end_task"]({**state, **out})
-
-    assert ended["todo_list"][0].status == ToDoStatus.FAILED
-    assert ended["current_task_index"] is None
-
-    trace = json.loads((tmp_path / ".agent" / "trace.json").read_text(encoding="utf-8"))
-    assert trace["stop_reason"] == "blocked"
-    assert trace["todo_list"][0]["status"] == "FAILED"
 
 
-def test_start_task_clears_a_stale_block_report(tmp_path: Path) -> None:
-    nodes = build_execute_nodes(MagicMock(), tools=[], worktree=tmp_path)
-    state = _base_state(
-        [ToDoItem(status=ToDoStatus.PENDING, description="next task")],
-        blocked_reason="boom",
-        blocked_evidence=[{"action": "run_shell", "detail": "x"}],
-    )
+def test_run_agent_converts_model_crash_into_stop_reason(tmp_path: Path, monkeypatch) -> None:
+    _fake_agent(monkeypatch, error=RuntimeError("deepseek 400"))
 
-    out = nodes["start_task"](state)
-
-    assert out["blocked_reason"] is None
-    assert out["blocked_evidence"] == []
-
-
-def test_success_after_a_block_is_not_marked_failed(tmp_path: Path, monkeypatch) -> None:
-    from terminal_coding_agent import executor as executor_module
-
-    class FakeAgent:
-        def invoke(self, payload, config):
-            return {"messages": [AIMessage(content="done it")]}
-
-    monkeypatch.setattr(executor_module, "create_agent", lambda **kwargs: FakeAgent())
-    nodes = executor_module.build_execute_nodes(MagicMock(), tools=[], worktree=tmp_path)
-    state = _base_state(
-        [
-            ToDoItem(status=ToDoStatus.FAILED, description="blocked task"),
-            ToDoItem(status=ToDoStatus.PENDING, description="innocent task"),
-        ],
-        blocked_reason="boom",
-        blocked_evidence=[{"action": "run_shell", "detail": "x"}],
-    )
-
-    started = nodes["start_task"](state)
-    ran = nodes["run_agent"]({**state, **started}, {})
-    ended = nodes["end_task"]({**state, **started, **ran})
-
-    assert ran.get("blocked_reason") is None
-    assert ended["todo_list"][1].status == ToDoStatus.DONE
-
-
-def test_end_task_marks_done_when_not_blocked(tmp_path, monkeypatch) -> None:
-    from terminal_coding_agent import executor as executor_module
-
-    class FakeAgent:
-        def invoke(self, payload, config):
-            return {"messages": [AIMessage(content="fixed")]}
-
-    monkeypatch.setattr(executor_module, "create_agent", lambda **kwargs: FakeAgent())
-    nodes = executor_module.build_execute_nodes(MagicMock(), tools=[], worktree=tmp_path)
-    state = _base_state(
-        [ToDoItem(status=ToDoStatus.IN_PROGRESS, description="fix typo")],
-        current_task_index=0,
-    )
-
-    out = nodes["run_agent"](state, {})
-
-    assert out.get("blocked_reason") is None
-    assert out["messages"][0].content == "fixed"
-
-    ended = nodes["end_task"]({**state, **out})
-
-    assert ended["todo_list"][0].status == ToDoStatus.DONE
-
-
-def test_run_agent_converts_model_crash_into_stop_reason(tmp_path, monkeypatch) -> None:
-    from terminal_coding_agent import executor as executor_module
-
-    class ExplodingAgent:
-        def invoke(self, payload, config):
-            raise RuntimeError("deepseek 400")
-
-    monkeypatch.setattr(executor_module, "create_agent", lambda **kwargs: ExplodingAgent())
-    nodes = executor_module.build_execute_nodes(MagicMock(), tools=[], worktree=tmp_path)
-    state = _base_state(
-        [ToDoItem(status=ToDoStatus.IN_PROGRESS, description="fix typo")],
-        current_task_index=0,
-    )
-
-    out = nodes["run_agent"](state, {})
+    out = _nodes()["run_agent"](_base_state(), {})
 
     assert out["stop_reason"] == "executor_error:RuntimeError"
+
+
+def test_run_agent_turns_the_native_call_limit_into_max_turns(tmp_path: Path, monkeypatch) -> None:
+    _fake_agent(
+        monkeypatch,
+        error=ModelCallLimitExceededError(
+            thread_count=1, run_count=5, thread_limit=None, run_limit=5
+        ),
+    )
+
+    out = _nodes()["run_agent"](_base_state(), {})
+
+    assert out["stop_reason"] == "max_turns"
+
+
+def test_run_agent_lets_a_graph_interrupt_through(tmp_path: Path, monkeypatch) -> None:
+    """The pause must reach the parent graph, not become an executor_error (design §4)."""
+    from langgraph.errors import GraphBubbleUp
+
+    _fake_agent(monkeypatch, error=GraphBubbleUp())
+
+    with pytest.raises(GraphBubbleUp):
+        _nodes()["run_agent"](_base_state(), {})
+
+
+def test_run_agent_publishes_the_agents_own_todos(tmp_path: Path, monkeypatch) -> None:
+    """`TodoListMiddleware` owns the plan; the node forwards it for the trace and panel."""
+    _fake_agent(
+        monkeypatch,
+        result={
+            "messages": [AIMessage(content="done")],
+            "todo_list": [ToDoItem(status=ToDoStatus.DONE, description="fix typo")],
+        },
+    )
+
+    out = _nodes()["run_agent"](_base_state(), {})
+
+    assert out["todo_list"][0].description == "fix typo"
+
+
+def test_the_native_planner_is_installed_by_default(tmp_path: Path, monkeypatch) -> None:
+    captured: dict = {}
+    _fake_agent(monkeypatch, captured=captured)
+
+    _nodes()["run_agent"](_base_state(), {})
+
+    middleware = captured["middleware"]
+    assert any(isinstance(m, TodoListMiddleware) for m in middleware)
+    assert any(isinstance(m, ModelCallLimitMiddleware) for m in middleware)
+
+
+def test_executor_only_drops_the_native_planner(tmp_path: Path, monkeypatch) -> None:
+    """`executor_only` is the no-plan arm: no todo tool and no mirror, but the cap stays."""
+    captured: dict = {}
+    _fake_agent(monkeypatch, captured=captured)
+
+    _nodes(executor_only=True)["run_agent"](_base_state(), {})
+
+    middleware = captured["middleware"]
+    assert not any(isinstance(m, TodoListMiddleware) for m in middleware)
+    assert not any(isinstance(m, TodoMirrorMiddleware) for m in middleware)
+    assert any(isinstance(m, ModelCallLimitMiddleware) for m in middleware)
+
+
+def test_the_todo_panel_renderer_is_only_installed_for_a_planning_run(
+    tmp_path: Path, monkeypatch
+) -> None:
+    captured: dict = {}
+    _fake_agent(monkeypatch, captured=captured)
+    render = MagicMock()
+
+    _nodes(todo_render=render)["run_agent"](_base_state(), {})
+
+    mirrors = [m for m in captured["middleware"] if isinstance(m, TodoMirrorMiddleware)]
+    assert len(mirrors) == 1
 
 
 @pytest.mark.parametrize("with_log", [True, False])
@@ -256,86 +256,19 @@ def test_run_agent_installs_the_sequence_logger_only_when_recording(
     tmp_path: Path, monkeypatch, with_log: bool
 ) -> None:
     """No `sequence_events` means no diagram was asked for, so nothing must be recorded."""
-    from terminal_coding_agent import executor as executor_module
-
     captured: dict = {}
-
-    class FakeAgent:
-        def invoke(self, payload, config):
-            return {"messages": []}
-
-    def fake_create_agent(**kwargs):
-        captured["middleware"] = kwargs["middleware"]
-        return FakeAgent()
-
-    monkeypatch.setattr(executor_module, "create_agent", fake_create_agent)
+    _fake_agent(monkeypatch, captured=captured)
     events: list = []
     kwargs = {"sequence_events": events} if with_log else {}
-    nodes = build_execute_nodes(MagicMock(), tools=[], worktree=tmp_path, **kwargs)
-    state = _base_state(
-        [ToDoItem(status=ToDoStatus.IN_PROGRESS, description="fix typo")],
-        current_task_index=0,
-    )
 
-    nodes["run_agent"](state, {})
+    state = _base_state(messages=[HumanMessage(content="fix the failing test")])
+    _nodes(**kwargs)["run_agent"](state, {})
 
     installed = [m for m in captured["middleware"] if isinstance(m, SequenceMiddleware)]
     assert bool(installed) is with_log
     if with_log:
         assert installed[0].events is events
-        assert events[0] == ("task", "fix typo")
-
-
-def test_run_agent_gives_the_executor_the_whole_plan(tmp_path, monkeypatch) -> None:
-    """Step history is isolated, so step 2 must learn step 1's file from the plan itself."""
-    from terminal_coding_agent import executor as executor_module
-
-    captured: dict = {}
-
-    class FakeAgent:
-        def invoke(self, payload, config):
-            return {"messages": []}
-
-    def fake_create_agent(**kwargs):
-        captured["system_prompt"] = kwargs["system_prompt"]
-        return FakeAgent()
-
-    monkeypatch.setattr(executor_module, "create_agent", fake_create_agent)
-    nodes = build_execute_nodes(MagicMock(), tools=[], worktree=tmp_path)
-    state = _base_state(
-        [
-            ToDoItem(status=ToDoStatus.DONE, description="create file notes.md"),
-            ToDoItem(status=ToDoStatus.IN_PROGRESS, description="open the file"),
-        ],
-        current_task_index=1,
-    )
-
-    nodes["run_agent"](state, {})
-
-    prompt = captured["system_prompt"]
-    assert "create file notes.md" in prompt, "an earlier step must reach the prompt"
-    assert "Your step: open the file" in prompt
-    assert "report_blocked" in prompt, "the base executor prompt must be preserved"
-
-
-def test_run_agent_lets_a_graph_interrupt_through(tmp_path, monkeypatch) -> None:
-    """The pause must reach the parent graph, not become an executor_error (design §4)."""
-    from langgraph.errors import GraphBubbleUp
-    from terminal_coding_agent import executor as executor_module
-
-    class PausingAgent:
-        def invoke(self, payload, config):
-            raise GraphBubbleUp
-
-    monkeypatch.setattr(executor_module, "create_agent", lambda **kwargs: PausingAgent())
-    nodes = build_execute_nodes(MagicMock(), tools=[], worktree=tmp_path)
-    state = _base_state(
-        [ToDoItem(status=ToDoStatus.IN_PROGRESS, description="fix typo")],
-        current_task_index=0,
-    )
-
-    with pytest.raises(GraphBubbleUp):
-        nodes["run_agent"](state, {})
+        assert events[0] == ("task", "fix the failing test")
 
 
 @pytest.mark.parametrize("with_hitl", [True, False])
@@ -343,28 +276,11 @@ def test_run_agent_installs_ask_user_only_when_hitl_is_enabled(
     tmp_path: Path, monkeypatch, with_hitl: bool
 ) -> None:
     """Harbor parity: without the flag the middleware table is unchanged."""
-    from terminal_coding_agent import executor as executor_module
-    from terminal_coding_agent.middleware.ask_user import AskUserMiddleware
-
     captured: dict = {}
-
-    class FakeAgent:
-        def invoke(self, payload, config):
-            return {"messages": []}
-
-    def fake_create_agent(**kwargs):
-        captured["middleware"] = kwargs["middleware"]
-        return FakeAgent()
-
-    monkeypatch.setattr(executor_module, "create_agent", fake_create_agent)
+    _fake_agent(monkeypatch, captured=captured)
     kwargs = {"enable_hitl": with_hitl} if with_hitl else {}
-    nodes = build_execute_nodes(MagicMock(), tools=[], worktree=tmp_path, **kwargs)
-    state = _base_state(
-        [ToDoItem(status=ToDoStatus.IN_PROGRESS, description="fix typo")],
-        current_task_index=0,
-    )
 
-    nodes["run_agent"](state, {})
+    _nodes(**kwargs)["run_agent"](_base_state(), {})
 
     installed = [m for m in captured["middleware"] if isinstance(m, AskUserMiddleware)]
     assert bool(installed) is with_hitl
@@ -374,9 +290,6 @@ def test_run_agent_installs_ask_user_only_when_hitl_is_enabled(
 def test_safety_guard_is_dropped_only_when_dangerous(
     tmp_path: Path, monkeypatch, allow_dangerous: bool
 ) -> None:
-    from terminal_coding_agent import executor as executor_module
-    from terminal_coding_agent.middleware.safety import SafetyMiddleware
-
     captured: list = []
 
     class FakeAgent:
@@ -388,83 +301,64 @@ def test_safety_guard_is_dropped_only_when_dangerous(
         return FakeAgent()
 
     monkeypatch.setattr(executor_module, "create_agent", fake_create_agent)
-    nodes = build_execute_nodes(
-        MagicMock(), tools=[], worktree=tmp_path, allow_dangerous=allow_dangerous
-    )
-    state = _base_state(
-        [ToDoItem(status=ToDoStatus.IN_PROGRESS, description="fix typo")],
-        current_task_index=0,
-    )
+    nodes = _nodes(allow_dangerous=allow_dangerous)
 
-    nodes["run_agent"](state, {})
-    nodes["chat"]({"messages": [HumanMessage(content="hi")]}, {})
+    nodes["run_agent"](_base_state(), {})
+    nodes["chat"](_base_state(messages=[HumanMessage(content="hi")]), {})
 
     for middleware in captured:
         installed = [m for m in middleware if isinstance(m, SafetyMiddleware)]
         assert bool(installed) is not allow_dangerous
 
 
-def test_chat_node_carries_the_final_reply(tmp_path, monkeypatch) -> None:
+def test_chat_node_carries_the_final_reply(tmp_path: Path, monkeypatch) -> None:
     """Summary relays the last message, so the chat node must end on its reply."""
-    from terminal_coding_agent import executor as executor_module
+    _fake_agent(monkeypatch, result={"messages": [AIMessage(content="the essay")]})
 
-    class FakeAgent:
-        def invoke(self, payload, config):
-            return {"messages": [AIMessage(content="the essay")]}
-
-    monkeypatch.setattr(executor_module, "create_agent", lambda **kwargs: FakeAgent())
-    nodes = build_execute_nodes(MagicMock(), tools=[], worktree=tmp_path)
-
-    out = nodes["chat"](_base_state([]), {})
+    out = _nodes()["chat"](_base_state(), {})
 
     assert out["messages"][0].content == "the essay"
 
 
-def test_chat_node_runs_on_the_conversation_history(tmp_path, monkeypatch) -> None:
+def test_chat_node_runs_on_the_conversation_history(tmp_path: Path, monkeypatch) -> None:
     """Multi-turn memory: a follow-up must see the earlier turns, not a bare step."""
-    from terminal_coding_agent import executor as executor_module
-
     captured: dict = {}
+    _fake_agent(monkeypatch, captured=captured)
+    state = _base_state(messages=[HumanMessage(content="first"), AIMessage(content="reply")])
 
-    class FakeAgent:
-        def invoke(self, payload, config):
-            captured["payload"] = payload
-            return {"messages": [AIMessage(content="ok")]}
-
-    monkeypatch.setattr(executor_module, "create_agent", lambda **kwargs: FakeAgent())
-    nodes = build_execute_nodes(MagicMock(), tools=[], worktree=tmp_path)
-    state = _base_state(
-        [], messages=[HumanMessage(content="first"), AIMessage(content="reply")]
-    )
-
-    nodes["chat"](state, {})
+    _nodes()["chat"](state, {})
 
     assert [m.content for m in captured["payload"]["messages"]] == ["first", "reply"]
 
 
-def test_run_agent_injects_attached_images_into_the_step_message(tmp_path, monkeypatch) -> None:
-    """Steps are isolated, so the turn's image must ride along on the step message."""
-    from terminal_coding_agent import executor as executor_module
-
+def test_chat_node_has_no_planner(tmp_path: Path, monkeypatch) -> None:
     captured: dict = {}
-    image = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
+    _fake_agent(monkeypatch, captured=captured)
 
-    class FakeAgent:
-        def invoke(self, payload, config):
-            captured["payload"] = payload
-            return {"messages": [AIMessage(content="a cat")]}
+    _nodes()["chat"](_base_state(), {})
 
-    monkeypatch.setattr(executor_module, "create_agent", lambda **kwargs: FakeAgent())
-    nodes = build_execute_nodes(MagicMock(), tools=[], worktree=tmp_path)
-    state = _base_state(
-        [ToDoItem(status=ToDoStatus.IN_PROGRESS, description="describe the image")],
-        current_task_index=0,
-        messages=[HumanMessage(content=[{"type": "text", "text": "look"}, image])],
+    assert not any(isinstance(m, TodoListMiddleware) for m in captured["middleware"])
+
+
+def test_a_stop_reason_ends_the_node_without_calling_the_model(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        executor_module,
+        "create_agent",
+        lambda **kwargs: pytest.fail("the model must not be reached"),
     )
 
-    nodes["run_agent"](state, {})
+    assert _nodes()["run_agent"](_base_state(stop_reason="max_turns"), {}) == {}
+
+
+def test_attached_images_ride_along_in_the_turn_message(tmp_path: Path, monkeypatch) -> None:
+    captured: dict = {}
+    _fake_agent(monkeypatch, captured=captured)
+    image = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
+    state = _base_state(messages=[HumanMessage(content=[{"type": "text", "text": "look"}, image])])
+
+    _nodes()["run_agent"](state, {})
 
     assert captured["payload"]["messages"][0].content == [
-        {"type": "text", "text": "describe the image"},
+        {"type": "text", "text": "look"},
         image,
     ]

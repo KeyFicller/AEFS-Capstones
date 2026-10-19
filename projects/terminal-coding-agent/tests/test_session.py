@@ -31,22 +31,17 @@ def test_reset_zeroes_the_ledger_and_the_plan() -> None:
     assert reset["cost_rmb"] == 0.0
     assert reset["todo_list"] == []
     assert reset["stop_reason"] is None
-    assert reset["current_task_index"] is None
-    assert reset["replan_count"] == 0
     assert reset["blocked_reason"] is None
-    assert reset["blocked_evidence"] == []
 
 
 def test_reset_returns_fresh_mutables() -> None:
     """Two turns must not share a list, or one turn's edits leak into the next."""
     first = reset_updates()
     first["todo_list"].append("leak")
-    first["blocked_evidence"].append({"leak": True})
 
     second = reset_updates()
 
     assert second["todo_list"] == []
-    assert second["blocked_evidence"] == []
 
 
 class _OrderGraph:

@@ -1,27 +1,24 @@
-"""Execute stage: start_task -> run_agent -> end_task (parent-graph nodes)."""
+"""Execute stage: one agent that plans with `TodoListMiddleware` and carries the task out."""
 
 import logging
 from collections.abc import Callable
-from dataclasses import replace
-from pathlib import Path
 from typing import Any
 
+from budget import Budget
 from langchain.agents import create_agent
-from langchain.agents.middleware import SummarizationMiddleware
+from langchain.agents.middleware import (
+    ModelCallLimitMiddleware,
+    SummarizationMiddleware,
+    TodoListMiddleware,
+)
+from langchain.agents.middleware.model_call_limit import ModelCallLimitExceededError
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.errors import GraphBubbleUp
 from telemetry import resolve_model_name
 
-from terminal_coding_agent.attachments import attached_images
-from terminal_coding_agent.config import PRECOMPACT_TOKENS
-from terminal_coding_agent.ledger import (
-    budget_updates,
-    ledger_from_state,
-    summarize_todos,
-    trace_path,
-    write_trace,
-)
+from terminal_coding_agent.config import MAX_TURNS, PRECOMPACT_TOKENS
+from terminal_coding_agent.ledger import budget_updates, ledger_from_state
 from terminal_coding_agent.middleware import (
     AskUserMiddleware,
     BlockedReportMiddleware,
@@ -29,10 +26,10 @@ from terminal_coding_agent.middleware import (
     ObservabilityMiddleware,
     SafetyMiddleware,
     SequenceMiddleware,
+    TodoMirrorMiddleware,
 )
 from terminal_coding_agent.models import SYSTEM_PROMPTS, AgentModels
-from terminal_coding_agent.recover import project_evidence
-from terminal_coding_agent.state import CodingAgentState, ToDoStatus, format_todos
+from terminal_coding_agent.state import CodingAgentState
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +50,12 @@ def _final_agent_message(agent_messages: list) -> AIMessage | None:
 
 
 def _executor_prompt(
-    *, enable_debug: bool, shell_anything: bool, allow_dangerous: bool = False
+    *,
+    enable_debug: bool,
+    shell_anything: bool,
+    allow_dangerous: bool = False,
+    executor_only: bool = False,
+    planning: bool = True,
 ) -> str:
     """Executor system prompt. Shell-only mode replaces the debug addendum."""
     prompt = SYSTEM_PROMPTS["executor"]
@@ -63,6 +65,11 @@ def _executor_prompt(
         prompt += "\n\n" + SYSTEM_PROMPTS["debug"]
     if allow_dangerous:
         prompt += "\n\n" + SYSTEM_PROMPTS["unrestricted"]
+    if executor_only:
+        # No `TodoListMiddleware` in this arm, so `write_todos` does not exist.
+        prompt += "\n\n" + SYSTEM_PROMPTS["executor_only"]
+    elif planning:
+        prompt += "\n\n" + SYSTEM_PROMPTS["planning"]
     return prompt
 
 
@@ -70,117 +77,128 @@ def build_execute_nodes(
     models: AgentModels,
     tools: list,
     *,
-    worktree: Path,
     sequence_events: list | None = None,
     enable_debug: bool = False,
     enable_hitl: bool = False,
     shell_anything: bool = False,
     allow_dangerous: bool = False,
-) -> dict[str, Callable[[CodingAgentState], dict[str, Any]]]:
-    """Three parent-graph nodes so IN_PROGRESS is committed (and printed) before the agent runs."""
+    executor_only: bool = False,
+    todo_render: Callable[[str], None] | None = None,
+) -> dict[str, Callable[[CodingAgentState, RunnableConfig], dict[str, Any]]]:
+    """Return the `run_agent` and `chat` nodes plus a compiled agent for diagramming."""
 
-    trace = trace_path(worktree)
-
-    def start_task(state: CodingAgentState) -> dict[str, Any]:
-        ledger = ledger_from_state(state)
-        todos = summarize_todos(state.get("todo_list") or [])
-
-        # A new task starts unblocked: the block report belongs to the task that just ended.
-        clear_block = {"blocked_reason": None, "blocked_evidence": []}
-
-        if reason := ledger.check():
-            ledger.stop_reason = reason
-            write_trace(trace, ledger, todo_list=todos, stop_reason=reason)
-            return {**budget_updates(ledger), **clear_block, "stop_reason": reason}
-
-        todo_items = list(state.get("todo_list") or [])
-        task_index = next(
-            (i for i, item in enumerate(todo_items) if item.status == ToDoStatus.PENDING),
-            None,
-        )
-        if task_index is None:
-            raise AssertionError("No pending task found")
-
-        todo_list = list(todo_items)
-        todo_list[task_index] = replace(todo_list[task_index], status=ToDoStatus.IN_PROGRESS)
-        return {
-            "todo_list": todo_list,
-            "current_task_index": task_index,
-            **clear_block,
-        }
-
-    def run_agent(state: CodingAgentState, config: RunnableConfig) -> dict[str, Any]:
-        if state.get("stop_reason"):
-            return {}
-
-        task_index = state.get("current_task_index")
-        if task_index is None:
-            raise AssertionError("current_task_index missing; start_task must run first")
-
-        ledger = ledger_from_state(state)
-        todo_list = list(state["todo_list"])
-
-        middleware = [
-            BudgetMiddleware(ledger),
-            SummarizationMiddleware(models.executor, trigger=("tokens", PRECOMPACT_TOKENS)),
-            ObservabilityMiddleware(resolve_model_name(models.executor)),
-        ]
+    def _stack(ledger: Any, *, todos: bool, cap: bool, summarize: bool, task: str = "") -> list:
+        """Middleware order is meaningful: the first registered sees the model request first."""
+        middleware: list = []
+        if cap:
+            middleware.append(ModelCallLimitMiddleware(run_limit=MAX_TURNS, exit_behavior="error"))
+        if todos:
+            middleware.append(TodoListMiddleware())
+        if summarize:
+            middleware.append(
+                SummarizationMiddleware(models.executor, trigger=("tokens", PRECOMPACT_TOKENS))
+            )
+        middleware.append(BudgetMiddleware(ledger))
+        middleware.append(ObservabilityMiddleware(resolve_model_name(models.executor)))
         if not allow_dangerous:
             middleware.append(SafetyMiddleware())
         middleware.append(BlockedReportMiddleware())
         if enable_hitl:
             middleware.append(AskUserMiddleware())
         if sequence_events is not None:
-            # Recording is on only when the caller asked for a diagram (sequence_path).
-            middleware.append(
-                SequenceMiddleware(sequence_events, description=todo_list[task_index].description)
-            )
+            middleware.append(SequenceMiddleware(sequence_events, description=task))
+        if todos and todo_render is not None:
+            middleware.append(TodoMirrorMiddleware(todo_render))
+        return middleware
 
-        base_prompt = _executor_prompt(
-            enable_debug=enable_debug,
-            shell_anything=shell_anything,
-            allow_dangerous=allow_dangerous,
-        )
-        system_prompt = (
-            base_prompt
-            + "\n\nCurrent plan:\n"
-            + format_todos(todo_list)
-            + f"\n\nYour step: {todo_list[task_index].description}"
-        )
-        agent = create_agent(
+    def _agent(
+        *,
+        ledger: Any,
+        todos: bool,
+        cap: bool,
+        summarize: bool,
+        task: str,
+        system_prompt: str,
+    ) -> Any:
+        return create_agent(
             model=models.executor,
             tools=tools,
             system_prompt=system_prompt,
-            middleware=middleware,
+            middleware=_stack(ledger, todos=todos, cap=cap, summarize=summarize, task=task),
         )
-        images = attached_images(list(state["messages"]))
-        step = todo_list[task_index].description
-        step_content: Any = step if not images else [{"type": "text", "text": step}, *images]
+
+    def diagram_agent() -> Any:
+        """The planning agent, compiled but never invoked: `graph.png` expands it."""
+        return _agent(
+            ledger=Budget(),
+            todos=not executor_only,
+            cap=True,
+            summarize=True,
+            task="",
+            system_prompt=_executor_prompt(
+                enable_debug=enable_debug,
+                shell_anything=shell_anything,
+                allow_dangerous=allow_dangerous,
+                executor_only=executor_only,
+            ),
+        )
+
+    def run_agent(state: CodingAgentState, config: RunnableConfig) -> dict[str, Any]:
+        """One agent run for the whole request. No per-step orchestration above it."""
+        if state.get("stop_reason"):
+            return {}
+
+        ledger = ledger_from_state(state)
+        task = next(
+            (
+                message.content
+                for message in reversed(state["messages"])
+                if isinstance(message, HumanMessage) and isinstance(message.content, str)
+            ),
+            "",
+        )
+        agent = _agent(
+            ledger=ledger,
+            todos=not executor_only,
+            cap=True,
+            summarize=True,
+            task=task,
+            system_prompt=_executor_prompt(
+                enable_debug=enable_debug,
+                shell_anything=shell_anything,
+                allow_dangerous=allow_dangerous,
+                executor_only=executor_only,
+            ),
+        )
+
         try:
-            result = agent.invoke(
-                {"messages": [HumanMessage(content=step_content)]},
-                config=config,
-            )
+            result = agent.invoke({"messages": list(state["messages"])}, config=config)
         except GraphBubbleUp:
             # `interrupt()` inside the sub-agent must reach the parent graph instead of being
             # swallowed below into an executor_error. Must precede the broad handler.
             raise
+        except ModelCallLimitExceededError:
+            return {**budget_updates(ledger), "stop_reason": "max_turns"}
         except Exception as exc:  # noqa: BLE001 - an error is an observation, not a crash
             logger.exception("executor failed")
             return {
                 **budget_updates(ledger),
                 "stop_reason": f"executor_error:{type(exc).__name__}",
             }
+
         agent_messages = list(result.get("messages") or [])
         updates: dict[str, Any] = {**budget_updates(ledger)}
+        if todo_list := result.get("todo_list"):
+            updates["todo_list"] = todo_list
 
         blocked_reason = result.get("blocked_reason")
         if blocked_reason:
+            # No plan stage above to translate a block report, so it ends the turn here.
+            updates["stop_reason"] = "blocked"
             updates["blocked_reason"] = blocked_reason
-            updates["blocked_evidence"] = project_evidence(agent_messages)
             return updates
 
-        final = _final_agent_message(list(agent_messages))
+        final = _final_agent_message(agent_messages)
         if final is not None:
             updates["messages"] = [final]
         return updates
@@ -190,22 +208,19 @@ def build_execute_nodes(
             return {}
 
         ledger = ledger_from_state(state)
-        middleware = [
-            BudgetMiddleware(ledger),
-            ObservabilityMiddleware(resolve_model_name(models.executor)),
-        ]
-        if not allow_dangerous:
-            middleware.append(SafetyMiddleware())
-
-        agent = create_agent(
-            model=models.executor,
-            tools=tools,
+        agent = _agent(
+            ledger=ledger,
+            todos=False,
+            cap=False,
+            summarize=False,
+            task="",
             system_prompt=(
-                _executor_prompt(enable_debug=False, shell_anything=shell_anything)
+                _executor_prompt(
+                    enable_debug=False, shell_anything=shell_anything, planning=False
+                )
                 + "\n\n"
                 + SYSTEM_PROMPTS["chat"]
             ),
-            middleware=middleware,
         )
         try:
             result = agent.invoke({"messages": list(state["messages"])}, config=config)
@@ -224,38 +239,4 @@ def build_execute_nodes(
             updates["messages"] = [final]
         return updates
 
-    def end_task(state: CodingAgentState) -> dict[str, Any]:
-        ledger = ledger_from_state(state)
-        task_index = state.get("current_task_index")
-        todo_list = list(state.get("todo_list") or [])
-
-        if task_index is not None and todo_list:
-            blocked = bool(state.get("blocked_reason"))
-            final_status = ToDoStatus.FAILED if (ledger.stop_reason or blocked) else ToDoStatus.DONE
-            todo_list[task_index] = replace(todo_list[task_index], status=final_status)
-            current = todo_list[task_index]
-            outcome = "successfully completed" if current.status == ToDoStatus.DONE else "failed"
-            write_trace(
-                trace,
-                ledger,
-                todo_list=summarize_todos(todo_list),
-                stop_reason=ledger.stop_reason or ("blocked" if blocked else "completed"),
-            )
-            return {
-                **budget_updates(ledger),
-                "todo_list": todo_list,
-                "messages": [AIMessage(content=f"Task {current.description} {outcome}.")],
-                "current_task_index": None,
-            }
-
-        return {
-            **budget_updates(ledger),
-            "current_task_index": None,
-        }
-
-    return {
-        "start_task": start_task,
-        "run_agent": run_agent,
-        "end_task": end_task,
-        "chat": chat,
-    }
+    return {"run_agent": run_agent, "chat": chat, "diagram_agent": diagram_agent}

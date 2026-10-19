@@ -12,7 +12,7 @@ from langchain_core.tools import tool
 from langgraph.types import Command
 from terminal_coding_agent.checkpoint import build_checkpointer
 from terminal_coding_agent.middleware.ask_user import AskUserMiddleware
-from terminal_coding_agent.state import CodingAgentState, ToDoItem, ToDoStatus
+from terminal_coding_agent.state import CodingAgentState
 
 SIDE_EFFECTS: list[str] = []
 BOUND_TOOLS: list[str] = []
@@ -246,7 +246,7 @@ def test_the_real_execute_node_surfaces_the_question_to_the_parent_graph(
 
     SIDE_EFFECTS.clear()
     models = AgentModels(planner=ScriptedModel(), executor=ScriptedModel())
-    nodes = build_execute_nodes(models, [side_effect], worktree=tmp_path, enable_hitl=True)
+    nodes = build_execute_nodes(models, [side_effect], enable_hitl=True)
 
     parent = StateGraph(CodingAgentState)
     parent.add_node("run_agent", nodes["run_agent"])
@@ -258,8 +258,7 @@ def test_the_real_execute_node_surfaces_the_question_to_the_parent_graph(
     first = app.invoke(
         {
             "messages": [],
-            "todo_list": [ToDoItem(ToDoStatus.IN_PROGRESS, "fix the typo")],
-            "current_task_index": 0,
+            "todo_list": [],
             "turns": 0,
             "tokens": 0,
             "input_tokens": 0,

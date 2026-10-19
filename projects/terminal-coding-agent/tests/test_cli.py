@@ -318,8 +318,8 @@ class _EmptySnapshot:
     tasks: tuple = ()
 
 
-class _PausingGraph:
-    """First invoke pauses on an approval; a `Command` input means resume."""
+class _QuestionGraph:
+    """First invoke pauses on an `ask_user` question; a `Command` input means resume."""
 
     def __init__(self) -> None:
         self.log: list[str] = []
@@ -333,18 +333,35 @@ class _PausingGraph:
         self.payloads.append(payload)
         if isinstance(payload, Command):
             return {"messages": [], "turns": 1, "stop_reason": "completed"}
-        pending = SimpleNamespace(value={"plan": "[-]  a"})
+        pending = SimpleNamespace(
+            value={"type": "question", "question": "which?", "options": ["a", "b"]}
+        )
         return {"messages": [], "turns": 1, "__interrupt__": [pending]}
 
     def get_state(self, config):  # noqa: ARG002
         return _EmptySnapshot()
 
 
-def test_repl_drains_a_paused_plan_through_approval(tmp_path, monkeypatch) -> None:
+def _pending_at_startup(config):  # noqa: ARG001
+    """A process killed while paused: the checkpoint still holds the interrupt."""
+    return SimpleNamespace(
+        tasks=(
+            SimpleNamespace(
+                interrupts=(
+                    SimpleNamespace(
+                        value={"type": "question", "question": "which?", "options": ["a"]}
+                    ),
+                )
+            ),
+        )
+    )
+
+
+def test_repl_pauses_then_resumes_a_question(tmp_path, monkeypatch) -> None:
     _capture(monkeypatch)
-    graph = _PausingGraph()
+    graph = _QuestionGraph()
     _script(monkeypatch, ["fix the typo"])
-    monkeypatch.setattr(ui, "ask_approval", lambda payload, **kwargs: "approve")
+    monkeypatch.setattr(ui, "ask_question", lambda payload: {"answer": "b", "cancelled": False})
 
     cli.repl(
         graph=graph,
@@ -356,95 +373,37 @@ def test_repl_drains_a_paused_plan_through_approval(tmp_path, monkeypatch) -> No
     assert isinstance(graph.payloads[-1], Command)
 
 
-def test_repl_does_not_reprint_the_plan_the_turn_already_rendered(tmp_path, monkeypatch) -> None:
-    """`_announce_todos` printed this plan as the turn's Tasks panel; printing it again doubles it."""
-    _capture(monkeypatch)
-    seen: list[dict] = []
-    _script(monkeypatch, ["fix the typo"])
-    monkeypatch.setattr(
-        ui, "ask_approval", lambda payload, **kwargs: seen.append(kwargs) or "approve"
-    )
-
-    cli.repl(
-        graph=_PausingGraph(),
-        config=cli._session_config(worktree=tmp_path, session="s1"),
-        model_name="m",
-    )
-
-    assert seen == [{"show_plan": False}]
-
-
-def test_repl_prompts_for_approval_outside_the_live_region(tmp_path, monkeypatch) -> None:
-    """The prompt must not fight the todo Live for the cursor (it is input(), not output)."""
-    monkeypatch.setenv("TERM", "xterm-256color")  # else rich treats the console as dumb
-    console = Console(file=io.StringIO(), width=80, force_terminal=True)
-    panel = ui.TodoPanel(console)
-    live_states: list[bool] = []
-
-    def spy_approval(payload, **kwargs):  # noqa: ARG001
-        live_states.append(panel._live is not None)
-        return "approve"
-
-    monkeypatch.setattr(ui, "ask_approval", spy_approval)
-    _script(monkeypatch, ["fix the typo"])
-    config = cli._session_config(worktree=tmp_path, session="s1")
-    config["configurable"]["todo_renderer"] = panel
-
-    cli.repl(graph=_PausingGraph(), config=config, model_name="m")
-
-    assert live_states == [False], "approval ran while the Live region was still open"
-
-
-class _LiveSpyGraph(_PausingGraph):
-    """Records whether the todo Live was still open when the resume actually ran."""
-
-    def __init__(self, panel) -> None:
-        super().__init__()
-        self.panel = panel
-        self.live_at_resume: list[bool] = []
-
-    def invoke(self, payload, config) -> dict:
-        if isinstance(payload, Command):
-            self.live_at_resume.append(self.panel._live is not None)
-        return super().invoke(payload, config)
-
-
 def test_repl_resumes_inside_the_live_region_so_the_panel_refreshes(tmp_path, monkeypatch) -> None:
     """Only the prompt must dodge the Live; the resumed graph still redraws in place."""
     monkeypatch.setenv("TERM", "xterm-256color")  # else rich treats the console as dumb
     console = Console(file=io.StringIO(), width=80, force_terminal=True)
     panel = ui.TodoPanel(console)
-    graph = _LiveSpyGraph(panel)
-    monkeypatch.setattr(ui, "ask_approval", lambda payload, **kwargs: "approve")
+    live_at_resume: list[bool] = []
+
+    class LiveSpyGraph(_QuestionGraph):
+        def invoke(self, payload, config):
+            if isinstance(payload, Command):
+                live_at_resume.append(panel._live is not None)
+            return super().invoke(payload, config)
+
+    graph = LiveSpyGraph()
+    monkeypatch.setattr(ui, "ask_question", lambda payload: {"answer": "b", "cancelled": False})
     _script(monkeypatch, ["fix the typo"])
     config = cli._session_config(worktree=tmp_path, session="s1")
     config["configurable"]["todo_renderer"] = panel
 
     cli.repl(graph=graph, config=config, model_name="m")
 
-    assert graph.live_at_resume == [True], "the resumed half appended panels instead of redrawing"
+    assert live_at_resume == [True], "the resumed half appended panels instead of redrawing"
 
 
-class _PendingSnapshot:
-    tasks = (SimpleNamespace(interrupts=(SimpleNamespace(value={"plan": "[-]  a"}),)),)
-
-
-class _PendingAtStartupGraph(_PausingGraph):
-    """A process killed while paused: the checkpoint still holds the interrupt."""
-
-    def get_state(self, config):  # noqa: ARG002
-        return _PendingSnapshot()
-
-
-def test_repl_rebuilds_a_pending_approval_at_startup(tmp_path, monkeypatch) -> None:
-    """A rebuilt approval has no panel above it, so this is the one path that prints the plan."""
+def test_repl_rebuilds_a_pending_question_at_startup(tmp_path, monkeypatch) -> None:
+    """A process killed while paused resumes before any input is read."""
     _capture(monkeypatch)
-    graph = _PendingAtStartupGraph()
-    seen: list[dict] = []
+    graph = _QuestionGraph()
+    monkeypatch.setattr(graph, "get_state", _pending_at_startup)
     _script(monkeypatch, [])  # EOF: no user turn at all
-    monkeypatch.setattr(
-        ui, "ask_approval", lambda payload, **kwargs: seen.append(kwargs) or "approve"
-    )
+    monkeypatch.setattr(ui, "ask_question", lambda payload: {"answer": "b", "cancelled": False})
 
     cli.repl(
         graph=graph,
@@ -453,11 +412,6 @@ def test_repl_rebuilds_a_pending_approval_at_startup(tmp_path, monkeypatch) -> N
     )
 
     assert graph.log == ["invoke"]  # resumed before any input was read
-    assert seen == [{"show_plan": True}]
-
-
-def _unexpected(*_args, **_kwargs):
-    raise AssertionError("the plan prompt must not see a question payload")
 
 
 def _dismiss(*_args, **_kwargs):
@@ -468,26 +422,11 @@ def _interrupt(*_args, **_kwargs):
     raise KeyboardInterrupt
 
 
-class _QuestionGraph(_PausingGraph):
-    """First invoke pauses on an `ask_user` question; a `Command` input means resume."""
-
-    def invoke(self, payload, config) -> dict:  # noqa: ARG002
-        self.log.append("invoke")
-        self.payloads.append(payload)
-        if isinstance(payload, Command):
-            return {"messages": [], "turns": 1, "stop_reason": "completed"}
-        pending = SimpleNamespace(
-            value={"type": "question", "question": "which?", "options": ["a", "b"]}
-        )
-        return {"messages": [], "turns": 1, "__interrupt__": [pending]}
-
-
 def test_repl_answers_a_question_with_the_selection(tmp_path, monkeypatch) -> None:
     _capture(monkeypatch)
     graph = _QuestionGraph()
     _script(monkeypatch, ["fix the typo"])
     monkeypatch.setattr(ui, "ask_question", lambda payload: {"answer": "b", "cancelled": False})
-    monkeypatch.setattr(ui, "ask_approval", _unexpected)
 
     cli.repl(
         graph=graph,
@@ -499,7 +438,7 @@ def test_repl_answers_a_question_with_the_selection(tmp_path, monkeypatch) -> No
 
 
 def test_repl_maps_a_dismissed_question_to_the_cancelled_sentinel(tmp_path, monkeypatch) -> None:
-    """A question is not a plan gate: Ctrl-C lets the agent carry on, it does not reject."""
+    """Ctrl-C lets the agent carry on; it does not reject the turn."""
     _capture(monkeypatch)
     graph = _QuestionGraph()
     _script(monkeypatch, ["fix the typo"])
@@ -529,22 +468,6 @@ def test_repl_ends_the_turn_on_eof_at_a_question(tmp_path, monkeypatch) -> None:
 
     # Only the task turn ran; no resume was issued with a sentinel answer.
     assert all(isinstance(payload, dict) for payload in graph.payloads)
-
-
-def test_repl_keeps_rejecting_a_declined_plan_prompt(tmp_path, monkeypatch) -> None:
-    """The plan gate's dismissal semantics must not follow the question's."""
-    _capture(monkeypatch)
-    graph = _PausingGraph()
-    _script(monkeypatch, ["fix the typo"])
-    monkeypatch.setattr(ui, "ask_approval", _dismiss)
-
-    cli.repl(
-        graph=graph,
-        config=cli._session_config(worktree=tmp_path, session="s1"),
-        model_name="m",
-    )
-
-    assert graph.payloads[-1].resume == "reject"
 
 
 class _CapturingGraph(_FakeGraph):

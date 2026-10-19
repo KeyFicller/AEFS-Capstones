@@ -26,8 +26,6 @@ CONSOLE = Console()
 
 # \1..\2 tell readline these escapes occupy no columns; without them the colour
 # codes would count toward the prompt width and shift the line.
-APPROVAL_PROMPT = "\001\033[1;33m\002approve? [y/n] › \001\033[0m\002"
-PLAIN_APPROVAL_PROMPT = "approve? [y/n] › "
 QUESTION_PROMPT = "\001\033[1;36m\002answer › \001\033[0m\002"
 PLAIN_QUESTION_PROMPT = "answer › "
 
@@ -56,13 +54,10 @@ class TodoPanel:
         self._working = False
         self._spinner = Spinner("dots", text=Text(WORKING_MESSAGE, style="bold cyan"))
 
-    def __call__(self, text: str, version: int = 0) -> None:
+    def __call__(self, text: str) -> None:
         self._panel = Panel(
             text,
             title=TODO_TITLE,
-            # Shown even at v0: hiding it made the count effectively invisible, since it
-            # resets to 0 every turn and only a mid-turn replan bumps it.
-            subtitle=f"replan v{version}",
             border_style="blue",
             expand=False,
         )
@@ -112,38 +107,11 @@ class TodoPanel:
                 self._live = None
 
 
-def ask_approval(payload: Mapping[str, Any], *, show_plan: bool = True) -> str:
-    """Show the plan and read a decision. Distinct prompt from `ask()` on purpose.
-
-    `show_plan=False` is for a caller that already printed this plan — the turn's own
-    Tasks panel stays as scrollback — so that only the prompt is owed. The payload is
-    byte-identical to what `_announce_todos` rendered, so re-printing it just doubles it.
-    """
-    if show_plan:
-        CONSOLE.print(
-            Panel(
-                escape(str(payload.get("plan", ""))),
-                title="plan for approval",
-                border_style="yellow",
-                expand=False,
-            )
-        )
-    prompt = APPROVAL_PROMPT if sys.stdin.isatty() else PLAIN_APPROVAL_PROMPT
-    while True:
-        answer = input(prompt).strip().lower()
-        if answer in {"y", "yes", "approve"}:
-            return "approve"
-        if answer in {"n", "no", "reject"}:
-            return "reject"
-        CONSOLE.print("[yellow]answer y or n[/]")
-
-
 def ask_question(payload: Mapping[str, Any]) -> dict[str, Any]:
     """Show a question with numbered options and read a choice or free text.
 
     A number picks that option; anything else is taken as the user's own answer.
-    Raises EOFError/KeyboardInterrupt — the caller decides what a dismissal means,
-    exactly as `ask_approval` leaves the plan gate's reject policy to the CLI.
+    Raises EOFError/KeyboardInterrupt — the caller decides what a dismissal means.
     """
     options = [str(option) for option in payload.get("options") or []]
     body = "\n".join(

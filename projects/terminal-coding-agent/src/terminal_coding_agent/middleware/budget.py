@@ -22,6 +22,8 @@ def _ai_message_from_result(result: Any) -> AIMessage | None:
 
 
 class BudgetMiddleware(AgentMiddleware):
+    """Count spend. Enforcement belongs to `ModelCallLimitMiddleware`."""
+
     def __init__(self, ledger: Budget) -> None:
         super().__init__()
         self.ledger = ledger
@@ -53,23 +55,13 @@ class BudgetMiddleware(AgentMiddleware):
             output_tokens=output_tokens,
             cache_read_tokens=cache_read,
         )
-        if tripped := self.ledger.check():
-            self.ledger.stop_reason = tripped
 
     def wrap_model_call(self, request: Any, handler: Callable[..., Any]) -> Any:
-        if reason := self.ledger.check():
-            self.ledger.stop_reason = reason
-            return AIMessage(content=f"Stopped: budget exceeded ({reason})")
-
         result = handler(request)
         self._bill(result)
         return result
 
     async def awrap_model_call(self, request: Any, handler: Callable[..., Any]) -> Any:
-        if reason := self.ledger.check():
-            self.ledger.stop_reason = reason
-            return AIMessage(content=f"Stopped: budget exceeded ({reason})")
-
         result = await handler(request)
         self._bill(result)
         return result
