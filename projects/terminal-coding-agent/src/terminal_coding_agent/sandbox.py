@@ -51,10 +51,17 @@ def require_docker(*, timeout: int = 15) -> None:
 class DockerSandbox:
     """A long-lived `sleep infinity` container bound to one host worktree."""
 
-    def __init__(self, *, worktree: Path, image: str, session: str) -> None:
+    # Where the host worktree appears inside the container. File tools accept paths
+    # spelled this way too, but they run on the host, under the worktree itself.
+    container_root = CONTAINER_WORKTREE
+
+    def __init__(
+        self, *, worktree: Path, image: str, session: str, allow_dangerous: bool = False
+    ) -> None:
         self.worktree = worktree.resolve()
         self.image = image
         self.name = container_name(session)
+        self.allow_dangerous = allow_dangerous
 
     def start(self) -> None:
         # A SIGKILLed CLI leaves `sleep infinity` running; the same session name would collide.
@@ -66,8 +73,8 @@ class DockerSandbox:
             "--rm",
             "--name",
             self.name,
-            "--network",
-            "none",
+            # `--allow-dangerous` drops the only network fence the sandbox has.
+            *(() if self.allow_dangerous else ("--network", "none")),
             "-v",
             f"{self.worktree}:{CONTAINER_WORKTREE}",
             "-w",

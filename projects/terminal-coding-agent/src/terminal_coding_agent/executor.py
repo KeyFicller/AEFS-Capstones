@@ -52,13 +52,17 @@ def _final_agent_message(agent_messages: list) -> AIMessage | None:
     return None
 
 
-def _executor_prompt(*, enable_debug: bool, shell_anything: bool) -> str:
+def _executor_prompt(
+    *, enable_debug: bool, shell_anything: bool, allow_dangerous: bool = False
+) -> str:
     """Executor system prompt. Shell-only mode replaces the debug addendum."""
     prompt = SYSTEM_PROMPTS["executor"]
     if shell_anything:
-        return prompt + "\n\n" + SYSTEM_PROMPTS["shell_anything"]
-    if enable_debug:
+        prompt += "\n\n" + SYSTEM_PROMPTS["shell_anything"]
+    elif enable_debug:
         prompt += "\n\n" + SYSTEM_PROMPTS["debug"]
+    if allow_dangerous:
+        prompt += "\n\n" + SYSTEM_PROMPTS["unrestricted"]
     return prompt
 
 
@@ -71,6 +75,7 @@ def build_execute_nodes(
     enable_debug: bool = False,
     enable_hitl: bool = False,
     shell_anything: bool = False,
+    allow_dangerous: bool = False,
 ) -> dict[str, Callable[[CodingAgentState], dict[str, Any]]]:
     """Three parent-graph nodes so IN_PROGRESS is committed (and printed) before the agent runs."""
 
@@ -119,9 +124,10 @@ def build_execute_nodes(
             BudgetMiddleware(ledger),
             SummarizationMiddleware(models.executor, trigger=("tokens", PRECOMPACT_TOKENS)),
             ObservabilityMiddleware(resolve_model_name(models.executor)),
-            SafetyMiddleware(),
-            BlockedReportMiddleware(),
         ]
+        if not allow_dangerous:
+            middleware.append(SafetyMiddleware())
+        middleware.append(BlockedReportMiddleware())
         if enable_hitl:
             middleware.append(AskUserMiddleware())
         if sequence_events is not None:
@@ -130,7 +136,11 @@ def build_execute_nodes(
                 SequenceMiddleware(sequence_events, description=todo_list[task_index].description)
             )
 
-        base_prompt = _executor_prompt(enable_debug=enable_debug, shell_anything=shell_anything)
+        base_prompt = _executor_prompt(
+            enable_debug=enable_debug,
+            shell_anything=shell_anything,
+            allow_dangerous=allow_dangerous,
+        )
         system_prompt = (
             base_prompt
             + "\n\nCurrent plan:\n"
@@ -183,8 +193,9 @@ def build_execute_nodes(
         middleware = [
             BudgetMiddleware(ledger),
             ObservabilityMiddleware(resolve_model_name(models.executor)),
-            SafetyMiddleware(),
         ]
+        if not allow_dangerous:
+            middleware.append(SafetyMiddleware())
 
         agent = create_agent(
             model=models.executor,

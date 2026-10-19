@@ -195,6 +195,7 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
     make_plan = build_planner(models, with_system_prompt=enable_intent)
     enable_debug = bool(configurable.get("enable_debug"))
     shell_anything = bool(configurable.get("shell_anything"))
+    allow_dangerous = bool(configurable.get("allow_dangerous"))
     execute = build_execute_nodes(
         models,
         make_tools(
@@ -203,12 +204,14 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
             enable_debug=enable_debug,
             shell_anything=shell_anything,
             sandbox=configurable.get("sandbox"),
+            allow_dangerous=allow_dangerous,
         ),
         worktree=worktree,
         sequence_events=sequence_events,
         enable_debug=enable_debug,
         enable_hitl=bool(configurable.get("enable_hitl")),
         shell_anything=shell_anything,
+        allow_dangerous=allow_dangerous,
     )
     recover = build_recover(make_plan, worktree=worktree)
 

@@ -45,6 +45,21 @@ def test_start_mounts_only_the_worktree(tmp_path: Path, monkeypatch) -> None:
     assert run[-3:] == ["img:1", "sleep", "infinity"]
 
 
+def test_dangerous_mode_drops_the_network_fence(tmp_path: Path, monkeypatch) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(command, **kwargs):  # noqa: ARG001
+        calls.append(command)
+        return _result(stdout="container-id")
+
+    monkeypatch.setattr(sandbox_module.subprocess, "run", fake_run)
+    DockerSandbox(
+        worktree=tmp_path, image="img", session="s1", allow_dangerous=True
+    ).start()
+
+    assert "--network" not in calls[1]
+
+
 def test_start_reports_a_failed_container(tmp_path: Path, monkeypatch) -> None:
     def fake_run(command, **kwargs):  # noqa: ARG001
         return _result(returncode=1, stderr="no such image")

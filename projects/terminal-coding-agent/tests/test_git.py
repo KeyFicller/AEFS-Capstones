@@ -26,6 +26,15 @@ def test_git_reset_rejected(tmp_path: Path) -> None:
     assert "not allowed" in out.lower()
 
 
+def test_dangerous_git_allows_a_denied_subcommand(tmp_path: Path) -> None:
+    """`--allow-dangerous` trusts the container: the allowlist is gone entirely."""
+    tool = build_git(tmp_path, allow_dangerous=True)
+
+    out = tool.invoke({"git_args": ["config", "--list"]})
+
+    assert "not allowed" not in out.lower()
+
+
 def test_git_config_rejected(tmp_path: Path) -> None:
     """`core.editor` / `core.hooksPath` (and --global) turn later git calls into execution."""
     tool = build_git(tmp_path)

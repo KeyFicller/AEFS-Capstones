@@ -208,10 +208,13 @@ def test_main_defaults_to_a_persistent_workspace(tmp_path: Path, monkeypatch) ->
 class _FakeSandbox:
     instances: list = []
 
-    def __init__(self, *, worktree: Path, image: str, session: str) -> None:
+    def __init__(
+        self, *, worktree: Path, image: str, session: str, allow_dangerous: bool = False
+    ) -> None:
         self.worktree = worktree
         self.image = image
         self.session = session
+        self.allow_dangerous = allow_dangerous
         self.log: list[str] = []
         self.__class__.instances.append(self)
 
@@ -273,6 +276,42 @@ def test_main_fails_fast_when_docker_is_missing(tmp_path: Path, monkeypatch) -> 
 
     assert cli.main(["--worktree", str(tmp_path), "--docker"]) == 1
     assert called == {}, "the REPL must not open without a working sandbox"
+
+
+def test_main_rejects_dangerous_without_docker(tmp_path: Path, monkeypatch) -> None:
+    """No container means no fence: refuse instead of running the agent on the host."""
+    called: dict = {}
+    _stub_main(monkeypatch, called)
+
+    assert cli.main(["--worktree", str(tmp_path), "--allow-dangerous"]) == 2
+    assert called == {}, "the REPL must not open when the flag is misused"
+
+
+def test_main_dangerous_opens_the_sandbox(tmp_path: Path, monkeypatch) -> None:
+    called: dict = {}
+    _stub_main(monkeypatch, called)
+    _capture(monkeypatch)
+    _FakeSandbox.instances = []
+    monkeypatch.setattr(cli, "require_docker", lambda: None)
+    monkeypatch.setattr(cli, "DockerSandbox", _FakeSandbox)
+
+    assert cli.main(["--worktree", str(tmp_path), "--docker", "--allow-dangerous"]) == 0
+
+    assert _FakeSandbox.instances[0].allow_dangerous is True
+    assert called["config"]["configurable"]["allow_dangerous"] is True
+
+
+def test_main_is_fenced_by_default(tmp_path: Path, monkeypatch) -> None:
+    called: dict = {}
+    _stub_main(monkeypatch, called)
+    monkeypatch.setattr(cli, "require_docker", lambda: None)
+    monkeypatch.setattr(cli, "DockerSandbox", _FakeSandbox)
+    _FakeSandbox.instances = []
+
+    assert cli.main(["--worktree", str(tmp_path), "--docker"]) == 0
+
+    assert _FakeSandbox.instances[0].allow_dangerous is False
+    assert called["config"]["configurable"]["allow_dangerous"] is False
 
 
 class _EmptySnapshot:

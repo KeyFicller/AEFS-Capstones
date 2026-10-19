@@ -27,7 +27,7 @@ _ALLOWED = frozenset(
 _DENIED = frozenset({"push", "pull", "fetch", "clone", "reset", "config"})
 
 
-def build_git(worktree: Path) -> BaseTool:
+def build_git(worktree: Path, *, allow_dangerous: bool = False) -> BaseTool:
     @tool
     @tool_output(lambda params, result: exit_code_and_output(result))
     def git(git_args: list[str]) -> str:
@@ -43,7 +43,8 @@ def build_git(worktree: Path) -> BaseTool:
             return truncate("Error: git_args is empty")
 
         subcommand = git_args[0]
-        if subcommand in _DENIED or subcommand not in _ALLOWED:
+        # `--allow-dangerous` trusts the container: push/pull/reset/config included.
+        if not allow_dangerous and (subcommand in _DENIED or subcommand not in _ALLOWED):
             return truncate(f"Error: git subcommand not allowed: {subcommand}")
 
         try:

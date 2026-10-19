@@ -34,6 +34,10 @@ SYSTEM_PROMPTS = {
     debug tools are not available. Read, edit, run, and commit by passing a shell
     command to `run_shell`.
     """,
+    "unrestricted": """
+    This sandbox has network access and no command restrictions: package installs,
+    network calls, and any shell command are allowed.
+    """,
     "debug": """
     A live lldb session is available via `debug_start`, `debug_cmd`, `debug_stop`.
     Build the program with `-g -O0` first. `debug_cmd` runs one lldb command

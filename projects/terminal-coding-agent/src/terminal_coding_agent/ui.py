@@ -211,3 +211,11 @@ def render_budget(state: Mapping[str, Any]) -> None:
 def render_workspace(path: Path) -> None:
     """Point at the worktree after the session ends so its edits stay findable."""
     CONSOLE.print(f"[dim]worktree[/] {escape(str(path))}")
+
+
+def render_danger_warning(path: Path) -> None:
+    """Say once, up front, that the container's fences are off."""
+    CONSOLE.print(
+        f"[bold yellow]dangerous[/] network and command fences are off in the sandbox "
+        f"mounted at {escape(str(path))}"
+    )

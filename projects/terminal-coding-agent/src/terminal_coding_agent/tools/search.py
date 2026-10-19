@@ -10,7 +10,7 @@ from terminal_coding_agent.tools.path import resolve_in_worktree
 from terminal_coding_agent.tools.truncate import truncate
 
 
-def build_ripgrep(worktree: Path) -> BaseTool:
+def build_ripgrep(worktree: Path, *, container_root: str | None = None) -> BaseTool:
     def _display(params: dict, result: str) -> tuple[str, str]:
         count = len(result.splitlines())
         unit = "hit" if count == 1 else "hits"
@@ -28,7 +28,7 @@ def build_ripgrep(worktree: Path) -> BaseTool:
         Returns:
             The search results, truncated to ~4000 tokens.
         """
-        resolved = resolve_in_worktree(worktree, path)
+        resolved = resolve_in_worktree(worktree, path, container_root=container_root)
         if isinstance(resolved, str):
             return truncate(resolved)
         if not resolved.exists():
@@ -65,7 +65,7 @@ def build_ripgrep(worktree: Path) -> BaseTool:
     return ripgrep
 
 
-def build_tree_sitter_symbols(worktree: Path) -> BaseTool:
+def build_tree_sitter_symbols(worktree: Path, *, container_root: str | None = None) -> BaseTool:
     def _display(params: dict, result: str) -> tuple[str, str]:
         count = len(result.splitlines())
         unit = "symbol" if count == 1 else "symbols"
@@ -82,7 +82,7 @@ def build_tree_sitter_symbols(worktree: Path) -> BaseTool:
         Returns:
             Symbol listing, truncated to ~4000 tokens.
         """
-        resolved = resolve_in_worktree(worktree, path)
+        resolved = resolve_in_worktree(worktree, path, container_root=container_root)
         if isinstance(resolved, str):
             return truncate(resolved)
         if not resolved.exists():

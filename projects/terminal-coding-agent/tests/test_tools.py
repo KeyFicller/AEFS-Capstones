@@ -60,6 +60,8 @@ def test_shell_anything_is_only_run_shell(tmp_path: Path) -> None:
 
 
 class _FakeSandbox:
+    container_root = "/workspace"
+
     def run(self, command: str, timeout: int):  # noqa: ARG002
         return 0, "from-container", ""
 
@@ -70,6 +72,31 @@ def test_make_tools_hands_the_sandbox_to_run_shell(tmp_path: Path) -> None:
     out = tools["run_shell"].invoke({"command": "true"})
 
     assert "from-container" in out
+
+
+def test_file_tools_accept_the_container_path(tmp_path: Path) -> None:
+    """A model that copies `/workspace/x` out of a shell result must still reach the file."""
+    (tmp_path / "a.txt").write_text("hello", encoding="utf-8")
+    (tmp_path / "a.py").write_text("def f():\n    pass\n", encoding="utf-8")
+    tools = tools_by_name(tmp_path, sandbox=_FakeSandbox())
+
+    assert "hello" in tools["read_file"].invoke({"path": "/workspace/a.txt"})
+    assert "hello" in tools["ripgrep"].invoke({"pattern": "hello", "path": "/workspace/a.txt"})
+    assert "function f" in tools["tree_sitter_symbols"].invoke({"path": "/workspace/a.py"})
+
+    diff = tools["edit_file"].invoke(
+        {"path": "/workspace/a.txt", "old_str": "hello", "new_str": "bye"}
+    )
+    assert "-hello" in diff and "+bye" in diff
+    assert (tmp_path / "a.txt").read_text(encoding="utf-8") == "bye"
+
+
+def test_make_tools_passes_allow_dangerous_to_git(tmp_path: Path) -> None:
+    out = tools_by_name(tmp_path, allow_dangerous=True)["git"].invoke(
+        {"git_args": ["reset", "--hard"]}
+    )
+
+    assert "not allowed" not in out.lower()
 
 
 def test_shell_anything_keeps_the_sandbox(tmp_path: Path) -> None:

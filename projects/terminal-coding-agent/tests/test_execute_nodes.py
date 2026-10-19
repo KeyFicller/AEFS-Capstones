@@ -70,6 +70,21 @@ def test_shell_anything_prompt_names_only_run_shell() -> None:
     assert "debug_start" not in prompt
 
 
+def test_dangerous_prompt_states_the_sandbox_is_open() -> None:
+    """Without this the model will not try installs or network calls on its own."""
+    closed = _executor_prompt(enable_debug=False, shell_anything=False)
+    opened = _executor_prompt(enable_debug=False, shell_anything=False, allow_dangerous=True)
+    shell_only = _executor_prompt(
+        enable_debug=False, shell_anything=True, allow_dangerous=True
+    )
+
+    assert "no command restrictions" not in closed
+    assert "no command restrictions" in opened
+    # Orthogonal to the tool set: shell-only runs keep the addendum.
+    assert "no command restrictions" in shell_only
+    assert "run_shell" in shell_only
+
+
 def test_final_agent_message_keeps_last_plain_ai() -> None:
     messages = [
         HumanMessage(content="do it"),
@@ -353,6 +368,40 @@ def test_run_agent_installs_ask_user_only_when_hitl_is_enabled(
 
     installed = [m for m in captured["middleware"] if isinstance(m, AskUserMiddleware)]
     assert bool(installed) is with_hitl
+
+
+@pytest.mark.parametrize("allow_dangerous", [True, False])
+def test_safety_guard_is_dropped_only_when_dangerous(
+    tmp_path: Path, monkeypatch, allow_dangerous: bool
+) -> None:
+    from terminal_coding_agent import executor as executor_module
+    from terminal_coding_agent.middleware.safety import SafetyMiddleware
+
+    captured: list = []
+
+    class FakeAgent:
+        def invoke(self, payload, config):
+            return {"messages": []}
+
+    def fake_create_agent(**kwargs):
+        captured.append(kwargs["middleware"])
+        return FakeAgent()
+
+    monkeypatch.setattr(executor_module, "create_agent", fake_create_agent)
+    nodes = build_execute_nodes(
+        MagicMock(), tools=[], worktree=tmp_path, allow_dangerous=allow_dangerous
+    )
+    state = _base_state(
+        [ToDoItem(status=ToDoStatus.IN_PROGRESS, description="fix typo")],
+        current_task_index=0,
+    )
+
+    nodes["run_agent"](state, {})
+    nodes["chat"]({"messages": [HumanMessage(content="hi")]}, {})
+
+    for middleware in captured:
+        installed = [m for m in middleware if isinstance(m, SafetyMiddleware)]
+        assert bool(installed) is not allow_dangerous
 
 
 def test_chat_node_carries_the_final_reply(tmp_path, monkeypatch) -> None:

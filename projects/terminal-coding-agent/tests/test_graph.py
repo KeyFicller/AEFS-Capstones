@@ -294,6 +294,34 @@ def test_shell_anything_binds_only_run_shell(tmp_path: Path, monkeypatch) -> Non
     assert captured["shell_anything"] is True
 
 
+def test_allow_dangerous_reaches_tools_and_execute_nodes(tmp_path: Path, monkeypatch) -> None:
+    """The flag must survive the graph boundary: tools get it, and so do the nodes."""
+    os.environ["DEEPSEEK_API_KEY"] = "test"
+    seen: dict = {}
+    real = graph_module.make_tools
+
+    def spy(worktree, **kwargs):
+        seen["kwargs"] = kwargs
+        return real(worktree, **kwargs)
+
+    monkeypatch.setattr(graph_module, "make_tools", spy)
+    captured = _spy_on_execute_nodes(monkeypatch)
+    make_graph(
+        {
+            "configurable": {
+                "worktree": tmp_path,
+                "allow_dangerous": True,
+                "enable_web_search": False,
+                "enable_debug": False,
+            }
+        }
+    )
+    os.environ.pop("DEEPSEEK_API_KEY")
+
+    assert seen["kwargs"]["allow_dangerous"] is True
+    assert captured["allow_dangerous"] is True
+
+
 def test_gated_graph_adds_the_approval_node(tmp_path: Path) -> None:
     os.environ["DEEPSEEK_API_KEY"] = "test"
     agent = make_graph({"configurable": {"worktree": tmp_path, "enable_hitl": True}})

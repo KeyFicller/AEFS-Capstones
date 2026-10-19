@@ -34,7 +34,7 @@ def _write_atomic(path: Path, content: str) -> None:
         raise
 
 
-def build_read_file(worktree: Path) -> BaseTool:
+def build_read_file(worktree: Path, *, container_root: str | None = None) -> BaseTool:
     @tool
     @tool_output(lambda params, result: (f"{len(result.splitlines())} lines", ""))
     def read_file(path: str) -> str:
@@ -46,7 +46,7 @@ def build_read_file(worktree: Path) -> BaseTool:
         Returns:
             The contents of the file, truncated to ~4000 tokens.
         """
-        resolved = resolve_in_worktree(worktree, path)
+        resolved = resolve_in_worktree(worktree, path, container_root=container_root)
         if isinstance(resolved, str):
             return truncate(resolved)
         try:
@@ -57,7 +57,7 @@ def build_read_file(worktree: Path) -> BaseTool:
     return read_file
 
 
-def build_edit_file(worktree: Path) -> BaseTool:
+def build_edit_file(worktree: Path, *, container_root: str | None = None) -> BaseTool:
     def _display(params: dict, result: str) -> tuple[str, str]:
         lines = result.splitlines()
         # Diff headers always carry a space after the marker; `+++foo` is content.
@@ -78,7 +78,7 @@ def build_edit_file(worktree: Path) -> BaseTool:
         Returns:
             The unified diff of the edits, truncated to ~4000 tokens.
         """
-        resolved = resolve_in_worktree(worktree, path)
+        resolved = resolve_in_worktree(worktree, path, container_root=container_root)
         if isinstance(resolved, str):
             return truncate(resolved)
         if not resolved.exists():

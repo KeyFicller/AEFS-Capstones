@@ -53,6 +53,7 @@ def _session_config(
     worktree: Path,
     session: str,
     shell_anything: bool = False,
+    allow_dangerous: bool = False,
     sandbox: DockerSandbox | None = None,
 ) -> dict[str, Any]:
     """One thread per session; the todo renderer is injected here, not in graph.py."""
@@ -66,6 +67,7 @@ def _session_config(
             "enable_web_search": True,
             "enable_debug": True,
             "shell_anything": shell_anything,
+            "allow_dangerous": allow_dangerous,
             "sandbox": sandbox,
             # "local_model": "qwen3:8b"
         }
@@ -225,7 +227,19 @@ def main(argv: list[str] | None = None) -> int:
         default="python:3.13-slim",
         help="image for --docker; it must provide the commands the tasks run",
     )
+    parser.add_argument(
+        "--allow-dangerous",
+        action="store_true",
+        help=(
+            "with --docker: drop the network and command fences, and allow every git "
+            "subcommand"
+        ),
+    )
     args = parser.parse_args(argv)
+
+    if args.allow_dangerous and not args.docker:
+        render_error("--allow-dangerous requires --docker: without a sandbox the fence is all there is")
+        return 2
 
     load_local_env(ENV_PATH)
     session = args.session or f"cli-{uuid.uuid4().hex[:8]}"
@@ -241,12 +255,17 @@ def main(argv: list[str] | None = None) -> int:
         try:
             require_docker()
             sandbox = DockerSandbox(
-                worktree=worktree, image=args.docker_image, session=session
+                worktree=worktree,
+                image=args.docker_image,
+                session=session,
+                allow_dangerous=args.allow_dangerous,
             )
             sandbox.start()
         except SandboxError as exc:
             render_error(str(exc))
             return 1
+        if args.allow_dangerous:
+            ui.render_danger_warning(worktree)
 
     # The one place the interactive CLI picks a tool-log level; Harbor stays at "off".
     display.LEVEL = "detail"
@@ -254,6 +273,7 @@ def main(argv: list[str] | None = None) -> int:
         worktree=worktree,
         session=session,
         shell_anything=args.shell_anything,
+        allow_dangerous=args.allow_dangerous,
         sandbox=sandbox,
     )
     try:
