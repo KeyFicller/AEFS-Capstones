@@ -47,6 +47,12 @@ projects/*/artifacts/*
 # under `eval/` are worth keeping.
 projects/*/artifacts-ablation/*
 
+# Poisoning experiments: generated fixtures and the ~100 MB index working copy are both
+# reproducible in seconds (`--build-fixtures`, `prepare()`). The JSONL results are kept: they
+# are the only thing a rerun cannot recreate.
+projects/*/poisoning/*/fixtures/
+projects/*/poisoning/*/work/
+
 # `doc-qa eval`'s default output path (`RESULTS_PATH`) — an append target, so it is
 # scratch. Curated mdq runs are committed under explicit names instead
 # (`results-<mode>-<n>q*.jsonl`). Deliberately not `projects/*/eval/results.jsonl`:
