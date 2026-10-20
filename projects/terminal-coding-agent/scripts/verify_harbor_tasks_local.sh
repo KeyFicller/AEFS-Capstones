@@ -15,7 +15,7 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TASKS_DIR="$ROOT/harbor_tasks"
-DEFAULT_TASKS=(h1-order-desk h2-mail-room h3-stock-sync h4-plan-billing)
+DEFAULT_TASKS=(h1-order-desk h2-mail-room h3-stock-sync h4-plan-billing h5-stock-holds h6-ledger-dates h7-event-rollup)
 
 if [ $# -gt 0 ]; then
   TASKS=("$@")
@@ -112,6 +112,15 @@ SH
       run_case "$task" broken 0 1
       run_case "$task" solve 1 0 "$solve_setup"
       ;;
+    h5-stock-holds|h7-event-rollup)
+      # The visible suite is green while the task is still broken.
+      run_case "$task" broken 0 0
+      run_case "$task" solve 1 0 "$solve_setup"
+      ;;
+    h6-ledger-dates)
+      run_case "$task" broken 0 1
+      run_case "$task" solve 1 0 "$solve_setup"
+      ;;
   esac
 
   # Each cheat turns the visible suite green and still fails the hidden verifier.
@@ -176,6 +185,64 @@ PY
 SH
 )"
     run_case "$task" cheat-trial-day 0 0 "$cheat"
+  fi
+  if [ "$task" = "h5-stock-holds" ]; then
+    cheat="$(setup_for "$task-cheat" <<'SH'
+python3 - <<'PY'
+from pathlib import Path
+
+path = Path("/app/engine.py")
+source = path.read_text()
+old = "            if hold.expires_at >= now:"
+new = "            if hold.expires_at > now:"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new))
+PY
+SH
+)"
+    run_case "$task" cheat-expiry-boundary 0 0 "$cheat"
+  fi
+
+  if [ "$task" = "h6-ledger-dates" ]; then
+    cheat="$(setup_for "$task-cheat" <<'SH'
+cp /solution/proration.py /app/domain/rules/proration.py
+SH
+)"
+    run_case "$task" cheat-proration-only 0 0 "$cheat"
+  fi
+
+  if [ "$task" = "h7-event-rollup" ]; then
+    cheat="$(setup_for "$task-cheat" <<'SH'
+python3 - <<'PY'
+from pathlib import Path
+
+Path("/app/sessionize.py").write_text(
+    '''"""Session stitching."""
+
+GAP_MS = 30 * 60 * 1000
+
+
+def stitch(events):
+    groups = {}
+    for index, event in enumerate(events):
+        groups.setdefault((event["tenant"], event["user"]), []).append((event["ts_ms"], index))
+    assignment = {}
+    for (tenant, user), items in groups.items():
+        items.sort()
+        for position, (ts, index) in enumerate(items):
+            start = ts
+            back = position - 1
+            while back >= 0 and ts - items[back][0] <= GAP_MS:
+                start = items[back][0]
+                back -= 1
+            assignment[index] = f"{tenant}:{user}:{start}"
+    return assignment
+'''
+)
+PY
+SH
+)"
+    run_case "$task" cheat-micro-optimize 0 0 "$cheat"
   fi
 done
 

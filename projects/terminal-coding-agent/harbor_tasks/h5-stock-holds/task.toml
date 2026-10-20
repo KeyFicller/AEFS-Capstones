@@ -1,0 +1,31 @@
+schema_version = "1.4"
+artifacts = ["/app/.agent/trace.json", "/app/.agent/patch.diff"]
+
+[task]
+name = "local/h5-stock-holds"
+version = "1.0.0"
+description = "Reservation engine: lazy expiry, idempotency keys and confirm/release accounting disagree with the README."
+authors = []
+keywords = []
+
+[metadata]
+
+[verifier]
+timeout_sec = 600.0
+collect = []
+
+[verifier.env]
+
+[agent]
+timeout_sec = 900.0
+
+[environment]
+network_mode = "public"
+build_timeout_sec = 900.0
+os = "linux"
+workdir = "/app"
+mcp_servers = []
+
+[environment.env]
+
+[solution.env]

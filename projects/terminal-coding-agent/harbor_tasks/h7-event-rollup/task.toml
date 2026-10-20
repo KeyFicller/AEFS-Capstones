@@ -1,0 +1,31 @@
+schema_version = "1.4"
+artifacts = ["/app/.agent/trace.json", "/app/.agent/patch.diff"]
+
+[task]
+name = "local/h7-event-rollup"
+version = "1.0.0"
+description = "Event rollups are correct on small samples but the session stitcher cannot replay the production 120k-event hour in time."
+authors = []
+keywords = []
+
+[metadata]
+
+[verifier]
+timeout_sec = 600.0
+collect = []
+
+[verifier.env]
+
+[agent]
+timeout_sec = 900.0
+
+[environment]
+network_mode = "public"
+build_timeout_sec = 900.0
+os = "linux"
+workdir = "/app"
+mcp_servers = []
+
+[environment.env]
+
+[solution.env]

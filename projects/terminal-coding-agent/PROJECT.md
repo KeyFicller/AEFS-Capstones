@@ -2,7 +2,7 @@
 
 - **项目**：terminal-coding-agent / 所属 Phase：Phase19 / Capstone 01
 - **spec**：[Capstone 01 — Terminal-native coding agent](https://aiengineeringfromscratch.com/lesson?path=phases%2F19-capstone-projects%2F01-terminal-native-coding-agent)
-- **状态**：**交付重点在 CLI**。CLI 已交付（多轮 REPL / 输入前缀 / HITL / 8 hook / OTel）；Harbor 评测链路也已跑通（垂直切片 + 4 题任务集 `h1`–`h4`，四臂 32 trial 零异常）。**已知降级** 3 处：Ctrl-C 取消的那一轮不写 trace、`!` 无破坏性守卫、`@` 图片不剥离。**未做**：PR 发布、OTel trace 归档、失败报告。
+- **状态**：**交付重点在 CLI**。CLI 已交付（多轮 REPL / 输入前缀 / HITL / 8 hook / OTel）；Harbor 评测链路也已跑通（垂直切片 + 7 题任务集 `h1`–`h7`，难题集四臂重测 48 trial）。**已知降级** 3 处：Ctrl-C 取消的那一轮不写 trace、`!` 无破坏性守卫、`@` 图片不剥离。**未做**：PR 发布、OTel trace 归档、失败报告。
 
 ## 目标与范围
 
@@ -62,7 +62,14 @@
 
 **lldb 调试工具（2026-10-09，已交付）**：`debug_start` / `debug_cmd` / `debug_stop` 三件套，agent 在一个活会话里连续设断点、运行、看变量与调用栈。会话住独立 `python3.9` worker（绑定限 3.9），主进程经逐行 JSON 驱动，**不解析 console**；超时由 watchdog 线程 `SBProcess.Stop()` 打断、会话仍可用。由 `enable_debug` 开启、默认关 → Harbor 工具表逐字不变。**只在本地 CLI 交付**（沙箱无 lldb）。
 
-**Harbor 评测证据（已交付，非当前重点）**：`harbor_tasks/` 下 4 题能力集（`h1-order-desk` / `h2-mail-room` / `h3-stock-sync` / `h4-plan-billing`，均为「表面症状误导 + 隐藏不变量测试」的业务逻辑缺陷），配 `langgraph.json` + `requirements-harbor.txt`。
+**Harbor 评测证据（已交付，非当前重点）**：`harbor_tasks/` 下 7 题能力集，配 `langgraph.json` + `requirements-harbor.txt`。
+
+- **易题集 `h1`–`h4`**（`h1-order-desk` / `h2-mail-room` / `h3-stock-sync` / `h4-plan-billing`）：「表面症状误导 + 隐藏不变量测试」的业务逻辑缺陷；每题有 1 条**红**的可见测试，正确实现在同一文件里，约 100 行仓库。
+- **难题集 `h5`–`h7`**（2026-10-20 新增）：各用一种难度机制，目标是让「一次贪心修补」过不了。
+  - `h5-stock-holds`：库存预留状态机（`reserve` / `confirm` / `release` / `available` / `snapshot`），3 个互相纠缠的缺陷；隐藏测试 = 18 条场景 + 5 seed × 400 步随机序列，每步对独立重算的参考实现比对 4 条不变量。**破损时可见测试全绿**。
+  - `h6-ledger-dates`：6 层调用链（`api` → `service` → `domain.policy` → `domain/rules` → `adapters` → `support`），2 个**独立**根因（比例分摊先取整再相乘、`config.settings` 默认 rounding mode 走错分支）；可见测试只有 1 条红，只暴露「差 1 分」。只修一个根因过不了。
+  - `h7-event-rollup`：会话链式聚合，破损版 O(n²)；隐藏测试 = 40 条正确性 + 12 万事件 9s 子进程超时（朴素约 90s）。**破损时可见测试全绿**，只做微优化仍超时。
+  - 每题配 1 个 `cheat-*`：可见测试变绿、隐藏测试仍红，用于证明题目咬得住。`h1`–`h4` 一行未动，旧数据可复现。
 
 - **跑批**（cwd = 仓库根，job 落仓库根 `jobs/`）：
 
@@ -88,9 +95,20 @@ harbor run -p projects/terminal-coding-agent/harbor_tasks \
 | allow-dangerous（去围栏） | 7/8 | 53%–98% | 24.0 | 121,135 | 4,833 |
 | executor-only（无 Plan） | 8/8 | 68%–100% | **9.2** | 100,918 | **2,709** |
 
-- **可证伪性**：本地双向验证 **12/12**（4 题 solve→1、broken→0，另 3 个作弊解在可见测试全绿时仍→0），不耗 LLM。
-- **当前无区分度**：四臂 pass@2 均 4/4，Wilson 区间大幅重叠，6/8 与 8/8 的差异不显著（n=2 只能发现大效应）。失败原因均为业务边界没修全或规划漏建修复 todo，非围栏/环境所致。稳定信号只有成本与步数：只给 shell 的输入 token 约为 baseline 的 41%；去掉 Plan 后轮次降到 24.4→9.2、输出 token 减半，通过率反升到 8/8（2 次尝试）。结论：这 4 题对 `deepseek-v4-flash` 已饱和；要区分需换更弱被试或继续加难度。
+- **难题集实测**（`h5`–`h7`，2026-10-20，每题 4 次尝试，共 48 trial，重测前已确认网络正常，全程无 infra 错误；臂组合与前表不同，未含 allow-dangerous，改测 `executor-only + shell`）：
+
+| arm | 通过 | pass@4 | 平均轮次 | 最大轮次 | 平均输入 tok | 平均输出 tok |
+|---|---|---|---|---|---|---|
+| baseline（Plan + Executor） | **12/12** | 1.0 | 33.9 | 151 | 227,580 | 13,764 |
+| shell-only（只给 `run_shell`） | 11/12 | 1.0 | 39.1 | 151 | 192,636 | 13,576 |
+| executor-only（无 Plan） | 11/12 | 1.0 | **20.1** | 39 | 223,587 | 11,954 |
+| executor-only + shell | 9/12 | 1.0 | 26.7 | 151 | 190,659 | **8,966** |
+
 - 汇总：`python3 scripts/collect_eval_results.py <job-dir>` → `eval/<arm>.jsonl`（逐题 `reward` / `turns` / in-out tokens / `cost_rmb` / `stop_reason` / artifact 状态）。
+- **可证伪性**：本地双向验证 **21/21**（7 题 solve→1、broken→0，另 7 个作弊解在可见测试全绿时仍→0），不耗 LLM。
+- **当前无区分度**：易题集四臂 pass@2 均 4/4、难题集四臂 pass@4 均 1.0，Wilson 区间大幅重叠，**不能据此排名拓扑**。失败原因均为业务边界没修全或规划漏建修复 todo，非围栏/环境所致。稳定信号只有成本与步数：只给 shell 的输入 token 约为 baseline 的 41%；去掉 Plan 后易题集轮次 24.4→9.2、输出 token 减半。结论：7 题对 `deepseek-v4-flash` 仍饱和；要区分需换更弱被试或继续加难度。
+- **难题集的真实信号是「卡住」而非「答错」**：48 trial 中 5 次未通过，形态为 3 次 `max_turns`（撞 151 轮上限）/ 2 次 `AgentTimeoutError`。`max_turns` 那次在 h6 上改了 4 个文件、两个根因都找到，却在重写比例分摊时引入新 bug 并陷入无限调试——是跨模块推理题该有的失败形态。平均轮次随配置变重单调上升（20.1 → 26.7 → 33.9 → 39.1）。
+- **下一步**：`h5` 的 `instruction.md` 直接列出了「过期回收 / 幂等键 / 确认释放记账」三个方向，等于替模型完成定位；改成只给用户故事、不给模块名与缺陷清单，才能测到读仓库的能力。详见 `eval/RESULTS-hard-tasks.md`。
 
 **已知降级**：REPL 里被 Ctrl-C 取消的那一轮不写 `trace.json` / `patch.diff`，checkpoint 停在中途，续跑即从该节点 at-least-once 重放；Harbor 跑批非交互，不受影响。rule `30-agent-architecture` 要求的「取消也要走 Stop hook」**未做**。（`!` 无破坏性命令守卫、`@` 图片不剥离，属首版刻意取舍。）
 
