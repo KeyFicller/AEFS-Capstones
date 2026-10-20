@@ -63,5 +63,8 @@ pydantic>=2.9
 pydantic-settings>=2.5
 typer>=0.27
 streamlit>=1.40
+# HTTP 服务（multimodal-doc-qa：POST /ask、GET /page）
+fastapi>=0.115
+uvicorn>=0.32
 # tiny-llm-pipeline: train-pretrain writes monitor.png
 matplotlib>=3.9

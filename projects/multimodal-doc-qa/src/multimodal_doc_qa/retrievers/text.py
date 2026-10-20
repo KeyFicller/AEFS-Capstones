@@ -1,5 +1,6 @@
 """OCR-first retriever. Same contract as the visual retriever; what is indexed is text chunks."""
 
+import threading
 from typing import Any
 
 import torch
@@ -25,10 +26,12 @@ class OcrEmbedder:
         from sentence_transformers import SentenceTransformer
 
         self._model = SentenceTransformer(model_name, device=device)
+        self._lock = threading.Lock()
 
     def encode(self, texts: list[str]) -> torch.Tensor:
         """Return L2-normalized ``[len(texts), dim]`` embeddings."""
-        return self._model.encode(texts, normalize_embeddings=True, convert_to_tensor=True)
+        with self._lock:
+            return self._model.encode(texts, normalize_embeddings=True, convert_to_tensor=True)
 
 
 class TextRetriever(BaseRetriever):

@@ -396,7 +396,7 @@ def _open_retriever(settings: Settings, mode: str):
         raise typer.Exit(code=1) from exc
 
 
-def _load_deps(
+def load_deps(
     settings: Settings, retriever: object, budget: Budget, *, enable_intent: bool = False
 ) -> GraphDeps:
     """Wire the graph's models. One chat model serves the three nodes and the answerer."""
@@ -459,7 +459,7 @@ def ask(
 
     retriever = _open_retriever(settings, mode)
     budget = Budget.from_settings(settings)
-    deps = _load_deps(settings, retriever, budget, enable_intent=True)
+    deps = load_deps(settings, retriever, budget, enable_intent=True)
 
     with ui.working():
         out = build_graph(deps, settings).invoke(initial_state(question))
@@ -565,7 +565,7 @@ def _eval_one(question, settings: Settings, retriever):
     from multimodal_doc_qa.eval.run import QuestionRun
 
     budget = Budget.from_settings(settings)
-    deps = _load_deps(settings, retriever, budget)
+    deps = load_deps(settings, retriever, budget)
     with ui.working():
         out_state = build_graph(deps, settings).invoke(initial_state(question.text))
     return QuestionRun(
@@ -777,7 +777,7 @@ def _run_turn(
     """One ask. A failure is printed and the session stays up."""
     try:
         budget = Budget.from_settings(settings)
-        deps = _load_deps(settings, retriever, budget, enable_intent=True)
+        deps = load_deps(settings, retriever, budget, enable_intent=True)
         with ui.working():
             out = build_graph(deps, settings).invoke(initial_state(question, history))
     except KeyboardInterrupt:

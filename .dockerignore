@@ -1,0 +1,33 @@
+# Build context is the repo root, but the image holds only multimodal-doc-qa and the
+# components it imports. Everything else in the repo is out of the context.
+
+.venv
+.git
+.gitmodules
+local.env
+.agent
+.agent-workspaces
+jobs
+_artifacts
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/*.pyc
+**/.DS_Store
+
+# Other projects: never copied, and their editable requirement lines are stripped.
+examples
+projects/terminal-coding-agent
+projects/tiny-llm-pipeline
+projects/cyber-cricket
+components/telemetry
+
+# Present on disk, mounted at run time instead.
+projects/multimodal-doc-qa/artifacts
+projects/multimodal-doc-qa/artifacts-ablation
+projects/multimodal-doc-qa/eval
+projects/multimodal-doc-qa/docs
+projects/multimodal-doc-qa/tests
+projects/multimodal-doc-qa/*.png
+projects/multimodal-doc-qa/README.md
+projects/multimodal-doc-qa/PROJECT.md

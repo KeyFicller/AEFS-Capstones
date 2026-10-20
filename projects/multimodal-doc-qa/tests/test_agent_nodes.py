@@ -10,6 +10,7 @@ their jobs at all -- and nothing else in the suite would notice.
 
 from pathlib import Path
 
+import pytest
 from langchain_core.messages import HumanMessage
 from multimodal_doc_qa.agent.nodes import Followups, Unsupported, assess, verify
 from multimodal_doc_qa.schemas import Answer, Citation
@@ -177,3 +178,42 @@ def test_verify_reports_an_answer_that_cites_nothing(tmp_path: Path) -> None:
 
     assert result == ["answer cites no page"]
     assert model.calls == []
+
+
+# -------------------------------------------------------------------------- no tool call
+
+
+class _FlakyModel:
+    """Returns the given results in order; a provider that answers without the tool call."""
+
+    def __init__(self, results: list[object]) -> None:
+        self.results = results
+        self.calls = 0
+
+    def invoke(self, messages: list[dict]) -> object:
+        self.calls += 1
+        return self.results[min(self.calls - 1, len(self.results) - 1)]
+
+
+def test_assess_retries_a_reply_that_missed_the_tool_call() -> None:
+    """Seen under concurrent load: the provider replies without calling the tool."""
+    model = _FlakyModel([None, Followups(followups=["which regions?"])])
+
+    assert assess(model, _ask("margin?"), [], Path()) == ["which regions?"]
+    assert model.calls == 2
+
+
+def test_assess_fails_loudly_when_the_tool_call_never_arrives() -> None:
+    """A second miss is a real failure, not an empty followup list."""
+    model = _FlakyModel([None, None])
+
+    with pytest.raises(RuntimeError, match="no structured output"):
+        assess(model, _ask("margin?"), [], Path())
+
+
+def test_verify_retries_a_reply_that_missed_the_tool_call(tmp_path: Path) -> None:
+    _page(tmp_path, "doc000/p000")
+    model = _FlakyModel([None, Unsupported(unsupported=[])])
+
+    assert verify(model, _ask("margin?"), _answer(Citation(doc_id="doc000", page=0)), ["doc000/p000"], tmp_path) == []
+    assert model.calls == 2

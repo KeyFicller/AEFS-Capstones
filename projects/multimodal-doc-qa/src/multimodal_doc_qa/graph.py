@@ -5,8 +5,9 @@
 ``stop_reason`` stays empty on a normal finish.
 """
 
+import functools
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -83,6 +84,22 @@ def build_graph(deps: GraphDeps, settings: Settings):
     """
     budget = deps.budget if deps.budget is not None else Budget.from_settings(settings)
 
+    def metered(node: Callable[[AskState], dict]) -> Callable[[AskState], dict]:
+        """Charge one call before the node runs; a spent budget ends the run instead.
+
+        The guard lives here so no node can forget it. It runs *before* the node body,
+        so an exhausted budget never half-runs a node.
+        """
+
+        @functools.wraps(node)
+        def guarded(state: AskState) -> dict:
+            if budget.exhausted():
+                return {"stop_reason": "budget_exhausted"}
+            budget.spend_call()
+            return node(state)
+
+        return guarded
+
     def retrieve_node(state: AskState) -> dict:
         # The entry hop bypasses the assess/verify guards, so the bound has to hold here too.
         if state["rounds"] >= settings.max_rounds:
@@ -100,10 +117,8 @@ def build_graph(deps: GraphDeps, settings: Settings):
                     pool.append(page)
         return {"page_ids": pool, "rounds": state["rounds"] + 1}
 
+    @metered
     def assess_node(state: AskState) -> dict:
-        if budget.exhausted():
-            return {"stop_reason": "budget_exhausted"}
-        budget.spend_call()
         followups = nodes.assess(
             deps.assessor_model,
             state["messages"],
@@ -113,10 +128,8 @@ def build_graph(deps: GraphDeps, settings: Settings):
         )
         return {"queries": followups}
 
+    @metered
     def synthesize_node(state: AskState) -> dict:
-        if budget.exhausted():
-            return {"stop_reason": "budget_exhausted"}
-        budget.spend_call()
         answer = deps.synth.synthesize(
             state["messages"], state["page_ids"], deps.render_dir, deps.documents
         )
@@ -124,10 +137,8 @@ def build_graph(deps: GraphDeps, settings: Settings):
         # pair this answer with verdicts that belong to a superseded one.
         return {"answer": answer.model_dump(), "unsupported": []}
 
+    @metered
     def verify_node(state: AskState) -> dict:
-        if budget.exhausted():
-            return {"stop_reason": "budget_exhausted"}
-        budget.spend_call()
         answer = Answer.model_validate(state["answer"])
         unsupported = nodes.verify(
             deps.verifier_model,
@@ -144,10 +155,8 @@ def build_graph(deps: GraphDeps, settings: Settings):
             return {"stop_reason": "recover_empty"}
         return {"stop_reason": "recover_exhausted"}
 
+    @metered
     def intent_node(state: AskState) -> dict:
-        if budget.exhausted():
-            return {"stop_reason": "budget_exhausted"}
-        budget.spend_call()
         label = "work"
         try:
             label = deps.classifier.classify(state["messages"]).intent
@@ -155,10 +164,8 @@ def build_graph(deps: GraphDeps, settings: Settings):
             logger.exception("intent classification failed; defaulting to work")
         return {"intent": label}
 
+    @metered
     def chat_node(state: AskState) -> dict:
-        if budget.exhausted():
-            return {"stop_reason": "budget_exhausted"}
-        budget.spend_call()
         answer = deps.synth.reply(state["messages"])
         return {"answer": answer.model_dump()}
 

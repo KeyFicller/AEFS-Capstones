@@ -36,6 +36,21 @@ class Unsupported(BaseModel):
     unsupported: list[str] = Field(default_factory=list)
 
 
+def _structured(model: Any, messages: Sequence[BaseMessage]) -> Any:
+    """Invoke a schema-bound model, retrying once if it answered without calling the tool.
+
+    A provider under load occasionally replies with no tool call, and langchain turns that
+    into ``None``; without the retry the node crashes on the missing attribute instead of
+    treating it as a retryable hiccup.
+    """
+    result = model.invoke(messages)
+    if result is None:
+        result = model.invoke(messages)
+    if result is None:
+        raise RuntimeError("the model returned no structured output")
+    return result
+
+
 def assess(
     model: Any,
     messages: Sequence[BaseMessage],
@@ -48,7 +63,7 @@ def assess(
         {"type": "text", "text": f"question: {question_text(messages)}"},
         *build_page_blocks(page_ids, render_dir, documents),
     ]
-    result = model.invoke(prompt_messages(_ASSESS_SYS, messages, content))
+    result = _structured(model, prompt_messages(_ASSESS_SYS, messages, content))
     return list(result.followups)
 
 
@@ -84,5 +99,5 @@ def verify(
         },
         *build_page_blocks(inside, render_dir, documents),
     ]
-    result = model.invoke(prompt_messages(_VERIFY_SYS, messages, content))
+    result = _structured(model, prompt_messages(_VERIFY_SYS, messages, content))
     return violations + list(result.unsupported)

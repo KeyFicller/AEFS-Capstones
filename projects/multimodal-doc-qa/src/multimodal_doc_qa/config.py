@@ -85,6 +85,11 @@ class Settings(BaseSettings):
     max_ask_tokens: int = 200_000
     max_ask_seconds: float = 120.0
     artifacts_dir: Path = PROJECT_ROOT / "artifacts"
+    api_host: str = "127.0.0.1"
+    api_port: int = 8000
+    # HTTP conversations live in memory: idle sessions expire and the store is capped.
+    session_ttl_seconds: float = 1800.0
+    max_sessions: int = 1024
 
     @property
     def render_dir(self) -> Path:

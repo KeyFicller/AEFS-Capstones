@@ -1,6 +1,7 @@
 """Multi-vector encoder over a ColBERT-style vision-language checkpoint."""
 
 import os
+import threading
 
 import torch
 from PIL import Image
@@ -55,17 +56,19 @@ class MultiVectorEncoder:
         """Bind ``model_name``. A load failure propagates; there is no second checkpoint."""
         self.settings = settings
         self.model, self.processor = _load(model_name, settings)
+        self._lock = threading.Lock()
 
     def encode_images(self, images: list[Image.Image]) -> list[torch.Tensor]:
         """Encode page images to a list of ``[n_patches, dim]`` matrices."""
         out: list[torch.Tensor] = []
-        for img in images:
-            batch = self.processor.process_images([img]).to(self.settings.device)
-            with torch.no_grad():
-                emb = self.model(**batch)
-            out.append(emb[0].to(torch.float32).cpu())
-            if self.settings.device == "mps":
-                torch.mps.empty_cache()
+        with self._lock:
+            for img in images:
+                batch = self.processor.process_images([img]).to(self.settings.device)
+                with torch.no_grad():
+                    emb = self.model(**batch)
+                out.append(emb[0].to(torch.float32).cpu())
+                if self.settings.device == "mps":
+                    torch.mps.empty_cache()
         return out
 
     def encode_texts(self, texts: list[str]) -> list[torch.Tensor]:
@@ -75,21 +78,23 @@ class MultiVectorEncoder:
         ``process_queries`` appends query-augmentation tokens and is only for questions.
         """
         out: list[torch.Tensor] = []
-        for text in texts:
-            batch = self.processor.process_texts([text]).to(self.settings.device)
-            with torch.no_grad():
-                emb = self.model(**batch)
-            out.append(emb[0].to(torch.float32).cpu())
-            if self.settings.device == "mps":
-                torch.mps.empty_cache()
+        with self._lock:
+            for text in texts:
+                batch = self.processor.process_texts([text]).to(self.settings.device)
+                with torch.no_grad():
+                    emb = self.model(**batch)
+                out.append(emb[0].to(torch.float32).cpu())
+                if self.settings.device == "mps":
+                    torch.mps.empty_cache()
         return out
 
     def encode_query(self, text: str) -> torch.Tensor:
         """Encode a query string to a ``[n_tokens, dim]`` matrix."""
-        batch = self.processor.process_queries([text]).to(self.settings.device)
-        with torch.no_grad():
-            emb = self.model(**batch)
-        out = emb[0].to(torch.float32).cpu()
-        if self.settings.device == "mps":
-            torch.mps.empty_cache()
+        with self._lock:
+            batch = self.processor.process_queries([text]).to(self.settings.device)
+            with torch.no_grad():
+                emb = self.model(**batch)
+            out = emb[0].to(torch.float32).cpu()
+            if self.settings.device == "mps":
+                torch.mps.empty_cache()
         return out
