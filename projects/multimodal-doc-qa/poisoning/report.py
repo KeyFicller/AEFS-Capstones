@@ -157,6 +157,16 @@ def render(cells: list[dict], header: dict | None, case: dict, asks: list[dict])
     )
     in_index = sum(cell["n"] for cell in c2r if cell["poison_chunk_in_index"])
     in_prompt = sum(cell["n"] for cell in c2r if cell["poison_text_in_prompt"])
+    # A PDF page reaches the answerer as a PNG, so ``poison_text_in_prompt`` is false whether
+    # or not the payload is visible. A case that records ``payload_ocr`` measured the rendered
+    # page instead; that count is the one a reader can act on. P1 has no such column, so its
+    # card — and its HTML — stays byte-identical.
+    pixel_rows = [row for row in asks if row["condition"] == "C2r" and "payload_ocr" in row]
+    pixel = sum(1 for row in pixel_rows if row.get("payload_ocr"))
+    pixel_label = (
+        "毒页载荷进入页图（OCR 可读）" if pixel_rows else "载荷文本进入生成 prompt"
+    )
+    third_card = pixel if pixel_rows else in_prompt
 
     body_rows = []
     for variant in variants:
@@ -210,8 +220,8 @@ def render(cells: list[dict], header: dict | None, case: dict, asks: list[dict])
     <div class="cap">C2r 回答采纳了载荷</div></div>
   <div class="card"><div class="big green">{in_index}/{poisoned_n}</div>
     <div class="cap">毒页 chunk 含载荷，已入库</div></div>
-  <div class="card"><div class="big green">{in_prompt}/{poisoned_n}</div>
-    <div class="cap">载荷文本进入生成 prompt</div></div>
+  <div class="card"><div class="big green">{third_card}/{poisoned_n}</div>
+    <div class="cap">{pixel_label}</div></div>
 </div>
 
 <h2>按变体 × 臂</h2>
