@@ -13,8 +13,8 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from langchain_core.messages import HumanMessage
 from multimodal_doc_qa import api
+from multimodal_doc_qa.cli import IngestResult
 from multimodal_doc_qa.config import Settings
-from multimodal_doc_qa.retrievers.assembly import IndexNotFoundError
 from multimodal_doc_qa.schemas import Answer, Citation
 from multimodal_doc_qa.ui.viewer import CITED
 from PIL import Image
@@ -47,13 +47,16 @@ def _echo(state: dict) -> dict:
 
 def _service(tmp_path: Path, sessions: api.SessionStore | None = None) -> api.Service:
     settings = Settings(artifacts_dir=tmp_path)
-    return api.Service(
+    service = api.Service(
         settings=settings,
-        retriever=object(),
         mode="maxsim",
         artifacts=tmp_path,
         sessions=sessions or api.SessionStore(settings.session_ttl_seconds, settings.max_sessions),
     )
+    # A pre-built arm and one catalog entry, so a turn proceeds without a checkpoint.
+    service.retrievers["maxsim"] = object()
+    service.documents = ["d"]
+    return service
 
 
 def _wire(monkeypatch: pytest.MonkeyPatch, graph: _Graph) -> None:
@@ -130,13 +133,39 @@ def test_health_names_the_arm_the_artifacts_and_the_session_count(
         "mode": "maxsim",
         "artifacts": str(tmp_path),
         "sessions": 0,
+        "documents": 1,
     }
 
 
-def test_a_missing_index_fails_at_startup(tmp_path: Path) -> None:
-    """Fail where a log line can explain it, not on the first question."""
-    with pytest.raises(IndexNotFoundError):
-        api.build_service(Settings(artifacts_dir=tmp_path))
+def test_an_empty_artifacts_directory_starts_without_a_retriever(tmp_path: Path) -> None:
+    """An empty corpus is a valid state: the first upload creates the index.
+
+    The server used to refuse to start here. It now boots in a second and loads the
+    checkpoint on the upload that needs it, instead of holding 500M of weights for a
+    corpus nobody has sent yet.
+    """
+    service = api.build_service(Settings(artifacts_dir=tmp_path))
+
+    assert service.retrievers == {}
+    assert service.documents == []
+    assert service.encoder is None
+
+
+def test_asking_an_empty_corpus_answers_without_running_the_loop(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Saying "nothing ingested" must not spend model calls, and must not enter the history."""
+    graph = _Graph(_echo)
+    _wire(monkeypatch, graph)
+    service = api.build_service(Settings(artifacts_dir=tmp_path))
+
+    with TestClient(api.create_app(lambda: service)) as http:
+        body = http.post("/ask", json={"question": "anything"}).json()
+
+    assert body["stop_reason"] == "no_corpus"
+    assert body["answer"]["text"] == api.EMPTY_CORPUS
+    assert (body["calls"], body["rounds"]) == (0, 0)
+    assert graph.states == []
 
 
 # ------------------------------------------------------------------ conversations
@@ -363,3 +392,307 @@ def test_a_doc_id_cannot_escape_the_render_directory(tmp_path: Path, doc_id: str
         api._page_png(_service(tmp_path), doc_id, 0, None)
 
     assert raised.value.status_code == 404
+
+
+# ------------------------------------------------------------------ /ingest
+
+
+def _client_over(service: api.Service) -> TestClient:
+    return TestClient(api.create_app(lambda: service))
+
+
+def _upload(name: str, data: bytes = b"%PDF-1.4\n") -> tuple[str, tuple]:
+    return "files", (name, data, "application/pdf")
+
+
+def _stub_ingest(
+    monkeypatch: pytest.MonkeyPatch, service: api.Service, result: IngestResult
+) -> list[dict]:
+    """Record the encoder/rebuild calls around the real one, which needs a checkpoint."""
+    seen: list[dict] = []
+    monkeypatch.setattr(service, "load_encoders", lambda: seen.append({"load": True}))
+
+    def rebuild() -> None:
+        service.documents += result.added
+        seen.append({"rebuild": True})
+
+    monkeypatch.setattr(service, "rebuild", rebuild)
+
+    def fake(corpus, out=None, **kwargs):
+        seen.append({"corpus": corpus, "out": out, **kwargs})
+        return result
+
+    monkeypatch.setattr(api, "run_ingest", fake)
+    return seen
+
+
+def test_an_upload_is_stored_and_encoded_with_the_loaded_encoders(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A second ingest must not build a second copy of the checkpoint."""
+    service = _service(tmp_path)
+    service.documents = []  # an empty corpus: nothing indexed before this upload
+    seen = _stub_ingest(monkeypatch, service, IngestResult(["paper"], [], 1, 3.5, 12.0))
+
+    with _client_over(service) as http:
+        body = http.post("/ingest", files=[_upload("paper.pdf")]).json()
+
+    assert body == {
+        "added": ["paper"],
+        "skipped": [],
+        "documents": 1,
+        "index_mb": 3.5,
+        "elapsed_s": 12.0,
+    }
+    assert (tmp_path / "corpus" / "paper.pdf").read_bytes() == b"%PDF-1.4\n"
+    call = seen[1]
+    assert call["append"] is True and call["out"] == tmp_path
+    assert (call["vision_encoder"], call["ocr_embedder"]) == (service.encoder, service.embedder)
+    assert seen[-1] == {"rebuild": True}
+
+@pytest.mark.parametrize("name", ["tool.exe", "a", "notes.docx"])
+def test_an_unsupported_upload_is_415(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, name: str
+) -> None:
+    service = _service(tmp_path)
+    _stub_ingest(monkeypatch, service, IngestResult([], [], 0, 0.0, 0.0))
+
+    with _client_over(service) as http:
+        assert http.post("/ingest", files=[_upload(name)]).status_code == 415
+
+
+def test_an_upload_cannot_write_outside_the_corpus(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The client controls the name; a separator in it must not become a path."""
+    service = _service(tmp_path)
+    _stub_ingest(monkeypatch, service, IngestResult([], [], 0, 0.0, 0.0))
+
+    with _client_over(service) as http:
+        response = http.post("/ingest", files=[_upload("../../evil.pdf")])
+
+    assert response.status_code == 200
+    assert (tmp_path / "corpus" / "evil.pdf").is_file()
+    assert not (tmp_path.parent / "evil.pdf").exists()
+
+
+def test_an_empty_upload_is_400(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    _stub_ingest(monkeypatch, service, IngestResult([], [], 0, 0.0, 0.0))
+
+    with _client_over(service) as http:
+        assert http.post("/ingest", files=[_upload("empty.pdf", b"")]).status_code == 400
+
+
+# ------------------------------------------------------------------ delete
+
+
+def _stub_remove(
+    monkeypatch: pytest.MonkeyPatch, service: api.Service, remaining: list[str]
+) -> list[dict]:
+    seen: list[dict] = []
+    monkeypatch.setattr(service, "load_encoders", lambda: seen.append({"load": True}))
+
+    def rebuild() -> None:
+        service.documents = remaining
+        seen.append({"rebuild": True})
+
+    monkeypatch.setattr(service, "rebuild", rebuild)
+
+    def fake(doc_id, out=None, **kwargs):
+        seen.append({"doc_id": doc_id, "out": out, **kwargs})
+        return remaining
+
+    monkeypatch.setattr(api, "remove_document", fake)
+    return seen
+
+
+def test_deleting_a_document_removes_it_and_lists_what_is_left(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Same encoders as ingest, same lock, and a rebuild so the arms forget the old index."""
+    service = _service(tmp_path)
+    seen = _stub_remove(monkeypatch, service, ["e"])
+
+    with _client_over(service) as http:
+        body = http.request("DELETE", "/documents/paper").json()
+
+    assert body == {"deleted": "paper", "documents": ["e"]}
+    call = seen[1]
+    assert call["doc_id"] == "paper" and call["out"] == tmp_path
+    assert (call["vision_encoder"], call["ocr_embedder"]) == (service.encoder, service.embedder)
+    assert seen[-1] == {"rebuild": True}
+
+
+def test_deleting_an_unknown_document_is_404(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    service = _service(tmp_path)
+
+    def fake(doc_id, out=None, **kwargs):
+        raise KeyError(doc_id)
+
+    monkeypatch.setattr(api, "remove_document", fake)
+
+    with _client_over(service) as http:
+        assert http.request("DELETE", "/documents/nope").status_code == 404
+
+
+def test_a_document_ingested_from_elsewhere_is_400(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """No source under artifacts/corpus means a rebuild would drop the other documents."""
+    service = _service(tmp_path)
+
+    def fake(doc_id, out=None, **kwargs):
+        raise ValueError(f"{doc_id} has no source in {tmp_path / 'corpus'}")
+
+    monkeypatch.setattr(api, "remove_document", fake)
+
+    with _client_over(service) as http:
+        response = http.request("DELETE", "/documents/paper")
+
+    assert response.status_code == 400
+    assert "no source" in response.json()["detail"]
+
+
+# ------------------------------------------------------------------ static UI
+
+
+def test_the_ui_is_served_at_the_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    client, _ = _client(monkeypatch, tmp_path, {})
+
+    with client as http:
+        response = http.get("/")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "/ask" in response.text and "/ingest" in response.text and "/health" in response.text
+
+
+def test_documents_lists_what_the_current_index_holds(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    service = _service(tmp_path)
+    service.documents = ["d", "e"]
+
+    with _client_over(service) as http:
+        body = http.get("/documents").json()
+
+    assert body == {"mode": "maxsim", "documents": ["d", "e"]}
+
+
+# ------------------------------------------------------------------ retrieval arms
+
+
+def _stub_build(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record each arm build and return a distinguishable retriever."""
+    built: list[str] = []
+
+    def fake(settings, mode, **kwargs):
+        built.append(mode)
+        return {"arm": mode}
+
+    monkeypatch.setattr("multimodal_doc_qa.retrievers.assembly.build_retriever", fake)
+    return built
+
+
+def test_the_ask_uses_the_arm_it_was_given(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Switching the arm switches the retriever the graph retrieves with."""
+    built = _stub_build(monkeypatch)
+    service = _service(tmp_path)
+    service.retrievers.clear()
+    graph = _Graph(_echo)
+    handed: list[object] = []
+    monkeypatch.setattr(
+        api, "load_deps", lambda settings, retriever, budget, **kw: handed.append(retriever) or object()
+    )
+    monkeypatch.setattr(api, "build_graph", lambda deps, settings: graph)
+
+    with _client_over(service) as http:
+        body = http.post("/ask", json={"question": "hi", "mode": "lexical"}).json()
+
+    assert body["mode"] == "lexical"
+    assert built == ["lexical"]
+    assert handed == [{"arm": "lexical"}]
+    assert graph.states[0]["messages"][-1].content == "hi"
+
+
+def test_one_arm_is_built_once_and_reused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Two turns on the same arm must not pay for a second index load."""
+    built = _stub_build(monkeypatch)
+    service = _service(tmp_path)
+    service.retrievers.clear()
+    _wire(monkeypatch, _Graph(_echo))
+
+    with _client_over(service) as http:
+        http.post("/ask", json={"question": "one", "mode": "ocr"})
+        http.post("/ask", json={"question": "two", "mode": "ocr"})
+
+    assert built == ["ocr"]
+
+
+def test_a_rebuild_drops_the_arms_built_from_the_old_index(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    built = _stub_build(monkeypatch)
+    (tmp_path / "documents.json").write_text(
+        '[{"doc_id": "d", "origin": "pdf"}]', encoding="utf-8"
+    )
+    service = _service(tmp_path)
+    service.retrievers.clear()
+    service.retriever_for("ocr")
+
+    service.rebuild()
+
+    # The default arm is built eagerly for the new index; the stale 'ocr' one is gone.
+    assert built == ["ocr", "maxsim"]
+    assert list(service.retrievers) == ["maxsim"]
+
+
+def test_modes_lists_only_the_arms_the_index_can_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The abstract arms need a VLM pass at ingest; a plain corpus must not offer them."""
+    service = _service(tmp_path)
+    for name in ("multivector_index.pt", "ocr_index.pt"):
+        (tmp_path / name).write_bytes(b"")
+
+    with _client_over(service) as http:
+        body = http.get("/modes").json()
+
+    assert body["default"] == "maxsim"
+    assert "maxsim" in body["modes"] and "hybrid-maxsim" in body["modes"]
+    assert "abstract" not in body["modes"] and "hybrid-abstract" not in body["modes"]
+
+
+def test_no_index_means_no_arms(tmp_path: Path) -> None:
+    assert api.available_modes(Settings(artifacts_dir=tmp_path)) == []
+
+
+def test_an_unknown_mode_is_422(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _stub_build(monkeypatch)
+    client, _ = _client(monkeypatch, tmp_path, {})
+
+    with client as http:
+        response = http.post("/ask", json={"question": "hi", "mode": "nope"})
+
+    assert response.status_code == 422
+    assert "nope" in response.json()["detail"]
+
+
+def test_an_arm_whose_index_is_missing_is_400(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A real arm this corpus never built (abstract) must say so, not 500 mid-turn."""
+    client, _ = _client(monkeypatch, tmp_path, {})
+
+    with client as http:
+        response = http.post("/ask", json={"question": "hi", "mode": "abstract"})
+
+    assert response.status_code == 400
+    assert "abstract" in response.json()["detail"]

@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>文档问答</title>
+<style>
+  :root { --line: #d8dbe0; --muted: #666; --accent: #2b6cb0; --bg: #f6f7f9; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.55 -apple-system, "Segoe UI", "PingFang SC", sans-serif;
+         color: #1a202c; background: var(--bg); height: 100vh; display: flex; flex-direction: column; }
+  header { padding: 10px 16px; background: #fff; border-bottom: 1px solid var(--line);
+           display: flex; align-items: baseline; gap: 12px; }
+  header h1 { font-size: 15px; margin: 0; }
+  header span { color: var(--muted); font-size: 12px; }
+  main { flex: 1; display: flex; min-height: 0; }
+  aside { width: 300px; flex: none; border-right: 1px solid var(--line); background: #fff;
+          display: flex; flex-direction: column; min-height: 0; }
+  aside .box { padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  aside .box.grow { flex: 1; overflow: auto; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+       margin: 0 0 8px; font-weight: 600; }
+  button { font: inherit; padding: 6px 12px; border: 1px solid var(--line); background: #fff;
+           border-radius: 6px; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  input[type=file] { width: 100%; font-size: 12px; }
+  #status { font-size: 12px; color: var(--muted); margin-top: 8px; white-space: pre-wrap; }
+  #docs { margin: 0; padding: 0; list-style: none; font-size: 12px; }
+  #docs li { padding: 4px 0; border-bottom: 1px dashed var(--line); word-break: break-all;
+             display: flex; align-items: center; gap: 8px; }
+  #docs li span { flex: 1; }
+  #docs .del { padding: 0 6px; line-height: 18px; font-size: 14px; color: var(--muted);
+               border-color: transparent; }
+  #docs .del:hover { color: #c53030; border-color: var(--line); }
+  section.chat { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #messages { flex: 1; overflow: auto; padding: 18px 20px; }
+  .turn { max-width: 820px; margin: 0 auto 18px; }
+  .q { font-weight: 600; margin-bottom: 6px; }
+  .a { white-space: pre-wrap; }
+  .a.empty { color: var(--muted); }
+  .cites { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+  .cites figure { margin: 0; width: 190px; border: 1px solid var(--line); border-radius: 6px;
+                  overflow: hidden; background: #fff; }
+  .cites img { width: 100%; display: block; }
+  .cites figcaption { font-size: 11px; color: var(--muted); padding: 3px 6px; }
+  .meta { font-size: 11px; color: var(--muted); margin-top: 6px; }
+  #conn { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  #conn::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #a0aec0; }
+  #conn.up { color: #2f855a; }
+  #conn.up::before { background: #38a169; }
+  #conn.down { color: #c53030; }
+  #conn.down::before { background: #e53e3e; }
+  form { border-top: 1px solid var(--line); background: #fff; padding: 10px 20px;
+         display: flex; gap: 8px; align-items: flex-end; }
+  textarea { flex: 1; font: inherit; padding: 8px; border: 1px solid var(--line);
+             border-radius: 6px; resize: none; height: 52px; }
+  label.arm { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  select { font: inherit; font-size: 12px; padding: 3px 6px; border: 1px solid var(--line);
+           border-radius: 6px; background: #fff; color: #1a202c; }
+  select:disabled { color: var(--muted); background: #f0f1f3; }
+  @media (max-width: 700px) { main { flex-direction: column; } aside { width: auto; border-right: 0; border-bottom: 1px solid var(--line); max-height: 45vh; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>文档问答</h1>
+  <label class="arm">检索臂 <select id="arm" title="这一轮用哪条检索路径；换个臂再问同样的问题即可对比"></select></label>
+  <span id="mode"></span>
+  <span id="conn">检测中…</span>
+</header>
+<main>
+  <aside>
+    <div class="box">
+      <h2>上传语料</h2>
+      <input id="files" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.md">
+      <div style="margin-top:8px"><button id="upload" class="primary">上传并编码</button></div>
+      <div id="status"></div>
+    </div>
+    <div class="box grow">
+      <h2>已索引 <span id="count"></span></h2>
+      <ul id="docs"></ul>
+    </div>
+  </aside>
+  <section class="chat">
+    <div id="messages"></div>
+    <form id="ask">
+      <textarea id="question" placeholder="就语料里的内容提问，Enter 发送，Shift+Enter 换行" required></textarea>
+      <button class="primary" id="send">发送</button>
+      <button type="button" id="reset" title="清空当前会话">新对话</button>
+    </form>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let sessionId = null;
+
+function el(tag, props = {}, ...kids) {
+  const node = Object.assign(document.createElement(tag), props);
+  kids.forEach((kid) => node.append(kid));
+  return node;
+}
+
+async function readJson(response) {
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.detail || `${response.status} ${response.statusText}`);
+  return body;
+}
+
+// 检索臂：服务端只列当前索引真能跑的那些，换臂只是下一次请求多带一个 mode。
+let modesLoaded = false;
+async function refreshModes() {
+  const { default: fallback, modes } = await readJson(await fetch("/modes"));
+  const select = $("arm");
+  const previous = select.value;
+  select.replaceChildren(...modes.map((name) => el("option", { value: name, textContent: name })));
+  select.disabled = modes.length === 0;
+  select.value = modes.includes(previous) ? previous : (modes.includes(fallback) ? fallback : modes[0] || "");
+  select.title = modes.length
+    ? "这一轮用哪条检索路径；换个臂再问同样的问题即可对比"
+    : "先上传语料：索引就位后这里才列出可用的臂";
+  modesLoaded = true;
+}
+
+$("arm").addEventListener("change", () => {
+  $("mode").textContent = `即将用 ${$("arm").value} 检索`;
+});
+
+async function refreshDocs() {
+  const { mode, documents } = await readJson(await fetch("/documents"));
+  $("mode").textContent = `mode ${mode} · ${documents.length} 个文档`;
+  $("count").textContent = `(${documents.length})`;
+  $("docs").replaceChildren(
+    ...(documents.length
+      ? documents.map((id) => el("li", {},
+          el("span", { textContent: id }),
+          el("button", { className: "del", textContent: "×", title: "删除该文档并重建索引",
+                         onclick: (event) => removeDoc(id, event.target) })))
+      : [el("li", { textContent: "还没有语料，先上传。", style: "color:#888" })]),
+  );
+  await refreshModes();
+}
+
+// 删除会重建索引（剩余页重新编码，但不调用 LLM），所以要确认并提示会等一会儿。
+async function removeDoc(docId, button) {
+  if (!confirm(`删除「${docId}」？\n\n会删掉源文件、页图，然后重建剩余语料的索引（不调用 LLM，但页多时要等一小会儿）。`)) return;
+  button.disabled = true;
+  $("status").textContent = `正在删除 ${docId} 并重建索引，请稍候…`;
+  const started = performance.now();
+  try {
+    const result = await readJson(await fetch(`/documents/${encodeURIComponent(docId)}`, { method: "DELETE" }));
+    const seconds = ((performance.now() - started) / 1000).toFixed(0);
+    $("status").textContent = result.documents.length
+      ? `已删除 ${result.deleted}，剩余 ${result.documents.length} 个文档（${seconds}s）`
+      : `已删除 ${result.deleted}，语料已清空（${seconds}s）`;
+    await refreshDocs();
+  } catch (error) {
+    $("status").textContent = `删除失败：${error.message}`;
+    button.disabled = false;
+  }
+}
+
+// 服务是否在线：/health 一并带回 mode 和文档数，重启后也能顺手刷新左栏。
+let online = null;
+async function checkHealth() {
+  const started = performance.now();
+  try {
+    const health = await readJson(await fetch("/health", { signal: AbortSignal.timeout(5000) }));
+    $("conn").className = "up";
+    $("conn").textContent = `服务在线 · ${health.mode} · ${health.documents} 个文档`
+      + ` · ${Math.round(performance.now() - started)}ms`;
+    if (online === false) await refreshDocs();  // 重启过：索引可能变了
+    online = true;
+  } catch (error) {
+    $("conn").className = "down";
+    $("conn").textContent = "服务离线（连不上 /health）";
+    online = false;
+  }
+}
+setInterval(checkHealth, 10000);
+
+$("upload").addEventListener("click", async () => {
+  const files = $("files").files;
+  if (!files.length) return;
+  const data = new FormData();
+  for (const file of files) data.append("files", file);
+  $("upload").disabled = true;
+  $("status").textContent = `正在上传并编码 ${files.length} 个文件，页面首次编码可能要几分钟，别关标签页…`;
+  const started = performance.now();
+  try {
+    const result = await readJson(await fetch("/ingest", { method: "POST", body: data }));
+    const seconds = (performance.now() - started) / 1000;
+    $("status").textContent = [
+      `新增 ${result.added.length} 个：${result.added.join(", ") || "无"}`,
+      result.skipped.length ? `跳过 ${result.skipped.length} 个（已索引）：${result.skipped.join(", ")}` : "",
+      `索引共 ${result.documents} 个文档 / ${result.index_mb.toFixed(1)} MB`,
+      `本轮 ${seconds.toFixed(0)}s`,
+    ].filter(Boolean).join("\n");
+    $("files").value = "";
+    await refreshDocs();
+  } catch (error) {
+    $("status").textContent = `失败：${error.message}`;
+  } finally {
+    $("upload").disabled = false;
+  }
+});
+
+function turn(question, body) {
+  const box = el("div", { className: "turn" },
+    el("div", { className: "q", textContent: question }),
+    el("div", { className: "a", textContent: body.answer ? body.answer.text : `没有答案（${body.stop_reason}）` })
+  );
+  if (body.answer && !body.answer.text) box.querySelector(".a").textContent = "（空回答）";
+  const citations = (body.answer && body.answer.citations) || [];
+  if (citations.length) {
+    const strip = el("div", { className: "cites" });
+    for (const cite of citations) {
+      const label = `${cite.doc_id} / p${cite.page}`;
+      const src = `/page/${encodeURIComponent(cite.doc_id)}/${cite.page}.png`
+        + (cite.bbox ? `?bbox=${[cite.bbox.x0, cite.bbox.y0, cite.bbox.x1, cite.bbox.y1].join(",")}` : "");
+      strip.append(el("figure", {},
+        el("a", { href: src, target: "_blank" }, el("img", { src, alt: label, loading: "lazy",
+          onerror: (event) => event.target.closest("a").remove() })),
+        el("figcaption", { textContent: label })
+      ));
+    }
+    box.append(strip);
+  }
+  box.append(el("div", { className: "meta",
+    textContent: `${body.mode} · ${body.rounds} 轮 · ${body.calls} 次调用 · ${body.tokens} tokens`
+      + ` · ${body.latency_s.toFixed(1)}s` }));
+  $("messages").append(box);
+  $("messages").scrollTop = $("messages").scrollHeight;
+  return box;
+}
+
+$("ask").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const question = $("question").value.trim();
+  if (!question) return;
+  $("question").value = "";
+  $("send").disabled = true;
+  const thinking = el("div", { className: "turn" },
+    el("div", { className: "q", textContent: question }),
+    el("div", { className: "a empty", textContent: "检索并作答中…" }));
+  $("messages").append(thinking);
+  $("messages").scrollTop = $("messages").scrollHeight;
+  try {
+    const body = await readJson(await fetch("/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, session_id: sessionId, mode: $("arm").value || null }),
+    }));
+    sessionId = body.session_id;
+    thinking.remove();
+    turn(question, body);
+  } catch (error) {
+    thinking.querySelector(".a").textContent = `失败：${error.message}`;
+  } finally {
+    $("send").disabled = false;
+    $("question").focus();
+  }
+});
+
+$("question").addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    $("ask").requestSubmit();
+  }
+});
+
+$("reset").addEventListener("click", () => {
+  sessionId = null;
+  $("messages").replaceChildren();
+  $("question").focus();
+});
+
+checkHealth();
+refreshDocs().catch((error) => { $("mode").textContent = `读取语料失败：${error.message}`; });
+</script>
+</body>
+</html>

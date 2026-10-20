@@ -244,6 +244,161 @@ def test_ingest_saves_a_multivector_index_that_holds_the_pages(corpus: Path, art
     assert index.search(torch.tensor([[1.0, 0.0]]), k=5), "the saved index has no pages"
 
 
+# ------------------------------------------------------------------ append
+
+
+def _add_pdf(directory: Path, name: str, text: str = "APAC margin was 9.1%") -> Path:
+    with pymupdf.open() as pdf:
+        page = pdf.new_page()
+        page.insert_text((72, 72), text)
+        pdf.save(directory / name)
+    return directory / name
+
+
+def _server_corpus(artifacts: Path, *names: str) -> Path:
+    """The corpus the HTTP layer uploads into; ``remove_document`` rebuilds from here."""
+    corpus = artifacts / "corpus"
+    corpus.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        _add_pdf(corpus, name)
+    return corpus
+
+
+def test_append_encodes_only_the_new_document(corpus: Path, artifacts: Path) -> None:
+    """Uploading one file must not re-encode the corpus that is already indexed."""
+    from multimodal_doc_qa.cli import run_ingest
+    from multimodal_doc_qa.config import documents_path
+    from multimodal_doc_qa.schemas import load_documents
+
+    run_ingest(corpus)
+    _StubVisionEncoder.image_calls.clear()
+    _add_pdf(corpus, "doc001.pdf")
+
+    result = run_ingest(corpus, append=True)
+
+    assert (result.added, result.skipped) == (["doc001"], ["doc000"])
+    assert _StubVisionEncoder.image_calls == [1], "the old page was encoded again"
+    assert sorted(load_documents(documents_path(artifacts))) == ["doc000", "doc001"]
+    _, multivector_path, _ = artifact_paths(artifacts)
+    index = MultiVectorIndex.load(multivector_path)
+    assert len(index.search(torch.tensor([[1.0, 0.0]]), k=5)) == 2
+
+
+def test_append_with_nothing_new_touches_no_checkpoint(corpus: Path, artifacts: Path) -> None:
+    """A repeated upload of the same bytes should be a no-op, not a second full encode."""
+    from multimodal_doc_qa.cli import run_ingest
+
+    run_ingest(corpus)
+    _StubVisionEncoder.image_calls.clear()
+    _StubOcrEmbedder.calls.clear()
+
+    result = run_ingest(corpus, append=True)
+
+    assert (result.added, result.skipped) == ([], ["doc000"])
+    assert _StubVisionEncoder.image_calls == [] and _StubOcrEmbedder.calls == []
+
+
+def test_removing_the_last_document_goes_back_to_an_empty_corpus(artifacts: Path) -> None:
+    """No corpus left means no index files, so the arm list returns empty instead of stale."""
+    from multimodal_doc_qa.cli import remove_document, run_ingest
+    from multimodal_doc_qa.config import documents_path
+    from multimodal_doc_qa.schemas import load_documents
+
+    corpus = _server_corpus(artifacts, "doc000.pdf")
+    run_ingest(corpus)
+    remaining = remove_document("doc000")
+
+    assert remaining == []
+    assert load_documents(documents_path(artifacts)) == {}
+    _, multivector_path, ocr_path = artifact_paths(artifacts)
+    assert not multivector_path.exists() and not ocr_path.exists()
+    assert not (corpus / "doc000.pdf").exists()
+    assert not (artifacts / "render" / "doc000").exists()
+
+
+def test_removing_a_document_rebuilds_the_indices_without_it(artifacts: Path) -> None:
+    """The rebuilt index must hold the surviving pages and none of the deleted ones."""
+    from multimodal_doc_qa.cli import remove_document, run_ingest
+    from multimodal_doc_qa.config import documents_path
+    from multimodal_doc_qa.schemas import load_documents
+
+    corpus = _server_corpus(artifacts, "doc000.pdf", "doc001.pdf")
+    run_ingest(corpus)
+
+    remaining = remove_document("doc000")
+
+    assert remaining == ["doc001"]
+    assert list(load_documents(documents_path(artifacts))) == ["doc001"]
+    _, multivector_path, ocr_path = artifact_paths(artifacts)
+    assert all(pid.startswith("doc001/") for pid in MultiVectorIndex.load(multivector_path).matrices())
+    assert list(torch.load(ocr_path, weights_only=True)) == ["doc001"]
+    assert not (artifacts / "render" / "doc000").exists()
+    assert not (artifacts / "doc000.txt").exists()
+
+
+def test_removing_a_document_keeps_the_other_abstract_pages(
+    tmp_path: Path, artifacts: Path
+) -> None:
+    """The cache is keyed by page bytes: pruning it before the render dir goes is the only chance."""
+    from multimodal_doc_qa.abstract import load_cache
+    from multimodal_doc_qa.cli import _prune_abstract
+    from multimodal_doc_qa.config import abstract_paths
+
+    render_dir, _, _ = artifact_paths(artifacts)
+    (render_dir / "gone").mkdir(parents=True)
+    (render_dir / "kept").mkdir(parents=True)
+    (render_dir / "gone" / "p000.png").write_bytes(b"gone page")
+    (render_dir / "kept" / "p000.png").write_bytes(b"kept page")
+
+    cache_path, abstract_path = abstract_paths(artifacts)
+    import hashlib
+
+    import json
+
+    gone = hashlib.sha256(b"gone page").hexdigest()
+    kept = hashlib.sha256(b"kept page").hexdigest()
+    cache_path.write_text(json.dumps({gone: "gone description", kept: "kept description"}))
+    torch.save({"gone": {"index": torch.ones(1, 2), "chunks": [("x", 0)]},
+                "kept": {"index": torch.ones(1, 2), "chunks": [("y", 0)]}}, abstract_path)
+
+    _prune_abstract("gone", artifacts, render_dir)
+
+    assert load_cache(cache_path) == {kept: "kept description"}
+    assert list(torch.load(abstract_path, weights_only=True)) == ["kept"]
+
+
+def test_an_unknown_document_cannot_be_removed(corpus: Path, artifacts: Path) -> None:
+    from multimodal_doc_qa.cli import remove_document, run_ingest
+
+    run_ingest(corpus)
+
+    with pytest.raises(KeyError):
+        remove_document("never-ingested")
+
+
+def test_a_document_id_that_reads_as_a_path_is_refused(artifacts: Path) -> None:
+    from multimodal_doc_qa.cli import remove_document
+
+    with pytest.raises(ValueError):
+        remove_document("../escape")
+
+
+def test_a_rebuild_drops_a_document_that_left_the_corpus(corpus: Path, artifacts: Path) -> None:
+    """``append=False`` is still the source-of-truth rebuild the CLI has always run."""
+    from multimodal_doc_qa.cli import run_ingest
+    from multimodal_doc_qa.config import documents_path
+    from multimodal_doc_qa.schemas import load_documents
+
+    _add_pdf(corpus, "doc001.pdf")
+    run_ingest(corpus)
+    (corpus / "doc001.pdf").unlink()
+
+    result = run_ingest(corpus)
+
+    assert result.added == ["doc000"]
+    assert list(load_documents(documents_path(artifacts))) == ["doc000"]
+
+
 def test_ingest_renders_the_pages_it_indexed(corpus: Path, artifacts: Path) -> None:
     _invoke("ingest", "--corpus", str(corpus))
 

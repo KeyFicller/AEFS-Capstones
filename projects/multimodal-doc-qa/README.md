@@ -15,9 +15,9 @@
 brew install tesseract                    # 扫描页的 OCR 臂需要它
 ./start.sh run doc-qa ingest --corpus <pdf_dir>   # 已有 PDF / 图片 / txt / md；视觉索引落 multivector_index.pt（由 vision_index.pt 改名，升级时把旧文件改名即可）
 ./start.sh run doc-qa                     # 多轮 REPL；--mode maxsim|pool|ocr|abstract|lexical|lexical-kw|hybrid-{ocr,abstract,pool,maxsim}，默认 maxsim
-./start.sh run uvicorn multimodal_doc_qa.api:app --port 8000   # HTTP：POST /ask（带 session_id 可续会话）、GET /health、GET /page/{doc_id}/{page}.png?bbox=x0,y0,x1,y1
+./start.sh run uvicorn multimodal_doc_qa.api:app --port 8000   # HTTP：网页 /（上传语料 + 问答 + 切检索臂）、POST /ingest、POST /ask（带 session_id 续会话、带 mode 换检索臂）、GET /modes、GET /documents、GET /health、GET /page/{doc_id}/{page}.png?bbox=x0,y0,x1,y1
 docker build -f projects/multimodal-doc-qa/Dockerfile -t mdq-api .   # 构建上下文是仓库根（依赖只声明在根 requirements.txt）
-docker run --rm -p 8000:8000 -v "$PWD/projects/multimodal-doc-qa/artifacts:/artifacts" -v "$HOME/.cache/huggingface:/cache/hf" --env-file local.env mdq-api   # 索引走挂载，模型缓存直接用本机 ~/.cache/huggingface，key 由 --env-file 注入、不进镜像
+docker run --rm -p 8000:8000 -v mdq-artifacts:/artifacts -v "$HOME/.cache/huggingface:/cache/hf" --env-file local.env mdq-api   # 命名卷 = 空语料启动，上传的文件留在卷里；模型缓存直接用本机 ~/.cache/huggingface，key 由 --env-file 注入、不进镜像。想用本地已有索引就换成 -v "$PWD/projects/multimodal-doc-qa/artifacts:/artifacts"
 ./start.sh run pytest projects/multimodal-doc-qa/tests -m "not slow"   # 单测（slow 会加载真实模型）
 ```
 

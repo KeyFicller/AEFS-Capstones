@@ -5,6 +5,7 @@ Heavy imports stay inside the commands so ``--help`` does not load torch.
 """
 
 import hashlib
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -173,6 +174,17 @@ _INGEST_OUT = typer.Option(
 )
 
 
+@dataclass(frozen=True)
+class IngestResult:
+    """What one ingest changed. ``skipped`` are doc_ids already in the catalog."""
+
+    added: list[str]
+    skipped: list[str]
+    documents: int
+    index_mb: float
+    elapsed_s: float
+
+
 @app.command()
 def ingest(
     corpus: Path = _INGEST_CORPUS,
@@ -183,46 +195,187 @@ def ingest(
     A PDF or a standalone image is encoded with ``encode_images``. Plain text is
     chunked and encoded with ``encode_texts``. Nothing rasterizes a text file.
     """
+    run_ingest(corpus=corpus, out=out)
+
+
+def run_ingest(
+    corpus: Path,
+    out: Path | None = None,
+    *,
+    append: bool = False,
+    vision_encoder: object = None,
+    ocr_embedder: object = None,
+) -> IngestResult:
+    """The body of ``ingest``, callable from the HTTP layer.
+
+    ``append`` keeps what the catalog already holds and encodes only the doc_ids it does
+    not. Encoders are passed in by a long-lived process so a second ingest does not load
+    a second copy of a 500M checkpoint; ``None`` builds them here.
+    """
+    import time
+
     import torch
 
     from multimodal_doc_qa.embed.encoder import MultiVectorEncoder
     from multimodal_doc_qa.index.maxsim import MultiVectorIndex
     from multimodal_doc_qa.retrievers.text import OcrEmbedder
 
+    started = time.monotonic()
     settings = Settings()
     artifacts = (out or settings.artifacts_dir).expanduser()
     render_dir, multivector_path, ocr_path = artifact_paths(artifacts)
+    catalog = documents_path(artifacts)
     sources = _unique_files(_checked_sources(corpus.expanduser()))
 
+    # Assign ids over the whole directory, then drop the ones already indexed: doing it
+    # the other way round would change a shared stem's id from filename back to stem.
+    existing = load_documents(catalog) if append and catalog.is_file() else {}
+    pairs = _assign_doc_ids(sources)
+    pending = [(source, doc_id) for source, doc_id in pairs if doc_id not in existing]
+    skipped = [doc_id for _, doc_id in pairs if doc_id in existing]
+    for doc_id in skipped:
+        ui.echo(f"  skip {doc_id}: already indexed")
+    documents: list[ImageDocument | PdfDocument | TextDocument] = list(existing.values())
+    if not pending:
+        ui.echo(f"[yellow]nothing new[/] {artifacts}")
+        return IngestResult(
+            [], skipped, len(documents), _index_mb(multivector_path), time.monotonic() - started
+        )
+
     artifacts.mkdir(parents=True, exist_ok=True)
-    vision = MultiVectorIndex(device="cpu")
-    vision_encoder = MultiVectorEncoder(settings.embedder_model, settings)
-    ocr_embedder = OcrEmbedder(settings.ocr_embedder_model, settings.device)
+    vision = (
+        MultiVectorIndex.load(multivector_path)
+        if append and multivector_path.is_file()
+        else MultiVectorIndex(device="cpu")
+    )
+    ocr_docs: dict[str, dict] = (
+        torch.load(ocr_path, weights_only=True) if append and ocr_path.is_file() else {}
+    )
+    vision_encoder = vision_encoder or MultiVectorEncoder(settings.embedder_model, settings)
+    ocr_embedder = ocr_embedder or OcrEmbedder(settings.ocr_embedder_model, settings.device)
     ui.echo(
         f"vision encoder  {type(vision_encoder.model).__name__} {settings.embedder_model} "
         f"({settings.device}/{settings.dtype})"
     )
     ui.echo(f"ocr encoder     {settings.ocr_embedder_model} ({settings.device})")
 
-    documents: list[ImageDocument | PdfDocument | TextDocument] = []
-    ocr_docs: dict[str, dict] = {}
-    for source, doc_id in _assign_doc_ids(sources):
+    added: list[str] = []
+    for source, doc_id in pending:
         document, payload = _index_source(
             source, doc_id, artifacts, render_dir, vision, vision_encoder, ocr_embedder
         )
         documents.append(document)
         ocr_docs[document.doc_id] = payload
+        added.append(document.doc_id)
 
     vision.save(multivector_path)
     ocr_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(ocr_docs, ocr_path)
-    save_documents(documents, documents_path(artifacts))
+    save_documents(documents, catalog)
     if settings.mode == "abstract" or settings.abstracts:
         _write_abstracts(settings, artifacts, render_dir, documents, ocr_embedder.encode)
 
     ui.echo(f"multivector {multivector_path}  ({vision.nbytes() / 1e6:.1f} MB)")
     ui.echo(f"ocr       {ocr_path}")
-    ui.echo(f"[green]ingested[/] {len(sources)} docs -> {artifacts}")
+    ui.echo(f"[green]ingested[/] {len(added)} docs -> {artifacts}")
+    return IngestResult(
+        added, skipped, len(documents), _index_mb(multivector_path), time.monotonic() - started
+    )
+
+
+def _index_mb(path: Path) -> float:
+    """On-disk index size; zero before the first ingest."""
+    return path.stat().st_size / 1e6 if path.is_file() else 0.0
+
+
+def remove_document(
+    doc_id: str,
+    out: Path | None = None,
+    *,
+    vision_encoder: object = None,
+    ocr_embedder: object = None,
+) -> list[str]:
+    """Delete one document, then rebuild every index from what is left.
+
+    Rebuilding re-encodes the remaining pages, which is slower than filtering the dicts
+    but leaves no stale entry behind in any of the three indexes. It costs no model
+    calls: the abstract cache is consulted per page, so only new bytes are described.
+
+    Returns the doc_ids still indexed. ``KeyError`` for an unknown id, ``ValueError`` for
+    one that would be read as a path.
+    """
+    if not doc_id or doc_id in {".", ".."} or "/" in doc_id or "\\" in doc_id:
+        raise ValueError(f"bad doc_id {doc_id!r}")
+    settings = Settings()
+    artifacts = (out or settings.artifacts_dir).expanduser()
+    render_dir, multivector_path, ocr_path = artifact_paths(artifacts)
+    catalog = documents_path(artifacts)
+    existing = load_documents(catalog) if catalog.is_file() else {}
+    if doc_id not in existing:
+        raise KeyError(doc_id)
+
+    corpus = artifacts / "corpus"
+    sources = _corpus_sources(corpus) if corpus.is_dir() else []
+    doomed = [source for source, assigned in _assign_doc_ids(sources) if assigned == doc_id]
+    if not doomed:
+        # A corpus ingested from another directory has no source here, and rebuilding from
+        # this one would silently drop every other document. Say so instead.
+        raise ValueError(
+            f"{doc_id} has no source in {corpus}; it was ingested from another directory"
+        )
+
+    # The cache is keyed by the sha256 of a PNG that is about to be deleted, so it has to
+    # be pruned while those files still exist.
+    _prune_abstract(doc_id, artifacts, render_dir)
+    for source in doomed:
+        source.unlink()
+    shutil.rmtree(render_dir / doc_id, ignore_errors=True)
+    if not Path(doc_id).suffix:
+        (artifacts / f"{doc_id}.txt").unlink(missing_ok=True)
+
+    ui.echo(f"[yellow]removed[/] {doc_id}")
+    if not (_corpus_sources(corpus) if corpus.is_dir() else []):
+        # No corpus left: drop the index files rather than saving empty ones, so the
+        # available-arm list goes back to empty instead of offering arms with no pages.
+        save_documents([], catalog)
+        multivector_path.unlink(missing_ok=True)
+        ocr_path.unlink(missing_ok=True)
+        ui.echo(f"[yellow]empty corpus[/] {artifacts}")
+        return []
+
+    run_ingest(
+        corpus,
+        artifacts,
+        append=False,
+        vision_encoder=vision_encoder,
+        ocr_embedder=ocr_embedder,
+    )
+    return list(load_documents(catalog))
+
+
+def _prune_abstract(doc_id: str, artifacts: Path, render_dir: Path) -> None:
+    """Drop the document's pages from the abstract cache and its entry from the index."""
+    import torch
+
+    from multimodal_doc_qa.abstract import load_cache, save_cache
+
+    cache_path, abstract_path = abstract_paths(artifacts)
+    page_dir = render_dir / doc_id
+    if page_dir.is_dir() and cache_path.is_file():
+        cache = load_cache(cache_path)
+        dropped = {
+            hashlib.sha256(png.read_bytes()).hexdigest() for png in page_dir.glob("p*.png")
+        }
+        kept = {key: text for key, text in cache.items() if key not in dropped}
+        if len(kept) != len(cache):
+            save_cache(cache_path, kept)
+    if abstract_path.is_file():
+        payload = torch.load(abstract_path, weights_only=True)
+        if payload.pop(doc_id, None) is not None:
+            if payload:
+                torch.save(payload, abstract_path)
+            else:
+                abstract_path.unlink()
 
 
 def _write_abstracts(settings, artifacts, render_dir, documents, encode) -> None:
