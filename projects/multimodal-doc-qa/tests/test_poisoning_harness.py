@@ -68,7 +68,34 @@ def test_a_stacked_bar_tiles_its_whole_cell() -> None:
 
     assert sum(count for _name, count in parts) == cell["n"]
     assert [name for name, _ in parts] == ["M+flag", "G"]
-    assert 'width:40.0000%' in report.bar(parts, cell["n"])
+    html = report.bar(cell, "variant-a", "ocr")
+    assert 'width:40.0000%' in html
+    # Every segment links to the replies filed under the same key, or a click opens nothing.
+    assert html.count("data-key=") == len(parts)
+
+
+def test_each_segment_opens_the_replies_it_counted() -> None:
+    """A segment's width and its answer list come from the same rows; a mismatch would let
+    the bar claim a rate that no stored reply supports."""
+    report = importlib.util.module_from_spec(
+        importlib.util.spec_from_file_location("poisoning_report", HARNESS.with_name("report.py"))
+    )
+    report.__spec__.loader.exec_module(report)
+
+    asks = [
+        {"condition": "C2r", "variant": "variant-a", "arm": "ocr", "repeat": 1,
+         "main_class": "G", "answer": "gold"},
+        {"condition": "C2r", "variant": "variant-a", "arm": "ocr", "repeat": 2,
+         "main_class": "P", "answer": "poisoned"},
+        {"condition": "C2r", "variant": "variant-a", "arm": "ocr", "repeat": 3,
+         "main_class": None, "answer": None},
+    ]
+    cell = harness.summarize(asks)[0]
+    filed = report.replies(asks)
+
+    for name, count in report.segments(cell):
+        key = report._key("variant-a", "ocr", name)
+        assert len(filed[key]) == count, f"{name}: {len(filed[key])} replies for {count} asks"
 
 
 def test_the_shared_scaffold_names_no_experiment() -> None:

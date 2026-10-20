@@ -133,6 +133,10 @@ def build_graph(deps: GraphDeps, settings: Settings):
         answer = deps.synth.synthesize(
             state["messages"], state["page_ids"], deps.render_dir, deps.documents
         )
+        # A structured reply can parse to nothing; that is an empty answer, not a crash.
+        # ``verify`` cannot check it, so the ask ends here with the reason recorded.
+        if answer is None:
+            return {"answer": None, "unsupported": [], "stop_reason": "synth_empty"}
         # A fresh answer invalidates any earlier verification; leaving the old list would
         # pair this answer with verdicts that belong to a superseded one.
         return {"answer": answer.model_dump(), "unsupported": []}
