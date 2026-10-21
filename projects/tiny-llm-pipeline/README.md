@@ -24,6 +24,7 @@ P=projects/tiny-llm-pipeline
     --out $P/checkpoints/dpo --beta 0.01 --epochs 4 --lr 3e-5        # 交付配置，--ref 全程只读
 
 ./start.sh test projects/tiny-llm-pipeline                          # 单测
+./start.sh run tiny-llm-pipeline eval --max-new 48                  # 40 条冻结题上按贪心评测，写 eval/results.jsonl（唯一报数来源）
 ./start.sh run python projects/tiny-llm-pipeline/eval/sample.py --rep-pen 1.5 --html $P/eval/replies.html   # 离线抽样 HTML
 ./start.sh run python projects/tiny-llm-pipeline/eval/serve.py --open                                      # 三段对照页
 ./start.sh run python projects/tiny-llm-pipeline/checkpoints/sync_ckpt.py pull                                # 新机器：拉回三段权重

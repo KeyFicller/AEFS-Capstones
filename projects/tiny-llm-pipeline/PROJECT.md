@@ -2,7 +2,8 @@
 
 - **项目**：tiny-llm-pipeline / 所属 Phase：Phase19 / Capstone 07
 - **spec**：[Capstone 07 — 端到端微调流水线](https://aieng-zh.cn/lessons/19-capstone-projects/07-end-to-end-fine-tuning-pipeline/)
-- **状态**：三段已在真实数据上训练完——预训练 34500 步（val ppl **11.8**）、SFT 5000 步（留出集回答 ppl **6.34**，微调前的 `pretrain-30m` 基线 **38.15**）、DPO 104 步（Δ = `logπ_chosen − logπ_rejected` 由 **−197.8** 升到 **+331.9**，Δ>0 的偏好对 **22% → 64%**）。`prepare` 位级可复现；`eval/sample.py` 与 `eval/serve.py` 已落地；SFT 另有 **LoRA 路径**（`--lora-rank`，落 adapter ckpt，单元与 CLI 已测；与全量 FT 的 5000 步对照**未跑**，待云端 GPU）；单测 `94 passed`。**未落地**：`eval/results.jsonl`、`gen` / `chat` / `compare` CLI。**交付配置**：DPO `--beta 0.01 --epochs 4 --lr 3e-5`，且**生成时必须开 `repetition_penalty`（1.3–1.5）——它是交付的一部分，不是可选的润色**。
+- **状态**：三段已在真实数据上训练完——预训练 34500 步（val ppl **11.8**）、SFT 5000 步（留出集回答 ppl **6.34**，微调前的 `pretrain-30m` 基线 **38.15**）、DPO 104 步（Δ = `logπ_chosen − logπ_rejected` 由 **−197.8** 升到 **+331.9**，Δ>0 的偏好对 **22% → 64%**）。`prepare` 位级可复现；`eval/sample.py` / `eval/serve.py` / **`eval` 子命令（写 `eval/results.jsonl`）**已落地；SFT 另有 **LoRA 路径**（`--lora-rank`，落 adapter ckpt，单元与 CLI 已测；与全量 FT 的 5000 步对照**未跑**，待云端 GPU）；单测 `101 passed`。**未落地**：`gen` / `chat` / `compare` CLI。**交付配置**：DPO `--beta 0.01 --epochs 4 --lr 3e-5`，且**生成时必须开 `repetition_penalty`（1.3–1.5）——它是交付的一部分，不是可选的润色**。
+- **对齐读数（来自 `eval/results.jsonl`）**：40 条冻结 prompt（`eval/prompts.jsonl`）、贪心、`rep_pen=1.5`、`max_new=48`，SFT 与 DPO 同一批题——`doubao_score` **1.07 → 8.10**（配对差 **+7.03**，bootstrap 95% CI **[6.06, 8.02]**，DPO 胜 **97.5%**，无平局）；同一份汇总的反面是 **跨 prompt 4-gram 多样性 0.862 → 0.572**，即 DPO 的得分有相当部分来自「每条回答用同一套开场模板」。单条内 `repeat_4` **0.008 → 0.0005**、平均长度 **58.3 → 51.3** 字。**两组数必须一起报**：只报 +7.03 就是把模板复读当成了对齐成功。该文件由**修订前的 ckpt** 产出（旧切分、DPO 全量训练），题集与解码口径不受影响，但不能与重跑后的新数字混用；`ppl` 段为空（本机无 `artifacts/data`）。
 - **2026-10-21 切分修订**：`prepare_sft` 先按 `--seed` 打乱再切（holdout 不再是文件前缀）；SFT 训练 batch 走 `seed` 派生的行置换，不再是文件顺序；`train-dpo` 按 prompt 的 sha256 留出 10%，只在留出对上报 `holdout_gap` / `holdout_margin` / `holdout_win_rate`。**既有 `checkpoints/{sft,dpo}` 与其 `train_log.jsonl` 是修订前的产物**（旧前缀 holdout、DPO 全量训练、日志混入两次 fresh run），要报新口径必须重跑 `prepare` → `train-sft` → `train-dpo`；新旧数字不得混用。
 - **产物位置**：权重与日志在 `checkpoints/{pretrain,sft,dpo}/`（`ckpt.pt` + `train_log.jsonl`，pretrain / SFT 另有 `monitor.png`），tokenizer 在 `checkpoints/tokenizer/tokenizer.json`；CLI 默认的输入输出目录是 `artifacts/`。**两者都被根 `.gitignore` 忽略**（`checkpoints/`、`projects/*/artifacts/*`），新机器 `git clone` 拿不到。唯一强制入库的 artifacts 是 `artifacts/prefs/`——`prefs.jsonl` 靠调 API 生成、**不可位级复现**，必须随机器搬运；`doubao-style-guide.md` 是 `synth-pref --guide` 的默认值，缺了默认命令直接失败。
 - **权重托管**：三段权重公开在 [HF `KeyFicller/tiny-llm-pipeline-29m`](https://huggingface.co/KeyFicller/tiny-llm-pipeline-29m)，布局与本项目一致，`Bundle.load(<snapshot>)` 可直接加载、无需改代码。**已剥离 `optimizer`**（因此不能 `--resume` 续训），权重与本地训练产物**逐张量相同**、回下载 sha256 一致，端到端生成结果一致。推/拉用 `checkpoints/sync_ckpt.py push` / `pull`。
@@ -37,7 +38,8 @@
 | `viz.py` | 流程图与 `monitor.png` |
 | `eval/sample.py` | 离线抽样 + 自包含 HTML |
 | `eval/serve.py` | 本地对照页（`GET /` + `POST /ask`）；与 `sample.py` 共用 `generate.py` |
-| `cli.py` | `prepare` / `synth-pref` / `train-pretrain` / `train-sft` / `train-dpo` / `flow` / `monitor` |
+| `cli.py` | `prepare` / `synth-pref` / `train-pretrain` / `train-sft` / `train-dpo` / `eval` / `flow` / `monitor` |
+| `evaluate.py` | 冻结题集上的确定性评测 + `results.jsonl`（run / item / summary） |
 
 **图产物**：`graph.png` 由 `flow` 子命令生成，拓扑改了重跑。README 只放这一张图。
 
@@ -84,4 +86,14 @@ Python 3.12.13，共享 venv。`torch`（fp32；设备按 CUDA → MPS → CPU �
 - `eval/serve.py`：本地对照页，三段并排，每栏带 `chars` / `dist4` / `tempo` 三项读数。只绑 `127.0.0.1`、无鉴权、**不落盘**。默认 `rep_pen=1.5`、`temperature=0`（贪心）、`max_new=64`。
 - 两者共用 `generate.py`，重构到共用之前后同一参数同一种子产出的 HTML **逐字节相同**。同一问在 `temperature=0.8` 下 DPO 栏出现 U+FFFD——**采样只掉连贯性、不加内容**，故页面默认仍是贪心。
 
-**未落地**：`eval/results.jsonl`、`gen` / `chat` / `compare`。落地时 **`gen` 必须暴露 `repetition_penalty`（默认约 1.3）**，否则交付的 DPO 权重会复读。
+**`eval` 子命令（已落地，唯一允许的报数来源）**
+
+- 命令：`tiny-llm-pipeline eval [--bundle checkpoints] [--prompts eval/prompts.jsonl] [--out eval/results.jsonl] [--stages sft,dpo] [--rep-pen 1.5] [--max-new 64] [--data artifacts/data]`。`--bundle` / `--prompts` / `--out` 默认按**项目目录**解析，从仓库根或项目目录跑都一样。
+- 题集：`eval/prompts.jsonl` 40 条（入库、冻结、不临场挑），与 `artifacts/prefs/prefs.jsonl` 的 822 条 prompt **零交集**（已核）。解码**固定贪心**（`temperature=0`），故同一批 ckpt 重跑得到**逐项相同的 item 行**与相同汇总指标（`date` / `elapsed_s` 两个时间字段除外，已实测两次运行一致）；`rep_pen` 是交付口径，改动它等于改题面，要一起写进 run 头（已自动写）。
+- 指标：`doubao_score`（权重词表见 `evaluate.py` 顶部，按每 100 字计分）、`distinct_1` / `distinct_2` / `repeat_4`（单条内 4-gram 重复占比）、`longest_run`（最长同字连跑）。汇总里另有 **`cross_prompt_distinct_4`**：把同一段全部回答拼起来算 4-gram 多样性——单条 `repeat_4` 抓不到「每条回答同一个开场白」，这一项才抓得到（实测 DPO 0.572 vs SFT 0.862）。
+- 配对与区间：`doubao_delta_dpo_minus_sft` 给 `mean` / `ci95`（bootstrap 2000 次重采样，种子固定）/ `dpo_win_rate` / `tie_rate` / `sft_win_rate`。**空输出照记**（`chars=0` 仍是一行），不跳过。
+- 行结构：`kind="run"`（commit / device / tokenizer hash / steps / 题集 sha256 / 解码参数 / 依赖版本）→ 逐项 `kind="item"` → `kind="summary"`。**每行写完即 flush**，中途失败已得结果不回滚；**每次 run 覆盖同名文件而非追加**（旧 `train_log.jsonl` 混了两次 fresh run 的教训）。
+- 文件位置：`eval/results.jsonl`（入库）。`--data` 存在时汇总多一段 `ppl`（各段在 `sft_holdout.jsonl` 上的 response-token 困惑度）；本机缺 `artifacts/data`，故当前文件无该段。
+- **未做**：LLM 配对裁判（`eval/judge.py`）。`doubao_score` 是代理指标，报读数时必须并列退化护栏。
+
+**未落地**：`gen` / `chat` / `compare`。落地时 **`gen` 必须暴露 `repetition_penalty`（默认约 1.3）**，否则交付的 DPO 权重会复读。

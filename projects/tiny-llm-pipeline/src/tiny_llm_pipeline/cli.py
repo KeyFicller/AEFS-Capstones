@@ -20,6 +20,8 @@ from tiny_llm_pipeline.data import (
     write_sft_splits,
     write_tokenizer_sample,
 )
+from tiny_llm_pipeline.evaluate import evaluate
+from tiny_llm_pipeline.generate import Bundle, GenSettings
 from tiny_llm_pipeline.lora import LoRAConfig
 from tiny_llm_pipeline.pref.synthesize import synth_prefs
 from tiny_llm_pipeline.tokenizer import load_tokenizer, train_tokenizer
@@ -27,6 +29,10 @@ from tiny_llm_pipeline.train.dpo import train_dpo
 from tiny_llm_pipeline.train.pretrain import train_pretrain
 from tiny_llm_pipeline.train.sft import train_sft
 from tiny_llm_pipeline.viz import write_flow, write_monitor
+
+# The project directory, so `eval`'s defaults work from any working directory.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
@@ -233,6 +239,57 @@ def train_dpo_cmd(
         holdout_frac=holdout_frac,
     )
     typer.echo(str(ckpt))
+
+
+@app.command("eval")
+def eval_cmd(
+    bundle: Path = typer.Option(PROJECT_ROOT / "checkpoints", "--bundle"),
+    prompts: Path = typer.Option(PROJECT_ROOT / "eval/prompts.jsonl", "--prompts"),
+    out: Path = typer.Option(PROJECT_ROOT / "eval/results.jsonl", "--out"),
+    stages: str = typer.Option("sft,dpo", "--stages"),
+    data: Path | None = typer.Option(
+        None, "--data", help="Directory with sft_holdout.jsonl, to add response perplexity."
+    ),
+    rep_pen: float = typer.Option(1.5, "--rep-pen"),
+    max_new: int = typer.Option(64, "--max-new"),
+    seed: int = typer.Option(0, "--seed"),
+) -> None:
+    """Score every frozen prompt on every stage and write `results.jsonl`.
+
+    Decoding is greedy, so the same checkpoints always give the same file. Each
+    stage reports mean `doubao_score`, distinct-n, 4-gram repeat share, and the
+    longest character run; DPO is also compared with SFT pair by pair, with a
+    bootstrap 95% interval (the interval comes from sampling, so turn it off
+    only by reading the same line). `--data` adds response-token perplexity.
+    """
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    loaded = Bundle.load(bundle, stages=tuple(part.strip() for part in stages.split(",")))
+    holdout = None
+    if data is not None:
+        holdout_path = data / "sft_holdout.jsonl"
+        if not holdout_path.is_file():
+            raise typer.BadParameter(f"missing holdout split: {holdout_path}")
+        holdout = read_sft(holdout_path)
+    summary = evaluate(
+        loaded,
+        read_prompts(prompts),
+        GenSettings(max_new=max_new, temperature=0.0, rep_pen=rep_pen, seed=seed),
+        out,
+        stages=loaded.stages,
+        holdout=holdout,
+    )
+    typer.echo(str(out))
+    for stage in loaded.stages:
+        typer.echo(
+            f"{stage} step={loaded.steps[stage]} doubao={summary['doubao_score'][stage]} "
+            f"repeat_4={summary['repeat_4'][stage]} longest_run={summary['longest_run'][stage]}"
+        )
+    delta = summary.get("doubao_delta_dpo_minus_sft")
+    if delta:
+        typer.echo(
+            f"dpo-sft delta mean={delta['mean']} ci95={delta['ci95']} "
+            f"win={delta['dpo_win_rate']} tie={delta['tie_rate']}"
+        )
 
 
 @app.command("flow")
