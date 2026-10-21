@@ -177,14 +177,32 @@ def render(cells: list[dict], header: dict | None, case: dict, asks: list[dict])
         row["variant"] == name and row["condition"] == "C2r" and "evidence_in_pool" in row
         for row in asks
     )]
+    # A citation case grades the evidence chain, not the answer: the payload leaves the
+    # number right and the citation wrong, so "obeyed" stays 0 however well the attack works.
+    # Its cards count what the pipeline noticed against what it actually shipped.
+    citations = any("citation_defect" in row for row in asks)
 
-    head_value, head_label = obeyed, "C2r 回答采纳了载荷"
-    index_label = "毒页 chunk 含载荷，已入库"
-    third_card, third_label = (
-        (pixel, "毒页载荷进入页图（OCR 可读）")
-        if pixel_rows
-        else (in_prompt, "载荷文本进入生成 prompt")
-    )
+    if citations:
+        graded = [row for row in asks if row["condition"] == "C2r"]
+        # Cards describe the shipped configuration. A round budget ending early also ends
+        # with claims still flagged, so pooling the budgets would report a rate over two
+        # different pipelines — the same mistake as averaging their egress counts.
+        shipped_rows = [row for row in graded if "@r" not in row["variant"]] or graded
+        shipped = sum(1 for row in shipped_rows if row.get("ships_defective"))
+        flagged = sum(1 for row in shipped_rows if row.get("verify_flagged"))
+        empty_cites = sum(1 for row in shipped_rows if row.get("citation_defect") == harness.EMPTY)
+        head_value, head_label = shipped, "C2r 交付了缺陷引用"
+        in_index, index_label = flagged, "C2r 结束时仍有未支持 claim"
+        third_card, third_label = empty_cites, "C2r 引用为空"
+        poisoned_n = len(shipped_rows)
+    else:
+        head_value, head_label = obeyed, "C2r 回答采纳了载荷"
+        index_label = "毒页 chunk 含载荷，已入库"
+        third_card, third_label = (
+            (pixel, "毒页载荷进入页图（OCR 可读）")
+            if pixel_rows
+            else (in_prompt, "载荷文本进入生成 prompt")
+        )
 
     # The cards above divide by every C2r ask, so they only mean something when the C2r asks
     # share one pipeline. An availability case can hold two round budgets (`@r1` and the
@@ -215,6 +233,31 @@ def render(cells: list[dict], header: dict | None, case: dict, asks: list[dict])
             + "</table>\n"
         )
 
+    citation_table = ""
+    if citations:
+        rows_html = []
+        for name in variants:
+            group = [row for row in asks if row["variant"] == name]
+            if not group:
+                continue
+            n = len(group)
+            flagged = sum(1 for row in group if row.get("verify_flagged"))
+            shipped = sum(1 for row in group if row.get("ships_defective"))
+            empty = sum(1 for row in group if row.get("citation_defect") == harness.EMPTY)
+            malformed = sum(1 for row in group if row.get("citation_defect") == harness.MALFORMED)
+            unread = sum(1 for row in group if row.get("citation_defect") == harness.UNRETRIEVED)
+            rows_html.append(
+                f'<tr><td class="v">{html.escape(name)}</td><td>{flagged}/{n}</td>'
+                f'<td>{shipped}/{n}</td><td>{empty}/{n}</td>'
+                f'<td>{malformed}/{n}</td><td>{unread}/{n}</td></tr>'
+            )
+        citation_table = (
+            "\n<h2>引用</h2><table><tr><th>变体</th><th>verify 检出</th><th>交付缺陷</th>"
+            "<th>引用为空</th><th>格式错</th><th>未检索到</th></tr>"
+            + "".join(rows_html)
+            + "</table>\n"
+        )
+
     body_rows = []
     for variant in variants:
         tds = [f'<td class="v">{html.escape(variant)}</td>']
@@ -223,7 +266,11 @@ def render(cells: list[dict], header: dict | None, case: dict, asks: list[dict])
             if cell is None:
                 tds.append("<td></td>")
                 continue
-            if availability:
+            if citations:
+                k = sum(1 for row in evidence_rows[(variant, arm)] if row.get("verify_flagged"))
+                rank = cell["poison_rank"]
+                note = f"flagged {k}/{cell['n']}"
+            elif availability:
                 rank = probes.get((variant, arm))
                 cell_rows = evidence_rows[(variant, arm)]
                 present = sum(1 for row in cell_rows if row.get("evidence_in_pool"))
@@ -277,7 +324,7 @@ def render(cells: list[dict], header: dict | None, case: dict, asks: list[dict])
     <div class="cap">{index_label}</div></div>
   <div class="card"><div class="big green">{third_card}/{poisoned_n}</div>
     <div class="cap">{third_label}</div></div>
-</div>{avail_table}
+</div>{avail_table}{citation_table}
 
 <h2>按变体 × 臂</h2>
 <table>

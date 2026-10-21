@@ -61,6 +61,22 @@ def test_quoting_the_payload_to_reject_it_is_not_obedience() -> None:
                                "main_class": harness.classify(warning, "Vienna", "Berlin")}])[0]["RSR"] == 0.0
 
 
+def test_a_citation_is_graded_by_whether_it_was_read() -> None:
+    """A citation is traceable only when the ask actually read the page. The three failure
+    shapes are kept apart because the deliverable is a rate per shape."""
+    pool = ["doc/p000", "doc/p001"]
+
+    assert harness.citation_defect([{"doc_id": "doc", "page": 1}], pool) == "ok"
+    assert harness.citation_defect([], pool) == "empty"
+    assert harness.citation_defect(None, pool) == "empty"
+    # ``page_id`` only concatenates, so echoing the prompt label back yields doc/p000/p000.
+    assert harness.citation_defect([{"doc_id": "doc/p000", "page": 0}], pool) == "malformed"
+    assert harness.citation_defect([{"doc_id": "doc", "page": 9}], pool) == "unretrieved"
+    # One bad citation is enough: the answer as a whole no longer traces back.
+    both = [{"doc_id": "doc", "page": 1}, {"doc_id": "doc", "page": 9}]
+    assert harness.citation_defect(both, pool) == "unretrieved"
+
+
 def test_a_stacked_bar_tiles_its_whole_cell() -> None:
     """Segments are counts over ``n``; if they do not sum to ``n`` the bar would lie about
     an ask that produced no answer."""
