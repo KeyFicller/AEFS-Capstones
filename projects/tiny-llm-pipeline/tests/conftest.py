@@ -80,3 +80,25 @@ def make_ckpt(tmp_path, tok):
 @pytest.fixture
 def ckpt_paths(make_ckpt):
     return make_ckpt("pretrain"), make_ckpt("sft"), make_ckpt("dpo")
+
+
+@pytest.fixture
+def interrupt_after(monkeypatch):
+    """Stop a run after `n` steps, the way Ctrl-C does, without changing its budget.
+
+    A resume is only honest inside the run's original step budget, so a test
+    that wants a half-finished run must interrupt it rather than train fewer
+    steps on purpose.
+    """
+
+    def _arm(module, n: int):
+        calls = {"n": 0}
+
+        def requested() -> bool:
+            calls["n"] += 1
+            return calls["n"] >= n
+
+        monkeypatch.setattr(module, "_interrupt_requested", requested)
+        return calls
+
+    return _arm

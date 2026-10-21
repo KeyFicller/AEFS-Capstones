@@ -199,7 +199,7 @@ def test_lora_sft_beats_base_and_writes_an_adapter(
 
 
 def test_lora_resume_continues_the_step_counter(
-    tmp_path, tok, tiny_sft_jsonl, make_ckpt, monkeypatch
+    tmp_path, tok, tiny_sft_jsonl, make_ckpt, monkeypatch, interrupt_after
 ) -> None:
     _use_cpu(monkeypatch)
     bundle = prepare_sft(tiny_sft_jsonl, tok, holdout_n=2, dpo_prompt_n=2)
@@ -212,7 +212,9 @@ def test_lora_resume_continues_the_step_counter(
         "plot_every": 0,
         "val_every": -1,
     }
-    train_sft(bundle, out, max_steps=1, ckpt_every=1, **common)
+    interrupt_after(sft_mod, 1)
+    train_sft(bundle, out, max_steps=2, ckpt_every=1, **common)
+    monkeypatch.setattr(sft_mod, "_interrupt_requested", lambda: False)
     train_sft(bundle, out, max_steps=2, ckpt_every=2, resume=out / "ckpt.pt", **common)
 
     rows = [

@@ -108,7 +108,9 @@ def _log_rows(path: Path) -> list[dict[str, float | int]]:
     ]
 
 
-def test_resume_matches_uninterrupted_run(tmp_path, tok, tiny_pretrain_jsonl, monkeypatch) -> None:
+def test_resume_matches_uninterrupted_run(
+    tmp_path, tok, tiny_pretrain_jsonl, monkeypatch, interrupt_after
+) -> None:
     _use_cpu(monkeypatch)
     prepare_pretrain(tiny_pretrain_jsonl, tmp_path, tok, max_tokens=4096)
     full = tmp_path / "full"
@@ -116,9 +118,11 @@ def test_resume_matches_uninterrupted_run(tmp_path, tok, tiny_pretrain_jsonl, mo
     train_pretrain(
         tmp_path, full, tok_hash=tok.hash, max_steps=2, max_tokens=2_000_000, ckpt_every=2
     )
+    interrupt_after(pretrain_mod, 1)
     train_pretrain(
-        tmp_path, part, tok_hash=tok.hash, max_steps=1, max_tokens=2_000_000, ckpt_every=1
+        tmp_path, part, tok_hash=tok.hash, max_steps=2, max_tokens=2_000_000, ckpt_every=1
     )
+    monkeypatch.setattr(pretrain_mod, "_interrupt_requested", lambda: False)
     log_path = part / "train_log.jsonl"
     with log_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps({"step": 99, "loss": 1, "lr": 1, "tokens": 1, "elapsed": 1}) + "\n")
@@ -144,14 +148,16 @@ def test_resume_matches_uninterrupted_run(tmp_path, tok, tiny_pretrain_jsonl, mo
 
 
 def test_resume_old_ckpt_keeps_the_data_cursor(
-    tmp_path, tok, tiny_pretrain_jsonl, monkeypatch
+    tmp_path, tok, tiny_pretrain_jsonl, monkeypatch, interrupt_after
 ) -> None:
     _use_cpu(monkeypatch)
     prepare_pretrain(tiny_pretrain_jsonl, tmp_path, tok, max_tokens=4096)
     out = tmp_path / "out"
+    interrupt_after(pretrain_mod, 1)
     train_pretrain(
-        tmp_path, out, tok_hash=tok.hash, max_steps=1, max_tokens=2_000_000, ckpt_every=1
+        tmp_path, out, tok_hash=tok.hash, max_steps=2, max_tokens=2_000_000, ckpt_every=1
     )
+    monkeypatch.setattr(pretrain_mod, "_interrupt_requested", lambda: False)
     ckpt = out / "ckpt.pt"
     payload = torch.load(ckpt, map_location="cpu", weights_only=False)
     del payload["tokens"]
@@ -170,6 +176,44 @@ def test_resume_old_ckpt_keeps_the_data_cursor(
     assert restored["step"] == 2
     assert restored["cursor"] == 2 * DEFAULT_TRAIN.batch_size
     assert [row["step"] for row in _log_rows(out / "train_log.jsonl")] == [1, 2]
+
+
+def test_second_fresh_run_replaces_the_log(
+    tmp_path, tok, tiny_pretrain_jsonl, monkeypatch
+) -> None:
+    """Rows an earlier run left behind are not this run's history."""
+    _use_cpu(monkeypatch)
+    prepare_pretrain(tiny_pretrain_jsonl, tmp_path, tok, max_tokens=4096)
+    out = tmp_path / "out"
+    for _ in range(2):
+        train_pretrain(
+            tmp_path, out, tok_hash=tok.hash, max_steps=2, max_tokens=2_000_000, ckpt_every=2
+        )
+    assert [row["step"] for row in _log_rows(out / "train_log.jsonl")] == [1, 2]
+    payload = torch.load(out / "ckpt.pt", map_location="cpu", weights_only=False)
+    assert payload["horizon"] == 2
+
+
+def test_resume_refuses_a_different_horizon(
+    tmp_path, tok, tiny_pretrain_jsonl, monkeypatch
+) -> None:
+    """A wider budget would move every remaining learning rate, so it is an error."""
+    _use_cpu(monkeypatch)
+    prepare_pretrain(tiny_pretrain_jsonl, tmp_path, tok, max_tokens=4096)
+    out = tmp_path / "out"
+    train_pretrain(
+        tmp_path, out, tok_hash=tok.hash, max_steps=1, max_tokens=2_000_000, ckpt_every=1
+    )
+    with pytest.raises(ValueError, match="horizon=1"):
+        train_pretrain(
+            tmp_path,
+            out,
+            tok_hash=tok.hash,
+            max_steps=2,
+            max_tokens=2_000_000,
+            ckpt_every=1,
+            resume=out / "ckpt.pt",
+        )
 
 
 def test_second_sigint_aborts() -> None:

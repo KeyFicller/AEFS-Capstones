@@ -112,11 +112,17 @@ def test_drops_rows_with_no_completion_tokens(tmp_path, tok, make_ckpt) -> None:
     assert records[0]["dropped"] == 1  # only the usable row is scored
 
 
-def test_resume_continues_the_step_counter(tmp_path, tok, make_ckpt, tiny_prefs_jsonl) -> None:
+def test_resume_continues_the_step_counter(
+    tmp_path, tok, make_ckpt, tiny_prefs_jsonl, interrupt_after, monkeypatch
+) -> None:
     """Resuming an existing run reloads AdamW state instead of starting fresh."""
+    from tiny_llm_pipeline.train import dpo as dpo_mod
+
     ref = make_ckpt("sft")
     out = tmp_path / "dpo"
-    train_dpo(tiny_prefs_jsonl, out, ref_ckpt=ref, tok_hash=tok.hash, tok=tok, max_steps=1)
+    interrupt_after(dpo_mod, 1)
+    train_dpo(tiny_prefs_jsonl, out, ref_ckpt=ref, tok_hash=tok.hash, tok=tok, max_steps=3)
+    monkeypatch.setattr(dpo_mod, "_interrupt_requested", lambda: False)
     train_dpo(
         tiny_prefs_jsonl,
         out,
@@ -129,6 +135,16 @@ def test_resume_continues_the_step_counter(tmp_path, tok, make_ckpt, tiny_prefs_
     records = [json.loads(line) for line in (out / "train_log.jsonl").read_text().splitlines()]
     assert [row["step"] for row in records] == [1, 2, 3]
     assert load_ckpt(out / "ckpt.pt")["step"] == 3
+
+
+def test_second_fresh_run_replaces_the_log(tmp_path, tok, make_ckpt, tiny_prefs_jsonl) -> None:
+    """The delivered DPO log held two runs: 208 rows for 104 steps."""
+    ref = make_ckpt("sft")
+    out = tmp_path / "dpo"
+    for _ in range(2):
+        train_dpo(tiny_prefs_jsonl, out, ref_ckpt=ref, tok_hash=tok.hash, tok=tok, max_steps=1)
+    records = [json.loads(line) for line in (out / "train_log.jsonl").read_text().splitlines()]
+    assert [row["step"] for row in records] == [1]
 
 
 def test_resume_rejects_a_checkpoint_without_optimizer_state(

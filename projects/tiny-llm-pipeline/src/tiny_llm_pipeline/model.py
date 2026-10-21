@@ -222,12 +222,16 @@ def save_ckpt(
     *,
     tokens: int | None = None,
     cursor: int | None = None,
+    horizon: int | None = None,
 ) -> None:
     """Write a checkpoint, creating parent directories.
 
     Persist weights, `cfg`, `step`, `seed`, and `tokenizer_hash`. Include
-    optimizer state when `optimizer` is given, and `tokens` / `cursor` when
-    set. Replace the destination only after the temporary file is written.
+    optimizer state when `optimizer` is given, and `tokens` / `cursor` /
+    `horizon` when set. `horizon` is the step budget the cosine schedule was
+    built for, so a resume can keep its learning-rate curve instead of
+    recomputing it from a different `--epochs`. Replace the destination only
+    after the temporary file is written.
     """
     dest = Path(path)
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -244,6 +248,8 @@ def save_ckpt(
         payload["tokens"] = tokens
     if cursor is not None:
         payload["cursor"] = cursor
+    if horizon is not None:
+        payload["horizon"] = horizon
     temporary = dest.with_suffix(dest.suffix + ".tmp")
     torch.save(payload, temporary)
     temporary.replace(dest)
@@ -262,6 +268,7 @@ def save_lora_ckpt(
     *,
     tokens: int | None = None,
     cursor: int | None = None,
+    horizon: int | None = None,
 ) -> None:
     """Write a LoRA adapter: the A/B matrices and the base path, not the weights.
 
@@ -286,6 +293,8 @@ def save_lora_ckpt(
         payload["tokens"] = tokens
     if cursor is not None:
         payload["cursor"] = cursor
+    if horizon is not None:
+        payload["horizon"] = horizon
     temporary = dest.with_suffix(dest.suffix + ".tmp")
     torch.save(payload, temporary)
     temporary.replace(dest)

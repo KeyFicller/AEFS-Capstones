@@ -114,7 +114,7 @@ def test_ckpt_records_holdout_ppl_and_monitor(
 
 
 def test_best_ckpt_keeps_the_lowest_holdout_ppl(
-    tmp_path, tok, tiny_sft_jsonl, make_ckpt, monkeypatch
+    tmp_path, tok, tiny_sft_jsonl, make_ckpt, monkeypatch, interrupt_after
 ) -> None:
     """A later, worse step must not overwrite `best.pt`, including across a resume."""
     _use_cpu(monkeypatch)
@@ -130,18 +130,23 @@ def test_best_ckpt_keeps_the_lowest_holdout_ppl(
         "plot_every": 0,
         "val_every": -1,
     }
+    # Interrupt after step 2 of a 3-step run: the resume below keeps its budget.
+    interrupt_after(sft_mod, 2)
     train_sft(bundle, out, max_steps=3, **common)
     assert torch.load(out / "best.pt", map_location="cpu", weights_only=False)["step"] == 2
-    assert torch.load(out / "ckpt.pt", map_location="cpu", weights_only=False)["step"] == 3
+    assert torch.load(out / "ckpt.pt", map_location="cpu", weights_only=False)["step"] == 2
 
+    monkeypatch.setattr(sft_mod, "_interrupt_requested", lambda: False)
     monkeypatch.setattr(sft_mod, "_response_ppl", lambda *_a, **_k: 5.0)
-    returned = train_sft(bundle, out, max_steps=4, resume=out / "ckpt.pt", **common)
+    returned = train_sft(bundle, out, max_steps=3, resume=out / "ckpt.pt", **common)
     assert torch.load(out / "best.pt", map_location="cpu", weights_only=False)["step"] == 2
-    assert torch.load(out / "ckpt.pt", map_location="cpu", weights_only=False)["step"] == 4
+    assert torch.load(out / "ckpt.pt", map_location="cpu", weights_only=False)["step"] == 3
     assert returned == out / "best.pt"
 
 
-def test_resume_matches_uninterrupted_run(tmp_path, tok, tiny_sft_jsonl, make_ckpt, monkeypatch) -> None:
+def test_resume_matches_uninterrupted_run(
+    tmp_path, tok, tiny_sft_jsonl, make_ckpt, monkeypatch, interrupt_after
+) -> None:
     _use_cpu(monkeypatch)
     bundle = prepare_sft(tiny_sft_jsonl, tok, holdout_n=2, dpo_prompt_n=2)
     base = make_ckpt("base")
@@ -155,7 +160,9 @@ def test_resume_matches_uninterrupted_run(tmp_path, tok, tiny_sft_jsonl, make_ck
         "val_every": -1,
     }
     train_sft(bundle, full, max_steps=2, ckpt_every=2, **common)
-    train_sft(bundle, part, max_steps=1, ckpt_every=1, **common)
+    interrupt_after(sft_mod, 1)
+    train_sft(bundle, part, max_steps=2, ckpt_every=1, **common)
+    monkeypatch.setattr(sft_mod, "_interrupt_requested", lambda: False)
     log_path = part / "train_log.jsonl"
     with log_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps({"step": 99, "loss": 1, "lr": 1, "tokens": 1, "elapsed": 1}) + "\n")
@@ -164,6 +171,7 @@ def test_resume_matches_uninterrupted_run(tmp_path, tok, tiny_sft_jsonl, make_ck
     part_rows = _log_rows(log_path)
     assert [row["step"] for row in part_rows] == [1, 2]
     assert [row["loss"] for row in part_rows] == [row["loss"] for row in full_rows]
+    assert [row["lr"] for row in part_rows] == [row["lr"] for row in full_rows]
     assert part_rows[1]["tokens"] == full_rows[1]["tokens"]
     assert part_rows[1]["elapsed"] >= part_rows[0]["elapsed"]
     full_weights = load_ckpt(full / "ckpt.pt")["model"].state_dict()
@@ -196,6 +204,31 @@ def test_interrupt_saves_checkpoint(tmp_path, tok, tiny_sft_jsonl, make_ckpt, mo
     assert load_ckpt(ckpt)["step"] == 2
     payload = torch.load(ckpt, map_location="cpu", weights_only=False)
     assert payload["cursor"] == 2 * DEFAULT_TRAIN.batch_size
+
+
+def test_fresh_run_ignores_a_previous_best(
+    tmp_path, tok, tiny_sft_jsonl, make_ckpt, monkeypatch
+) -> None:
+    """A fresh run must not hand back `best.pt` left by the run before it."""
+    _use_cpu(monkeypatch)
+    monkeypatch.setattr(sft_mod, "_response_ppl", lambda *_a, **_k: float("inf"))
+    out = tmp_path / "sft"
+    out.mkdir()
+    stale = out / "best.pt"
+    stale.write_bytes(b"not this run's weights")
+    returned = train_sft(
+        prepare_sft(tiny_sft_jsonl, tok, holdout_n=2, dpo_prompt_n=2),
+        out,
+        tok=tok,
+        base_ckpt=make_ckpt("base"),
+        tok_hash=tok.hash,
+        max_steps=1,
+        ckpt_every=1,
+        plot_every=0,
+        val_every=-1,
+    )
+    assert returned == out / "ckpt.pt"
+    assert not stale.is_file()
 
 
 def test_holdout_sample_changes_with_step() -> None:

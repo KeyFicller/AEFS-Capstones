@@ -25,6 +25,8 @@ from tiny_llm_pipeline.tokenizer import Tok
 from tiny_llm_pipeline.train import pretrain as _pretrain
 from tiny_llm_pipeline.train.pretrain import (
     _append_log,
+    _begin_run,
+    _check_horizon,
     _device,
     _interrupt_requested,
     _on_sigint,
@@ -192,6 +194,10 @@ def train_dpo(
     dest.mkdir(parents=True, exist_ok=True)
     ckpt_path = dest / "ckpt.pt"
     log_path = dest / "train_log.jsonl"
+    horizon = _check_horizon(
+        max(1, total), payload.get("horizon") if payload else None, resume
+    )
+    elapsed_offset = _begin_run(log_path, step, resume=resume is not None)
 
     torch.manual_seed(seed)
     logger.info(
@@ -213,7 +219,15 @@ def train_dpo(
 
     def _save() -> None:
         save_ckpt(
-            ckpt_path, policy, policy.cfg, step, tok_hash, optimizer=opt, seed=seed, tokens=tokens
+            ckpt_path,
+            policy,
+            policy.cfg,
+            step,
+            tok_hash,
+            optimizer=opt,
+            seed=seed,
+            tokens=tokens,
+            horizon=horizon,
         )
 
     margin_avg: float | None = None
@@ -267,7 +281,7 @@ def train_dpo(
                 "lr": lr,
                 "tokens": tokens,
                 "dropped": dropped,
-                "elapsed": round(time.perf_counter() - started, 3),
+                "elapsed": round(elapsed_offset + time.perf_counter() - started, 3),
             }
             interrupted = _interrupt_requested()
             stop = step == total or interrupted

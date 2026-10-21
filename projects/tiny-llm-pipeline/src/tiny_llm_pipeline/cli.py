@@ -115,7 +115,9 @@ def train_pretrain_cmd(
     """Next-token pretraining. Stops at the first of steps, tokens, or seconds.
 
     Ctrl-C finishes the current step and writes a checkpoint. Pass that file
-    to `--resume` to continue the same data cursor and token count.
+    to `--resume` to continue the same data cursor, token count, and cosine
+    horizon: the run's step budget is recorded at its first checkpoint, so a
+    resume that asks for a different one is rejected.
     """
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     tok = load_tokenizer(data)
@@ -162,7 +164,8 @@ def train_sft_cmd(
     wins over `--epochs`, and `--limit` caps how many rows are read, which is
     what the smoke run uses instead of pulling in all 1.2 GB of the split.
     Ctrl-C finishes the current step and writes a checkpoint. Pass that file
-    to `--resume` to continue the same row cursor and token count. Holdout
+    to `--resume` to continue the same row cursor, token count, and cosine
+    horizon; changing `--max-steps` / `--epochs` on resume is rejected. Holdout
     perplexity is recorded on each save and the lowest one so far goes to
     `best.pt`; `--val-every` prints 5 greedy replies drawn from the holdout
     for that step. `--lr` defaults to `SFT_LR`, below pretraining's `1e-3`.
@@ -217,9 +220,10 @@ def train_dpo_cmd(
 
     The policy starts from `--ref` too. `--ref` itself is only ever read.
     `--lr` defaults to `DPO_LR`, an order below SFT's. Ctrl-C finishes the
-    current step and writes a checkpoint; pass that file to `--resume`.
-    `--holdout-frac` holds pairs out by prompt hash; the log reports
-    `holdout_gap`, `holdout_margin`, and `holdout_win_rate` at each save.
+    current step and writes a checkpoint; pass that file to `--resume`, which
+    keeps the run's step budget and rejects a different `--epochs` /
+    `--max-steps`. `--holdout-frac` holds pairs out by prompt hash; the log
+    reports `holdout_gap`, `holdout_margin`, and `holdout_win_rate` at each save.
     """
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     tok = load_tokenizer(data)

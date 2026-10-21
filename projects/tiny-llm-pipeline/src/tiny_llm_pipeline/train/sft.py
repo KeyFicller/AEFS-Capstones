@@ -31,11 +31,12 @@ from tiny_llm_pipeline.tokenizer import Tok, encode_chat
 from tiny_llm_pipeline.train import pretrain as _pretrain
 from tiny_llm_pipeline.train.pretrain import (
     _append_log,
+    _begin_run,
+    _check_horizon,
     _device,
     _interrupt_requested,
     _on_sigint,
     _optimizer,
-    _truncate_log,
 )
 
 logger = logging.getLogger(__name__)
@@ -126,7 +127,15 @@ def train_sft(
     ckpt_path = dest / "ckpt.pt"
     best_path = dest / "best.pt"
     log_path = dest / "train_log.jsonl"
-    elapsed_offset = _truncate_log(log_path, step) if resume is not None else 0.0
+    horizon = _check_horizon(
+        max(1, total), payload.get("horizon") if payload else None, resume
+    )
+    elapsed_offset = _begin_run(log_path, step, resume=resume is not None)
+    if resume is None:
+        # A left-over `best.pt` belongs to the earlier run, and `_best_ppl` would
+        # read its number too: the new run could never beat it and would return
+        # the old weights as its own best.
+        best_path.unlink(missing_ok=True)
     best_ppl = _best_ppl(log_path)
 
     torch.manual_seed(seed)
@@ -155,6 +164,7 @@ def train_sft(
                 seed=seed,
                 tokens=tokens,
                 cursor=cursor,
+                horizon=horizon,
             )
             return
         save_ckpt(
@@ -167,6 +177,7 @@ def train_sft(
             seed=seed,
             tokens=tokens,
             cursor=cursor,
+            horizon=horizon,
         )
 
     _pretrain._INTERRUPT = False

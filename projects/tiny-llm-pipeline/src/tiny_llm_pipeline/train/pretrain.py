@@ -113,14 +113,15 @@ def train_pretrain(
     dataset = PackedDataset(train_bin, DEFAULT_MODEL.max_seq_len)
     if len(dataset) == 0:
         raise ValueError(f"pretrain bin is empty: {train_bin}")
-    model, opt, step, saved_tokens, saved_cursor = _load_or_init(
+    model, opt, step, saved_tokens, saved_cursor, saved_horizon = _load_or_init(
         resume, tok_hash, device, train_cfg
     )
     per_step = train_cfg.batch_size * max(1, dataset.seq - 1)
     cursor = step * train_cfg.batch_size if saved_cursor is None else saved_cursor
     tokens = step * per_step if saved_tokens is None else saved_tokens
-    elapsed_offset = _truncate_log(log_path, step) if resume is not None else 0.0
-    horizon = max_steps if max_steps is not None else max(1, math.ceil(max_tokens / per_step))
+    elapsed_offset = _begin_run(log_path, step, resume=resume is not None)
+    requested = max_steps if max_steps is not None else max(1, math.ceil(max_tokens / per_step))
+    horizon = _check_horizon(requested, saved_horizon, resume)
     started = time.perf_counter()
     amp = _DTYPES[dtype]
     logger.info(
@@ -143,6 +144,7 @@ def train_pretrain(
             seed=seed,
             tokens=tokens,
             cursor=cursor,
+            horizon=horizon,
         )
 
     global _INTERRUPT
@@ -326,15 +328,49 @@ def _truncate_log(path: Path, step: int) -> float:
     return elapsed
 
 
+def _begin_run(log_path: Path, step: int, *, resume: bool) -> float:
+    """Take ownership of `log_path` for one run, returning the elapsed offset.
+
+    Appending is what makes a resume cheap, so a resumed run keeps the rows up
+    to its checkpoint (later ones are steps it is about to recompute) and goes
+    on appending. A fresh run owns the file: rows an earlier run left in the
+    same directory are not this run's history, and reading them as if they were
+    also corrupts the best-ppl baseline and every monitor plot drawn from them.
+    """
+    if resume:
+        return _truncate_log(log_path, step)
+    log_path.unlink(missing_ok=True)
+    return 0.0
+
+
+def _check_horizon(requested: int, stored: object | None, ckpt: Path | str | None) -> int:
+    """Keep a resumed run on the cosine schedule it started with.
+
+    `horizon` is the step budget the learning rate is spread over. Recomputing
+    it from a new `--epochs` or `--max-steps` moves every remaining rate and
+    makes the curve jump at the seam, so a resume must ask for the same budget.
+    A checkpoint written before the horizon was recorded has no stored value;
+    it falls back to `requested` as it always did.
+    """
+    known = None if stored is None else int(stored)
+    if known is None or known == requested:
+        return requested
+    raise ValueError(
+        f"{ckpt} was trained with horizon={known}, but this run asks for {requested}; "
+        "a resume cannot change the step budget — pass the original --max-steps / --epochs, "
+        "or start a fresh run from that checkpoint"
+    )
+
+
 def _load_or_init(
     resume: Path | str | None,
     tok_hash: str,
     device: torch.device,
     train_cfg: TrainConfig,
-) -> tuple[TinyLM, torch.optim.Optimizer, int, int | None, int | None]:
+) -> tuple[TinyLM, torch.optim.Optimizer, int, int | None, int | None, int | None]:
     if resume is None:
         model = TinyLM(DEFAULT_MODEL).to(device)
-        return model, _optimizer(model, train_cfg), 0, None, None
+        return model, _optimizer(model, train_cfg), 0, None, None, None
     loaded = load_ckpt(resume, expect_tokenizer_hash=tok_hash)
     model = loaded["model"].to(device)
     opt = _optimizer(model, train_cfg)
@@ -345,7 +381,8 @@ def _load_or_init(
     opt.load_state_dict(state)
     tokens = int(payload["tokens"]) if "tokens" in payload else None
     cursor = int(payload["cursor"]) if "cursor" in payload else None
-    return model, opt, int(loaded["step"]), tokens, cursor
+    horizon = int(payload["horizon"]) if "horizon" in payload else None
+    return model, opt, int(loaded["step"]), tokens, cursor, horizon
 
 
 def _optimizer(model: TinyLM, train_cfg: TrainConfig) -> torch.optim.Optimizer:
