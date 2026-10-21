@@ -75,6 +75,10 @@ def provenance(
     exception is ``extractor_model``: the keyword arm retrieves with an LLM even in a
     retrieval-only run, so the model it used is recorded there.
     """
+    from multimodal_doc_qa.manifest import load_manifest
+
+    root = getattr(settings, "artifacts_dir", None)
+    manifest = load_manifest(root) if root is not None else None
     return {
         "commit": _git_commit(),
         "date": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -88,6 +92,10 @@ def provenance(
         "extractor_model": extractor_model,
         "max_rounds": None if retrieval_only else getattr(settings, "max_rounds", None),
         "max_ask_calls": None if retrieval_only else getattr(settings, "max_ask_calls", None),
+        "index_fingerprint": manifest["fingerprint"] if manifest else None,
+        "pages": manifest["counts"]["pages"] if manifest else None,
+        "documents": manifest["counts"]["documents"] if manifest else None,
+        "bytes_per_page": manifest["storage"]["bytes_per_page"] if manifest else None,
         "python": platform.python_version(),
     }
 

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from multimodal_doc_qa.config import Settings, abstract_paths, artifact_paths
+from multimodal_doc_qa.manifest import validate
 from multimodal_doc_qa.schemas import page_id
 
 
@@ -167,11 +168,12 @@ MODES: tuple[str, ...] = tuple(ARMS)
 
 
 def require_index(name: str, settings: Settings) -> None:
-    """Raise ``IndexNotFoundError`` when the artifact an arm needs is not on disk."""
+    """Raise ``IndexNotFoundError`` for a missing artifact, ``ManifestError`` for a foreign one."""
     spec = INDEXES[name]
     path = spec.path(settings)
     if not path.is_file():
         raise IndexNotFoundError(f"no {spec.label} index at {path}{spec.hint}")
+    validate(settings.artifacts_dir, settings, "visual" if name == "multivector" else "text")
 
 
 def _fuse_rrf(parts: dict[str, object], k: int):

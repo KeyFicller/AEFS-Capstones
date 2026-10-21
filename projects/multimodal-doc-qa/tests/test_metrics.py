@@ -6,6 +6,7 @@ from contextlib import suppress
 from pathlib import Path
 
 import pytest
+import torch
 from multimodal_doc_qa.eval.metrics import (
     bbox_hit_rate,
     iou_at_threshold,
@@ -647,3 +648,36 @@ def test_the_extractor_model_is_null_without_one(tmp_path: Path) -> None:
     )
 
     assert _read(out)[0]["extractor_model"] is None
+
+
+def test_provenance_records_the_index_it_scored(tmp_path: Path) -> None:
+    from multimodal_doc_qa.config import Settings
+    from multimodal_doc_qa.eval.run import provenance
+    from multimodal_doc_qa.manifest import write_manifest
+    from multimodal_doc_qa.schemas import PdfDocument
+
+    settings = Settings(artifacts_dir=tmp_path)
+    write_manifest(
+        tmp_path,
+        settings,
+        [PdfDocument(doc_id="d")],
+        matrices={"d/p000": torch.zeros(2, 2)},
+        ocr_docs={},
+    )
+
+    header = provenance(settings, "maxsim", 5, 19, 0.5, retrieval_only=True)
+
+    assert header["index_fingerprint"].startswith("sha256:")
+    assert header["pages"] == 1
+    assert header["documents"] == 1
+    assert header["bytes_per_page"] == 16
+
+
+def test_provenance_without_a_manifest_is_still_a_header(tmp_path: Path) -> None:
+    from multimodal_doc_qa.config import Settings
+    from multimodal_doc_qa.eval.run import provenance
+
+    header = provenance(Settings(artifacts_dir=tmp_path), "maxsim", 5, 19, 0.5, retrieval_only=True)
+
+    assert header["index_fingerprint"] is None
+    assert header["pages"] is None

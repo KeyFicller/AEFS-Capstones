@@ -12,6 +12,8 @@ import pymupdf
 import pytesseract
 from PIL import Image
 
+from multimodal_doc_qa.config import CHUNK_MAX_CHARS
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,7 +41,7 @@ def extract_image_text(image: Image.Image) -> str:
     return pytesseract.image_to_string(image).strip()
 
 
-def chunk_texts(page_texts: list[str], max_chars: int = 400) -> list[tuple[str, int]]:
+def chunk_texts(page_texts: list[str], max_chars: int = CHUNK_MAX_CHARS) -> list[tuple[str, int]]:
     """``(chunk, page_index)`` pieces of at most ``max_chars``, split on whitespace.
 
     Never splits a token: ``16.8%`` cut in half is a value this baseline can never retrieve.
