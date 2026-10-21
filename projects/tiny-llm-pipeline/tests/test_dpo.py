@@ -9,7 +9,7 @@ import torch
 
 from tiny_llm_pipeline.data import collate_dpo
 from tiny_llm_pipeline.model import load_ckpt
-from tiny_llm_pipeline.train.dpo import dpo_loss, seq_logprob, train_dpo
+from tiny_llm_pipeline.train.dpo import _is_holdout, dpo_loss, seq_logprob, train_dpo
 
 
 def test_dpo_loss_matches_manual() -> None:
@@ -176,3 +176,36 @@ def test_interrupt_saves_and_stops(tmp_path, tok, make_ckpt, tiny_prefs_jsonl, m
     records = [json.loads(line) for line in (out / "train_log.jsonl").read_text().splitlines()]
     assert [row["step"] for row in records] == [1, 2]
     assert load_ckpt(out / "ckpt.pt")["step"] == 2
+
+
+def test_holdout_split_is_stable_and_keyed_by_prompt() -> None:
+    prompts = [f"问题{i}？" for i in range(2000)]
+    held = {prompt for prompt in prompts if _is_holdout(prompt, 0.1)}
+    assert 150 <= len(held) <= 250
+    assert held == {prompt for prompt in prompts if _is_holdout(prompt, 0.1)}
+    assert not any(_is_holdout(prompt, 0.0) for prompt in prompts)
+
+
+def test_holdout_readings_are_logged(tmp_path, tok, make_ckpt) -> None:
+    prefs = tmp_path / "prefs.jsonl"
+    rows = [
+        {"prompt": f"问题{i}？", "chosen": f"宝子～回答{i}呢！", "rejected": f"回答{i}。"}
+        for i in range(200)
+    ]
+    prefs.write_text(
+        "\n".join(json.dumps(row, ensure_ascii=False) for row in rows), encoding="utf-8"
+    )
+    out = tmp_path / "dpo"
+    train_dpo(
+        prefs,
+        out,
+        ref_ckpt=make_ckpt("sft"),
+        tok_hash=tok.hash,
+        tok=tok,
+        max_steps=1,
+        ckpt_every=1,
+    )
+    records = [json.loads(line) for line in (out / "train_log.jsonl").read_text().splitlines()]
+    record = records[0]
+    assert "holdout_gap" in record and "holdout_margin" in record
+    assert 0.0 <= record["holdout_win_rate"] <= 1.0

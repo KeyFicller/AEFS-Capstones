@@ -7,6 +7,7 @@ Checkpoints follow pretraining: save every `ckpt_every` steps and on the first
 Ctrl-C.
 """
 
+import hashlib
 import logging
 import math
 import signal
@@ -18,8 +19,8 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 
 from tiny_llm_pipeline.config import DEFAULT_TRAIN, TrainConfig, lr_at
-from tiny_llm_pipeline.data import PreferenceExample, collate_dpo, read_preferences
-from tiny_llm_pipeline.model import load_ckpt, save_ckpt
+from tiny_llm_pipeline.data import PreferenceExample, collate_dpo, read_preferences, row_order
+from tiny_llm_pipeline.model import TinyLM, load_ckpt, save_ckpt
 from tiny_llm_pipeline.tokenizer import Tok
 from tiny_llm_pipeline.train import pretrain as _pretrain
 from tiny_llm_pipeline.train.pretrain import (
@@ -63,6 +64,61 @@ def seq_logprob(model, input_ids: Tensor, mask: Tensor) -> Tensor:
     return (token_lp * weights).sum(dim=-1)
 
 
+def _is_holdout(prompt: str, fraction: float) -> bool:
+    """Held-out share keyed by the prompt text.
+
+    `synth-pref` is append-only, so an index split would move a prompt between
+    train and holdout whenever the pair file grows. A hash bucket is stable.
+    """
+    if fraction <= 0.0:
+        return False
+    digest = hashlib.sha256(prompt.encode("utf-8")).digest()
+    return int.from_bytes(digest[:4], "big") % 10_000 < fraction * 10_000
+
+
+def _holdout_readings(
+    policy: TinyLM,
+    ref: TinyLM,
+    rows: list[PreferenceExample],
+    tok: Tok,
+    max_seq_len: int,
+    beta: float,
+    device: torch.device,
+    batch_size: int = 16,
+) -> tuple[float, float, float] | None:
+    """`(gap, margin, win_rate)` on held-out pairs, or None when the split is empty.
+
+    `gap` is the raw `logπ_chosen − logπ_rejected` reported against the SFT
+    baseline, `margin` is the β-scaled DPO objective, and `win_rate` is the
+    share of pairs with `gap > 0`. All three come from one forward pass.
+    """
+    if not rows:
+        return None
+    was_training = policy.training
+    policy.eval()
+    gaps: list[Tensor] = []
+    margins: list[Tensor] = []
+    try:
+        with torch.no_grad():
+            for offset in range(0, len(rows), batch_size):
+                batch = collate_dpo(rows[offset : offset + batch_size], tok, max_seq_len)
+                chosen = batch["chosen_input_ids"].to(device)
+                chosen_mask = batch["chosen_mask"].to(device)
+                rejected = batch["rejected_input_ids"].to(device)
+                rejected_mask = batch["rejected_mask"].to(device)
+                pw = seq_logprob(policy, chosen, chosen_mask)
+                pl = seq_logprob(policy, rejected, rejected_mask)
+                rw = seq_logprob(ref, chosen, chosen_mask)
+                rl = seq_logprob(ref, rejected, rejected_mask)
+                gaps.append(pw - pl)
+                margins.append(dpo_loss(pw, pl, rw, rl, beta)[1])
+    finally:
+        policy.train(was_training)
+    gap = torch.cat(gaps)
+    margin = torch.cat(margins)
+    return float(gap.mean()), float(margin.mean()), float((gap > 0).float().mean())
+
+
 def train_dpo(
     prefs_jsonl: Path | str,
     out_dir: Path | str,
@@ -77,13 +133,21 @@ def train_dpo(
     resume: Path | str | None = None,
     train_cfg: TrainConfig = DEFAULT_TRAIN,
     ckpt_every: int = 500,
+    holdout_frac: float = 0.1,
 ) -> Path:
     """Run DPO from `ref_ckpt` (or `resume`) and return the policy checkpoint.
 
     `max_steps` wins over `epochs` when set. Pairs whose assistant side has no
     tokens left after truncation are dropped up front and counted in every log
     record, rather than fed in as an all-zero mask.
+
+    `holdout_frac` of the pairs are held out by prompt hash and never trained.
+    At every save they give `holdout_gap` (logπ_chosen − logπ_rejected),
+    `holdout_margin` (the β-scaled DPO margin) and `holdout_win_rate`, so the
+    reported alignment numbers are not in-sample.
     """
+    if not 0.0 <= holdout_frac < 1.0:
+        raise ValueError(f"holdout_frac must be in [0, 1), got {holdout_frac}")
     rows = read_preferences(prefs_jsonl)
     if not rows:
         raise ValueError("preference file is empty")
@@ -97,6 +161,10 @@ def train_dpo(
     rows, dropped = _scorable(rows, tok, max_seq_len)
     if not rows:
         raise ValueError("every preference pair has no assistant tokens to score")
+    holdout = [row for row in rows if _is_holdout(row["prompt"], holdout_frac)]
+    train_rows = [row for row in rows if not _is_holdout(row["prompt"], holdout_frac)]
+    if not train_rows:
+        train_rows, holdout = rows, []
 
     start = ref_ckpt if resume is None else resume
     loaded = load_ckpt(start, expect_tokenizer_hash=tok_hash)
@@ -115,7 +183,8 @@ def train_dpo(
     tokens = int(payload["tokens"]) if payload and "tokens" in payload else 0
 
     batch_size = train_cfg.batch_size
-    per_epoch = max(1, math.ceil(len(rows) / batch_size))
+    order = row_order(len(train_rows), seed)
+    per_epoch = max(1, math.ceil(len(train_rows) / batch_size))
     total = max_steps if max_steps is not None else max(1, epochs) * per_epoch
     horizon = max(1, total)
 
@@ -126,15 +195,21 @@ def train_dpo(
 
     torch.manual_seed(seed)
     logger.info(
-        "dpo device=%s batch=%d pairs=%d dropped=%d horizon=%d beta=%.3g step=%d",
+        "dpo device=%s batch=%d pairs=%d holdout=%d dropped=%d horizon=%d beta=%.3g step=%d",
         device.type,
         batch_size,
-        len(rows),
+        len(train_rows),
+        len(holdout),
         dropped,
         horizon,
         beta,
         step,
     )
+    holdout_start = _holdout_readings(policy, ref, holdout, tok, max_seq_len, beta, device)
+    if holdout_start is not None:
+        logger.info(
+            "dpo holdout_start gap=%.3f margin=%.3f win_rate=%.3f", *holdout_start
+        )
 
     def _save() -> None:
         save_ckpt(
@@ -149,8 +224,8 @@ def train_dpo(
         policy.train()
         while step < total:
             step += 1
-            first = ((step - 1) * batch_size) % len(rows)
-            batch_rows = [rows[(first + offset) % len(rows)] for offset in range(batch_size)]
+            first = ((step - 1) * batch_size) % len(train_rows)
+            batch_rows = [train_rows[order[(first + offset) % len(train_rows)]] for offset in range(batch_size)]
             batch = collate_dpo(batch_rows, tok, max_seq_len)
             chosen_ids = batch["chosen_input_ids"].to(device)
             chosen_mask = batch["chosen_mask"].to(device)
@@ -197,6 +272,15 @@ def train_dpo(
             interrupted = _interrupt_requested()
             stop = step == total or interrupted
             if ckpt_every > 0 and (step % ckpt_every == 0 or stop):
+                readings = _holdout_readings(
+                    policy, ref, holdout, tok, max_seq_len, beta, device
+                )
+                if readings is not None:
+                    (
+                        record["holdout_gap"],
+                        record["holdout_margin"],
+                        record["holdout_win_rate"],
+                    ) = readings
                 _save()
             _append_log(log_path, record)
             logger.info(

@@ -9,6 +9,7 @@ from tiny_llm_pipeline.data import (
     fetch_minimind,
     prepare_pretrain,
     prepare_sft,
+    row_order,
     write_sft_splits,
     write_tokenizer_sample,
 )
@@ -126,15 +127,11 @@ def test_prepare_sft_splits_unrelated_turns(tmp_path, tok) -> None:
 
     bundle = prepare_sft(raw, tok, holdout_n=1, dpo_prompt_n=1)
 
-    assert bundle.holdout == [
-        {
-            "conversations": [
-                {"role": "user", "content": "第一问"},
-                {"role": "assistant", "content": "第一答"},
-            ]
-        }
-    ]
-    assert bundle.dpo_prompts == ["第二问"]
+    held = bundle.holdout[0]["conversations"]
+    assert held[0]["role"] == "user" and held[-1]["role"] == "assistant"
+    held_prompt = held[0]["content"]
+    assert held_prompt in {"第一问", "第二问"}
+    assert bundle.dpo_prompts == [({"第一问", "第二问"} - {held_prompt}).pop()]
     assert bundle.train == []
 
 
@@ -184,3 +181,32 @@ def test_prepare_sft_keeps_a_record_spanning_raw_newlines(tmp_path, tok) -> None
     bundle = prepare_sft(raw, tok, holdout_n=1, dpo_prompt_n=1)
     assert len(bundle.train) + len(bundle.holdout) + len(bundle.dpo_prompts) == len(rows)
     assert bundle.holdout[0]["conversations"][-1]["content"] == body
+
+
+def test_row_order_is_a_seeded_permutation() -> None:
+    order = row_order(100, seed=7)
+    assert sorted(order) == list(range(100))
+    assert order != list(range(100))
+    assert order == row_order(100, seed=7)
+
+
+def test_prepare_sft_holdout_is_not_the_file_prefix(tmp_path, tok) -> None:
+    """SFT file order correlates with length and topic, so a prefix is biased."""
+    rows = [
+        {
+            "conversations": [
+                {"role": "user", "content": f"问题{i}？"},
+                {"role": "assistant", "content": f"回答{i}。"},
+            ]
+        }
+        for i in range(200)
+    ]
+    raw = tmp_path / "sft.jsonl"
+    raw.write_text(
+        "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n",
+        encoding="utf-8",
+    )
+    bundle = prepare_sft(raw, tok, holdout_n=20, dpo_prompt_n=20, seed=0)
+    holdout = {row["conversations"][0]["content"] for row in bundle.holdout}
+    assert len(holdout) == 20
+    assert holdout != {f"问题{i}？" for i in range(20)}

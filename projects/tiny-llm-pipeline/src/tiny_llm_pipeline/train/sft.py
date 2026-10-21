@@ -2,8 +2,9 @@
 
 `collate_sft` shifts and masks the batch, and the model loss already ignores
 -100, so the mask is never multiplied in a second time. `max_steps` wins over
-`epochs` when set; batches cycle through the train split, so a split smaller
-than one batch still fills every step.
+`epochs` when set; batches walk a seeded permutation of the train split (file
+order correlates with length), so a split smaller than one batch still fills
+every step.
 
 Checkpoints, the monitor plot, and held-out eval follow pretraining: save
 every `ckpt_every` steps (and on Ctrl-C), write `monitor.png` every
@@ -23,7 +24,7 @@ import torch
 from torch import nn
 
 from tiny_llm_pipeline.config import DEFAULT_TRAIN, TrainConfig, lr_at
-from tiny_llm_pipeline.data import SFTBundle, collate_sft
+from tiny_llm_pipeline.data import SFTBundle, collate_sft, row_order
 from tiny_llm_pipeline.lora import LoRAConfig, inject_lora
 from tiny_llm_pipeline.model import TinyLM, load_ckpt, load_lora_ckpt, save_ckpt, save_lora_ckpt
 from tiny_llm_pipeline.tokenizer import Tok, encode_chat
@@ -84,6 +85,7 @@ def train_sft(
     rows = sft_bundle.train
     if not rows:
         raise ValueError("sft train split is empty")
+    order = row_order(len(rows), seed)
     device = _device()
     start = base_ckpt if resume is None else resume
     lora_cfg = lora if (lora is not None and lora.enabled) else None
@@ -175,7 +177,7 @@ def train_sft(
             step += 1
             first = cursor % len(rows)
             cursor += batch_size
-            batch_rows = [rows[(first + offset) % len(rows)] for offset in range(batch_size)]
+            batch_rows = [rows[order[(first + offset) % len(rows)]] for offset in range(batch_size)]
             batch = collate_sft(batch_rows, tok, max_seq_len)
             input_ids = batch["input_ids"].to(device)
             labels = batch["labels"].to(device)

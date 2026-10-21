@@ -8,6 +8,7 @@ disjoint user texts.
 import hashlib
 import json
 import logging
+import random
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -218,15 +219,17 @@ def prepare_sft(
     tok: Tok,
     holdout_n: int = 200,
     dpo_prompt_n: int = 1000,
+    seed: int = 42,
 ) -> SFTBundle:
-    """Split SFT jsonl in file order, without shuffling.
+    """Shuffle SFT rows, then cut the three splits.
 
     A source record lists several user/assistant pairs back to back. Those
     pairs are separate questions, not context for each other, so each pair
     becomes its own one-turn example before the split. Drop pairs whose
-    `encode_chat` length exceeds `ModelConfig.max_seq_len`. Then `holdout` is
-    the first `holdout_n` pairs, `dpo_prompts` is the user text of the next
-    `dpo_prompt_n` pairs, and `train` is the rest.
+    `encode_chat` length exceeds `ModelConfig.max_seq_len`. Then shuffle with
+    `seed` (`holdout` must not be a file prefix: the corpus order correlates
+    with length and topic), take `holdout_n` pairs, the user text of the next
+    `dpo_prompt_n`, and leave the rest to `train`.
 
     The corpus repeats user turns, so index slicing alone would let one split
     share a user text with another. A row is claimed only when its user text
@@ -237,6 +240,7 @@ def prepare_sft(
         for pair in _single_turns(source):
             if len(encode_chat(list(pair["conversations"]), tok)[0]) <= DEFAULT_MODEL.max_seq_len:
                 rows.append(pair)
+    random.Random(seed).shuffle(rows)
     holdout = rows[:holdout_n]
     blocked: set[str] = set()
     for row in holdout:
@@ -326,6 +330,18 @@ def _dump_jsonl(rows: Iterable[object], path: Path) -> None:
     with path.open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def row_order(n: int, seed: int) -> list[int]:
+    """A seeded permutation of `0..n-1`, so batches are not file order.
+
+    Rows in the source jsonl are correlated (length, topic), which makes a
+    sequential batch unrepresentative. Deriving the order from `(n, seed)` lets
+    `--resume` rebuild the same order without storing it in the checkpoint.
+    """
+    order = list(range(n))
+    random.Random(seed).shuffle(order)
+    return order
 
 
 class PackedDataset:

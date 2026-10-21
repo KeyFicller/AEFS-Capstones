@@ -42,12 +42,14 @@ def prepare_cmd(
     out: Path = typer.Option(Path("artifacts/data"), "--out"),
     max_tokens: int = typer.Option(PRETRAIN_TOKENS, "--max-tokens"),
     sample_mb: int = typer.Option(200, "--sample-mb"),
+    seed: int = typer.Option(42, "--seed", help="Shuffle seed for the SFT splits."),
 ) -> None:
     """Fetch the corpus, train the tokenizer, then write the bins and splits.
 
     Order: download -> `tokenizer_sample.txt` -> `tokenizer.json` -> the packed
-    `train.bin` / `val.bin` -> the three disjoint SFT splits. Re-running reuses
-    the download cache and overwrites the derived files.
+    `train.bin` / `val.bin` -> the three disjoint SFT splits, shuffled by
+    `--seed` before the cut. Re-running reuses the download cache and
+    overwrites the derived files.
     """
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     if dataset != "minimind":
@@ -60,7 +62,7 @@ def prepare_cmd(
     train_tokenizer(sample, out, vocab_size=DEFAULT_MODEL.vocab_size, sample_mb=sample_mb)
     tok = load_tokenizer(out)
     train_bin, val_bin = prepare_pretrain(raw_pretrain, out, tok, max_tokens=max_tokens)
-    splits = write_sft_splits(prepare_sft(raw_sft, tok), out)
+    splits = write_sft_splits(prepare_sft(raw_sft, tok, seed=seed), out)
     for path in (train_bin, val_bin, *splits.values()):
         typer.echo(str(path))
 
@@ -203,12 +205,15 @@ def train_dpo_cmd(
     seed: int = typer.Option(42, "--seed"),
     lr: float = typer.Option(DPO_LR, "--lr"),
     ckpt_every: int = typer.Option(500, "--ckpt-every"),
+    holdout_frac: float = typer.Option(0.1, "--holdout-frac"),
 ) -> None:
     """DPO on `prefs.jsonl`, with `--ref` frozen as the reference policy.
 
     The policy starts from `--ref` too. `--ref` itself is only ever read.
     `--lr` defaults to `DPO_LR`, an order below SFT's. Ctrl-C finishes the
     current step and writes a checkpoint; pass that file to `--resume`.
+    `--holdout-frac` holds pairs out by prompt hash; the log reports
+    `holdout_gap`, `holdout_margin`, and `holdout_win_rate` at each save.
     """
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     tok = load_tokenizer(data)
@@ -225,6 +230,7 @@ def train_dpo_cmd(
         resume=resume,
         train_cfg=replace(DEFAULT_TRAIN, lr=lr),
         ckpt_every=ckpt_every,
+        holdout_frac=holdout_frac,
     )
     typer.echo(str(ckpt))
 
