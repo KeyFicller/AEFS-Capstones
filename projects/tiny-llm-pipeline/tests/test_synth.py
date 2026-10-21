@@ -83,3 +83,9 @@ def test_guide_is_embedded_verbatim_in_the_chosen_prompt(tmp_path, tok) -> None:
     assert "160 字" in chosen_sys        # a concrete length target
     # The token figure is the cap `_fits` actually enforces, not a stale copy.
     assert f"{DEFAULT_MODEL.max_seq_len} token" in chosen_sys
+    # The outline's own example sentences get copied unless this says otherwise.
+    assert "不要照抄原句" in chosen_sys
+    assert "换一种开场" in chosen_sys
+    # The outline's own example sentences get copied unless this says otherwise.
+    assert "不要照抄原句" in chosen_sys
+    assert "换一种开场" in chosen_sys

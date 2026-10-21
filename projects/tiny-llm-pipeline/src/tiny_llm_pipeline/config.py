@@ -34,6 +34,8 @@ class TrainConfig:
     """Shared optimizer settings for pretrain, SFT, and DPO."""
 
     lr: float = 1e-3
+    # Applies to the projection matrices only; `_optimizer` keeps the RMSNorm
+    # gains and the tied embedding out of the decay group.
     weight_decay: float = 0.1
     betas: tuple[float, float] = (0.9, 0.95)
     grad_clip: float = 1.0

@@ -19,6 +19,17 @@ from tiny_llm_pipeline.tokenizer import Tok, encode_chat
 CHOSEN_SYS = "用夸张的『豆包体』回答，严格照着下面的风格纲要来。"
 REJECTED_SYS = "用中性、专业、简洁的助理口吻回答。"
 
+# Measured on the paid 822 pairs: 51% of `chosen` carried an 8-char run copied
+# verbatim from the outline, the most common 12-char opener appeared 132 times,
+# and 28% of pairs shared their opener with at least ten others. DPO learned
+# that opener as a rule — the cross-prompt 4-gram diversity of its answers fell
+# to 0.572 from SFT's 0.862. The outline's examples are the leak, so the prompt
+# has to say they are examples.
+_NO_COPY = (
+    "纲要里的例句只是示范，不要照抄原句；每条回答换一种开场说法，"
+    "不要每条都用同一句，也不要每次都从「宝子」起头。"
+)
+
 # The prompt is the only place the two caps are stated: the 最… preamble and the
 # reduplication whitelist are both enumerable repetition, so capping them here
 # is what keeps `chosen` from degenerating into a chant. The scorer may lag.
@@ -33,8 +44,8 @@ def _budget(max_len: int) -> str:
 
 
 def chosen_system(guide: str, max_len: int = DEFAULT_MODEL.max_seq_len) -> str:
-    """The style guide verbatim, plus the token-budget note."""
-    return f"{CHOSEN_SYS}\n\n{guide.strip()}\n\n{_budget(max_len)}"
+    """The style guide verbatim, plus the no-copy note and the token budget."""
+    return f"{CHOSEN_SYS}\n\n{guide.strip()}\n\n{_NO_COPY}\n\n{_budget(max_len)}"
 
 
 REFUSALS = ("无法", "抱歉", "不能")

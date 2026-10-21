@@ -2,7 +2,7 @@
 
 - **项目**：tiny-llm-pipeline / 所属 Phase：Phase19 / Capstone 07
 - **spec**：[Capstone 07 — 端到端微调流水线](https://aieng-zh.cn/lessons/19-capstone-projects/07-end-to-end-fine-tuning-pipeline/)
-- **状态**：三段已在真实数据上训练完——预训练 34500 步（val ppl **11.8**）、SFT 5000 步（留出集回答 ppl **6.34**，微调前的 `pretrain-30m` 基线 **38.15**）、DPO 104 步（Δ = `logπ_chosen − logπ_rejected` 由 **−197.8** 升到 **+331.9**，Δ>0 的偏好对 **22% → 64%**）。`prepare` 位级可复现；`eval/sample.py` / `eval/serve.py` / **`eval` 子命令（写 `eval/results.jsonl`）**已落地；SFT 另有 **LoRA 路径**（`--lora-rank`，落 adapter ckpt，单元与 CLI 已测；与全量 FT 的 5000 步对照**未跑**，待云端 GPU）；单测 `105 passed`。**未落地**：`gen` / `chat` / `compare` CLI。**交付配置**：DPO `--beta 0.01 --epochs 4 --lr 3e-5`，且**生成时必须开 `repetition_penalty`（1.3–1.5）——它是交付的一部分，不是可选的润色**。
+- **状态**：三段已在真实数据上训练完——预训练 34500 步（val ppl **11.8**）、SFT 5000 步（留出集回答 ppl **6.34**，微调前的 `pretrain-30m` 基线 **38.15**）、DPO 104 步（Δ = `logπ_chosen − logπ_rejected` 由 **−197.8** 升到 **+331.9**，Δ>0 的偏好对 **22% → 64%**）。`prepare` 位级可复现；`eval/sample.py` / `eval/serve.py` / **`eval` 子命令（写 `eval/results.jsonl`）**已落地；SFT 另有 **LoRA 路径**（`--lora-rank`，落 adapter ckpt，单元与 CLI 已测；与全量 FT 的 5000 步对照**未跑**，待云端 GPU）；单测 `107 passed`。**未落地**：`gen` / `chat` / `compare` CLI。**交付配置**：DPO `--beta 0.01 --epochs 4 --lr 3e-5`，且**生成时必须开 `repetition_penalty`（1.3–1.5）——它是交付的一部分，不是可选的润色**。
 - **对齐读数（来自 `eval/results.jsonl`）**：40 条冻结 prompt（`eval/prompts.jsonl`）、贪心、`rep_pen=1.5`、`max_new=48`，SFT 与 DPO 同一批题——`doubao_score` **1.07 → 8.10**（配对差 **+7.03**，bootstrap 95% CI **[6.06, 8.02]**，DPO 胜 **97.5%**，无平局）；同一份汇总的反面是 **跨 prompt 4-gram 多样性 0.862 → 0.572**，即 DPO 的得分有相当部分来自「每条回答用同一套开场模板」。单条内 `repeat_4` **0.008 → 0.0005**、平均长度 **58.3 → 51.3** 字。**两组数必须一起报**：只报 +7.03 就是把模板复读当成了对齐成功。该文件由**修订前的 ckpt** 产出（旧切分、DPO 全量训练），题集与解码口径不受影响，但不能与重跑后的新数字混用；`ppl` 段为空（本机无 `artifacts/data`）。
 - **2026-10-21 切分修订**：`prepare_sft` 先按 `--seed` 打乱再切（holdout 不再是文件前缀）；SFT 训练 batch 走 `seed` 派生的行置换，不再是文件顺序；`train-dpo` 按 prompt 的 sha256 留出 10%，只在留出对上报 `holdout_gap` / `holdout_margin` / `holdout_win_rate`。**既有 `checkpoints/{sft,dpo}` 与其 `train_log.jsonl` 是修订前的产物**（旧前缀 holdout、DPO 全量训练、日志混入两次 fresh run），要报新口径必须重跑 `prepare` → `train-sft` → `train-dpo`；新旧数字不得混用。
 - **产物位置**：权重与日志在 `checkpoints/{pretrain,sft,dpo}/`（`ckpt.pt` + `train_log.jsonl`，pretrain / SFT 另有 `monitor.png`），tokenizer 在 `checkpoints/tokenizer/tokenizer.json`；CLI 默认的输入输出目录是 `artifacts/`。**两者都被根 `.gitignore` 忽略**（`checkpoints/`、`projects/*/artifacts/*`），新机器 `git clone` 拿不到。唯一强制入库的 artifacts 是 `artifacts/prefs/`——`prefs.jsonl` 靠调 API 生成、**不可位级复现**，必须随机器搬运；`doubao-style-guide.md` 是 `synth-pref --guide` 的默认值，缺了默认命令直接失败。
@@ -51,7 +51,7 @@ Python 3.12.13，共享 venv。`torch`（fp32；设备按 CUDA → MPS → CPU �
 
 **训练（已交付）**
 
-- `prepare` 的产物**位级可复现**：同版本 `tokenizers` 下重跑得到与既有产物**逐字节相同**的 `tokenizer.json` / `train.bin` / `val.bin` 与三份切分（切分另依赖 `--seed`，默认 42；改 seed 即换切分）。**但这份确定性依赖 BPE 训练器实现**——`tokenizers` 与 `numpy` 只由 `transformers` / `torch` 传递带入、没写进 `requirements.txt`，换版本可能改变 merges，连带 bin 与切分一起漂移，**换机后先重训 tokenizer 比对哈希再往下走**。切分口诀 `val_docs, train_docs = kept[:n_val], kept[n_val:]` → **`train.bin` 从第 `n_val` 篇文档开始**，做前缀比对要拿 `val.bin`（从第 0 篇起）。
+- `prepare` 的产物**位级可复现**：同版本 `tokenizers` 下重跑得到与既有产物**逐字节相同**的 `tokenizer.json` / `train.bin` / `val.bin` 与三份切分（切分另依赖 `--seed`，默认 42；改 seed 即换切分）。**这份确定性依赖 BPE 训练器实现**：`tokenizers` 已在根 `requirements.txt` 钉到 **`==0.23.2`**（`transformers==5.18.0` 的区间是 `>=0.23.1,<0.24.0`，不冲突），**`numpy`（2.5.3）仍是传递依赖、未钉**——它只影响 uint16 打包，风险远低于 merges，但换机后仍建议先重训 tokenizer 比对哈希再往下走。切分口诀 `val_docs, train_docs = kept[:n_val], kept[n_val:]` → **`train.bin` 从第 `n_val` 篇文档开始**，做前缀比对要拿 `val.bin`（从第 0 篇起）。
 - **存盘**：每 **500** 步写 `ckpt.pt`（优化器 / 累计 token / 行游标 / **`horizon`**）。**`ckpt.pt` 每步覆盖同一路径**，最优权重可能被末步盖掉——SFT 靠 `best.pt` 兜（见下）。
 - **一次 run 拥有自己的日志**（`train_log.jsonl` 与 SFT 的 `best.pt`）：**fresh run 覆盖日志、并删掉上一次 run 留下的 `best.pt`**；`--resume` 只截掉步数大于 ckpt 的行，其余照旧追加。所以同一 `--out` 重复跑不再把两次 run 拼成一份日志。**交付的 `checkpoints/dpo/train_log.jsonl` 是旧代码留下的反例：208 行只有 104 个 step**（第 104 行 `lr=3.0e-6`，第 105 行退回 `step=1, lr=3e-5`），引用 DPO 曲线以 ckpt 的 104 步为准，重跑一次即被覆盖。
 - **预训练**：`--val-every` 默认 **-1**（关）。`--resume` 从该步的数据游标与累计 token 接着训，不重放看过的窗口。
@@ -59,6 +59,7 @@ Python 3.12.13，共享 venv。`torch`（fp32；设备按 CUDA → MPS → CPU �
 - **DPO**：只写 `ckpt.pt`（无 `monitor.png` / `best.pt`），训练 batch 同样走 `seed` 派生的置换。**按 prompt hash 留出 10% 不参与训练**，每个存盘点在日志写 `holdout_gap` / `holdout_margin` / `holdout_win_rate`；训练批次上的 `margin` / `margin_avg` 只是训练诊断。`--ref` 全程只读未写。
 - **`--max-steps` 是绝对值**：`--resume` 时接着 ckpt 里的 `step`；fresh stage 从 0 起（base ckpt 的 `step` 属上一段，不继承）。
 - **`--lr` 默认** `SFT_LR = 2e-4` / `DPO_LR = 1e-5`；交付用的是 DPO `--lr 3e-5`。`--beta` 与 `--epochs` 也必须显式给——默认 `beta = 0.1` 落在「通顺但没风格」的欠训点。
+- **`weight_decay = 0.1` 只作用于投影矩阵**（`_optimizer`）：RMSNorm 的 gain 与 tied embedding 不进衰减组，`weight_decay=0.0`。按交付日程算，`wd` 会把无梯度反抗的参数乘到 **0.15**（预训练 34500 步）/ **0.76**（SFT 5000 步）/ **0.994**（DPO 104 步）；交付 ckpt 里 **89% 的 norm gain 跌破 0.9、最小 0.053**（初值 1.0），就是这条拉力留下的痕迹。**三条既有 ckpt 是这次修正前训的**，读数照旧可比，但它们**不能 `--resume`**——旧 ckpt 存的是 1 个参数组，新优化器是 2 个，`load_state_dict` 会硬报 `different number of parameter groups`。重训必须从 `prepare` 出的数据起新的 run。
 - **余弦视野属于 run，不属于这次调用**：`horizon` 在第一个 ckpt 里记下，`--resume` 若按新的 `--epochs` / `--max-steps` 算出不同视野就**直接报错**，报错里给出该传的值（要么原样传回，要么从 ckpt 起一个 fresh run）。旧 ckpt 没有该字段时退回传入值。理由是一组实测：5000 步的视野按 7000 重算，学习率从 `2.0e-5` 跳回 `5.4e-5`，留出困惑度 **6.34 → 8.92**。DPO 同理，视野由 `--epochs × 每 epoch 步数` 或 `--max-steps` 决定——这是同一 `beta` 下不同 `epochs` 结果差很多的原因。
 
 **SFT 的 LoRA 路径（已落地；对照实验待云端）**
@@ -80,6 +81,10 @@ Python 3.12.13，共享 venv。`torch`（fp32；设备按 CUDA → MPS → CPU �
 - **未运行**：上面那组 5000 步对照。`artifacts/data` 本机缺失（`artifacts/` 被 `.gitignore` 忽略），且未认证的 HF 下载在 256 MB 处卡死。跑之前先确认 `prepare` 重建出的 tokenizer hash 与 `checkpoints/pretrain/ckpt.pt` 一致，否则 `load_ckpt` 硬报错。
 
 **`synth-pref`（数据流水线一环）**：**追加式、默认续跑**——已在输出里的 prompt 跳过，中断重跑不重复计费；**重跑会把所有历史失败 prompt 再试一遍**（resume 只跳过已成功的），而拒答在 `temperature 0.8` 下高度可复现、重试基本不转正，所以拒答越攒越多、扩量轮的调用量高于新增 prompt 数。**它是流水线里唯一不可位级复现的一步**（调 API，无 seed 无缓存）。
+
+**chosen 侧句式收窄（实测，已改 prompt）**：风格纲要被逐字塞进 chosen 的 system prompt，纲要里的例句也被模型照抄——822 对里 **421 对（51%）含有至少一段 8 字逐字来自纲要**，最常见的 12 字开头「我用最直白、最不绕弯、最」出现 **132 次**，**28.3% 的对与至少 10 对共享同一个开头**。这正是 DPO 跨题 4-gram 多样性掉到 0.572 的来源。`chosen_system` 因此加了一条 `_NO_COPY`：例句只是示范、不必照抄、每条换一种开场、不要每次从「宝子」起头。
+
+**这条改动对既有 822 对无效**——`resume=True` 会跳过已完成的 prompt。要让新 prompt 生效必须**写到新路径**（如 `--out artifacts/prefs/prefs-v2.jsonl`），旧文件保留作对照；`resume=False` 重试全部会付两遍钱，不推荐。
 
 **推理与查看（已落地）**
 

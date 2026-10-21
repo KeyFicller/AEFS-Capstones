@@ -52,6 +52,9 @@ colpali-engine==0.3.18
 torch==2.13.0+cu126 ; sys_platform == "win32"
 torch==2.13.0 ; sys_platform != "win32"
 transformers==5.18.0
+# BPE merges 随版本变，tiny-llm-pipeline 的 prepare 产物（tokenizer / bin / 切分）
+# 位级可复现性全靠它钉住；transformers 只给区间，新机器会漂到别的 0.23.x。
+tokenizers==0.23.2
 # 页面渲染
 pymupdf==1.28.2
 pillow>=12

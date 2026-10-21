@@ -8,12 +8,14 @@ import torch
 
 from tiny_llm_pipeline.config import DEFAULT_MODEL, DEFAULT_TRAIN
 from tiny_llm_pipeline.data import prepare_pretrain
+from tiny_llm_pipeline.lora import LoRAConfig, inject_lora
 from tiny_llm_pipeline.model import TinyLM, load_ckpt
 from tiny_llm_pipeline.train import pretrain as pretrain_mod
 from tiny_llm_pipeline.train.pretrain import (
     _boundary_targets,
     _log_val_samples,
     _on_sigint,
+    _optimizer,
     _sample_span,
     train_pretrain,
 )
@@ -145,6 +147,35 @@ def test_resume_matches_uninterrupted_run(
     part_weights = load_ckpt(part / "ckpt.pt")["model"].state_dict()
     for name, tensor in full_weights.items():
         assert torch.equal(tensor, part_weights[name]), name
+
+
+def test_optimizer_leaves_scale_parameters_undecayed() -> None:
+    """Decay belongs on the matrices, not on a gain that starts at 1.0."""
+    model = TinyLM(DEFAULT_MODEL)
+    opt = _optimizer(model, DEFAULT_TRAIN)
+    keys = {}
+    for group in opt.param_groups:
+        for param in group["params"]:
+            keys[id(param)] = group["weight_decay"]
+    named = dict(model.named_parameters())
+    assert keys[id(named["blocks.0.norm1.weight"])] == 0.0
+    assert keys[id(named["norm_f.weight"])] == 0.0
+    assert keys[id(named["tok_emb.weight"])] == 0.0
+    assert keys[id(named["blocks.0.attn.q_proj.weight"])] == DEFAULT_TRAIN.weight_decay
+    assert keys[id(named["blocks.0.mlp.w_down.weight"])] == DEFAULT_TRAIN.weight_decay
+    assert len(keys) == sum(1 for param in model.parameters() if param.requires_grad)
+
+
+def test_optimizer_tolerates_an_empty_group(tok) -> None:
+    """LoRA trains 2-D adapters only, so the undecayed group stays empty."""
+    model = TinyLM(DEFAULT_MODEL)
+    inject_lora(model, LoRAConfig(rank=4, alpha=8))
+    opt = _optimizer(model, DEFAULT_TRAIN)
+    counts = sorted(len(group["params"]) for group in opt.param_groups)
+    assert counts[0] == 0 and counts[1] > 0
+    loss = model(torch.randint(0, 64, (1, 8)), targets=torch.randint(0, 64, (1, 8)))[1]
+    loss.backward()
+    opt.step()
 
 
 def test_resume_old_ckpt_keeps_the_data_cursor(

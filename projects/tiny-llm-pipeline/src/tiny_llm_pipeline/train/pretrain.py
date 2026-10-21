@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from torch import nn
+from torch import Tensor, nn
 
 from tiny_llm_pipeline.config import DEFAULT_MODEL, DEFAULT_TRAIN, TrainConfig, lr_at
 from tiny_llm_pipeline.data import PackedDataset
@@ -386,10 +386,34 @@ def _load_or_init(
 
 
 def _optimizer(model: TinyLM, train_cfg: TrainConfig) -> torch.optim.Optimizer:
+    """AdamW that leaves the scale parameters undecayed.
+
+    Weight decay is an L2 pull toward zero, which is right for an output matrix
+    and wrong for anything whose initialized value is a scale rather than a
+    direction: decaying an RMSNorm gain drags it off 1.0, and the tied embedding
+    is the matrix every logit depends on. Llama's own recipes leave both alone.
+    The delivered pretrain run made the cost visible — wd=0.1 over 34500 steps
+    multiplies an undefended parameter by 0.15, and 89% of its norm gains ended
+    below 0.9 (min 0.053) against an init of exactly 1.0.
+
+    The model is bias-free, so `dim() >= 2` already means "a matrix". Two groups
+    rather than one: the per-step `lr` write walks `param_groups`, so both get it.
+    """
+    decay: list[Tensor] = []
+    no_decay: list[Tensor] = []
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        if param.dim() >= 2 and name != "tok_emb.weight":
+            decay.append(param)
+        else:
+            no_decay.append(param)
     return torch.optim.AdamW(
-        [p for p in model.parameters() if p.requires_grad],
+        [
+            {"params": decay, "weight_decay": train_cfg.weight_decay},
+            {"params": no_decay, "weight_decay": 0.0},
+        ],
         lr=train_cfg.lr,
-        weight_decay=train_cfg.weight_decay,
         betas=train_cfg.betas,
     )
 
