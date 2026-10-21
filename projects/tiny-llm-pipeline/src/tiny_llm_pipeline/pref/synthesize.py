@@ -6,7 +6,9 @@ preamble is capped at 3, reduplication at 2. Output is append-only, so a re-run
 skips finished prompts and the API is paid for once.
 """
 
+import hashlib
 import json
+import re
 import shutil
 import time
 from datetime import UTC, datetime
@@ -34,6 +36,32 @@ _NO_COPY = (
     "不要每条都用同一句，也不要每次都从「宝子」起头。"
 )
 
+# A model told to "vary the opening" with no alternative given falls back to
+# the outline's own canonical preamble: 132 of the first 822 replies opened
+# with it, and the cross-prompt 4-gram diversity of DPO's answers fell to 0.572
+# from SFT's 0.862 as a result. Naming one angle per prompt is the alternative
+# `_NO_COPY` cannot supply.
+_OPENERS = (
+    "「最…」排比前摇：先声明自己要用多直接的方式回答",
+    "夸张共情开场：先接住用户的情绪，再谈内容",
+    "先认同：先说用户说得对，再补上自己的看法",
+    "拟人化副语言开场：用迟疑、停顿或语气词起头",
+    "过度热情开场：连发短感叹句",
+    "陪伴与在场感开场：强调你在这儿稳稳陪着对方",
+    "亲密称呼开场：用「宝子 / 宝宝 / 亲爱的」起头",
+    "不要开场白：第一句直接给答案，语气词放在句中",
+)
+
+
+def _opener(prompt: str) -> str:
+    """One opening angle per prompt, keyed by the prompt text itself.
+
+    Stable across appends and shards, so a resumed run keeps the same rotation
+    and two shards never give the same prompt different openers.
+    """
+    digest = hashlib.sha256(prompt.encode("utf-8")).digest()
+    return _OPENERS[int.from_bytes(digest[:4], "big") % len(_OPENERS)]
+
 # The prompt is the only place the two caps are stated: the 最… preamble and the
 # reduplication whitelist are both enumerable repetition, so capping them here
 # is what keeps `chosen` from degenerating into a chant. The scorer may lag.
@@ -47,19 +75,29 @@ def _budget(max_len: int) -> str:
     )
 
 
-def chosen_system(guide: str, max_len: int = DEFAULT_MODEL.max_seq_len) -> str:
-    """The style guide verbatim, plus the no-copy note and the token budget."""
-    return f"{CHOSEN_SYS}\n\n{guide.strip()}\n\n{_NO_COPY}\n\n{_budget(max_len)}"
+def chosen_system(guide: str, max_len: int = DEFAULT_MODEL.max_seq_len, opener: str | None = None) -> str:
+    """The style guide verbatim, plus the no-copy note, an opening angle, and the budget."""
+    parts = [CHOSEN_SYS, guide.strip(), _NO_COPY]
+    if opener is not None:
+        parts.append(f"这次只用这一种开场方向：{opener}。其它开场方向这次都不要用。")
+    parts.append(_budget(max_len))
+    return "\n\n".join(parts)
 
 
-REFUSALS = ("无法", "抱歉", "不能")
+# A refusal names its own inability at the very start. Matching these words
+# anywhere in the reply drops valid pairs: 无法 / 不能 / 抱歉 are ordinary
+# Chinese, and the rerun of the 168 dropped prompts showed 仅凭这一句话无法判断
+# — a normal answer — being thrown away for a 无法 inside the sentence.
+_APOLOGY = ("抱歉", "对不起", "很遗憾", "恕难", "不便")
+_UNABLE = re.compile(r"^(目前|暂时|现在|我|本豆|这里)?\s*(无法|不能|不便|不会)")
 DEFAULT_MODEL_ID = "deepseek-v4-flash"
 _MAX_TRIES = 5
 
 
 def is_rejected(text: str) -> bool:
-    """True when the reply looks like a refusal, so the pair must be dropped."""
-    return any(marker in text for marker in REFUSALS)
+    """True when the reply opens as a refusal, so the pair must be dropped."""
+    head = text.lstrip()
+    return head.startswith(_APOLOGY) or bool(_UNABLE.match(head))
 
 
 def synth_one(prompt: str, llm, chosen_sys: str = CHOSEN_SYS) -> tuple[str, str]:
@@ -106,7 +144,6 @@ def synth_prefs(
     dest.parent.mkdir(parents=True, exist_ok=True)
     skipped = _skipped_path(dest)
     done = _existing_prompts(dest) | _existing_prompts(skipped) if resume else set()
-    chosen_sys = chosen_system(guide, max_len) if guide else CHOSEN_SYS
     client = llm if llm is not None else _client(model)
     dropped = 0
     over_limit = 0
@@ -114,10 +151,14 @@ def synth_prefs(
     for prompt in prompts[:n]:
         if prompt in done:
             continue
+        chosen_sys = (
+            chosen_system(guide, max_len, _opener(prompt)) if guide else CHOSEN_SYS
+        )
         chosen, rejected = synth_one(prompt, client, chosen_sys)
-        if _drop(chosen, rejected):
+        reason = _drop(chosen, rejected)
+        if reason:
             dropped += 1
-            _append(skipped, _skip_record(prompt, "rejected", model))
+            _append(skipped, _skip_record(prompt, reason, model))
             rprint(f"[yellow]dropped[/yellow] {dropped} total: {prompt[:40]}")
             continue
         if not _fits(prompt, chosen, rejected, tok, max_len):
@@ -163,10 +204,22 @@ def _chat_len(prompt: str, reply: str, tok: Tok) -> int:
     return len(encode_chat(messages, tok)[0])
 
 
-def _drop(chosen: str, rejected: str) -> bool:
-    if not chosen or not rejected or chosen == rejected:
-        return True
-    return is_rejected(chosen) or is_rejected(rejected)
+def _drop(chosen: str, rejected: str) -> str | None:
+    """Why this pair is unusable, or None when it can be kept.
+
+    The reason names the side: a refusal on `chosen` means the style prompt
+    itself failed, on `rejected` it usually means the prompt asked about text
+    that was in an earlier turn. One reason for both sides hid that split.
+    """
+    if not chosen or not rejected:
+        return "empty"
+    if chosen == rejected:
+        return "identical"
+    if is_rejected(chosen):
+        return "refusal:chosen"
+    if is_rejected(rejected):
+        return "refusal:rejected"
+    return None
 
 
 def _invoke(llm, system: str, prompt: str, *, answer: str | None = None) -> str:
@@ -314,4 +367,8 @@ def _append(path: Path, record: dict[str, str]) -> None:
 def _client(model: str):
     from langchain_deepseek import ChatDeepSeek
 
-    return ChatDeepSeek(model=model, temperature=0.8)
+    # A request timeout is what turns a hung socket into an exception `_invoke`
+    # can retry. Without it two of six shards sat for 12 minutes on one call
+    # while their files stopped growing. `max_retries=0` keeps the retry policy
+    # in `_invoke`, which classifies transient failures itself.
+    return ChatDeepSeek(model=model, temperature=0.8, timeout=120, max_retries=0)

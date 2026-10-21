@@ -1,8 +1,10 @@
+import hashlib
 import json
 import shutil
 import sys
 from pathlib import Path
 
+import pytest
 import torch
 
 from tiny_llm_pipeline.cli import _utf8_stdio, app
@@ -59,6 +61,38 @@ def test_prepare_writes_the_data_pipeline(tmp_path, monkeypatch, runner, tiny_pr
     assert len(rows["sft_train.jsonl"]) + len(rows["sft_holdout.jsonl"]) == 12
     prompts = [row["prompt"] for row in rows["dpo_prompts.jsonl"]]
     assert len(prompts) == len(set(prompts))
+
+
+def test_prepare_reuses_the_tokenizer_that_is_already_there(
+    tmp_path, monkeypatch, runner, tiny_pretrain_jsonl, tiny_sft_jsonl
+) -> None:
+    """A second `prepare` must not re-fit BPE: new ids orphan every weight.
+
+    `tokenizers` id assignment is not stable across versions even when the
+    merges match, and the SFT length filter makes the splits depend on it.
+    """
+    sources = {PRETRAIN_FILE: tiny_pretrain_jsonl, SFT_FILE: tiny_sft_jsonl}
+
+    def fake_fetch(out_dir, filename, repo="jingyaogong/minimind_dataset"):
+        dest_dir = Path(out_dir)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / filename
+        shutil.copy(sources[filename], dest)
+        return dest
+
+    monkeypatch.setattr("tiny_llm_pipeline.cli.fetch_minimind", fake_fetch)
+    out = tmp_path / "data"
+    args = ["prepare", "--out", str(out), "--max-tokens", "4096", "--sample-mb", "1"]
+    assert runner.invoke(app, args).exit_code == 0
+    before = hashlib.sha256((out / "tokenizer.json").read_bytes()).hexdigest()
+
+    monkeypatch.setattr(
+        "tiny_llm_pipeline.cli.train_tokenizer",
+        lambda *a, **k: pytest.fail("re-fit the tokenizer on a second run"),
+    )
+    result = runner.invoke(app, ["prepare", "--out", str(out), "--max-tokens", "4096", "--sample-mb", "1"])
+    assert result.exit_code == 0, result.output
+    assert hashlib.sha256((out / "tokenizer.json").read_bytes()).hexdigest() == before
 
 
 def test_synth_pref_help(runner) -> None:

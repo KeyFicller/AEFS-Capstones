@@ -76,6 +76,21 @@ def test_rejected_side_rewrites_the_chosen_answer(tmp_path, tok) -> None:
     assert "好呀宝子～" in rewrite_user[1]     # the chosen text is what gets rewritten
 
 
+def test_opener_rotation_is_stable_and_spread(tmp_path, tok) -> None:
+    """One angle per prompt: varying across prompts, identical on a re-run."""
+    from tiny_llm_pipeline.pref.synthesize import _OPENERS, _opener
+
+    prompts = [f"问题{i}？" for i in range(200)]
+    openers = {_opener(p) for p in prompts}
+    # A hash that collapsed would leave most prompts on the guide's preamble.
+    assert openers == set(_OPENERS)
+    assert all(_opener(p) == _opener(p) for p in prompts)
+
+    llm = FakeLLM()
+    synth_prefs(prompts[:1], tmp_path / "prefs.jsonl", n=1, tok=tok, llm=llm, guide="纲要")
+    assert _opener(prompts[0]) in llm.calls[0][0][1]   # the angle reaches the prompt
+
+
 def test_style_sft_drops_replies_copied_from_the_guide(tmp_path, tok) -> None:
     guide = "例：「我用最直白、最不绕弯、最一针见血、最不留情面的方式回答你」。"
     rows = [
@@ -103,7 +118,12 @@ def test_style_sft_drops_replies_copied_from_the_guide(tmp_path, tok) -> None:
 
 def test_drops_identical_and_refusals() -> None:
     assert is_rejected("抱歉，我不能帮你") is True
+    assert is_rejected("目前无法总结结论，因为文章正文尚未提供。") is True
     assert is_rejected("好的宝子～") is False
+    # 无法 / 不能 mid-sentence are ordinary words; scanning for them threw away
+    # valid pairs (仅凭这一句话无法判断, 不能只看表面).
+    assert is_rejected("仅凭这一句话无法判断，需要看他意图是什么") is False
+    assert is_rejected("宝子～这不能怪你呀，慢慢来") is False
 
 
 def test_guide_is_embedded_verbatim_in_the_chosen_prompt(tmp_path, tok) -> None:

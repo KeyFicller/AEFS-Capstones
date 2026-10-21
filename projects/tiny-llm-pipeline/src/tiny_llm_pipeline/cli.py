@@ -49,6 +49,9 @@ def prepare_cmd(
     max_tokens: int = typer.Option(PRETRAIN_TOKENS, "--max-tokens"),
     sample_mb: int = typer.Option(200, "--sample-mb"),
     seed: int = typer.Option(42, "--seed", help="Shuffle seed for the SFT splits."),
+    retrain_tokenizer: bool = typer.Option(
+        False, "--retrain-tokenizer", help="Retrain the tokenizer even if one is present."
+    ),
 ) -> None:
     """Fetch the corpus, train the tokenizer, then write the bins and splits.
 
@@ -56,16 +59,27 @@ def prepare_cmd(
     `train.bin` / `val.bin` -> the three disjoint SFT splits, shuffled by
     `--seed` before the cut. Re-running reuses the download cache and
     overwrites the derived files.
+
+    An existing `--out/tokenizer.json` is **reused, not retrained**. BPE is
+    deterministic under a pinned `tokenizers`, but not across versions: the ids
+    can come back permuted with identical merges, which silently invalidates
+    every checkpoint trained on the old ids and shifts the SFT length filter
+    enough to reshuffle the splits (a rerun moved 817 of 822 prompts out of
+    `dpo_prompts.jsonl`). Pretrained weights and their tokenizer travel
+    together, so regenerating the tokenizer means retraining from scratch.
     """
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     if dataset != "minimind":
         raise typer.BadParameter(f"unknown dataset {dataset!r}; only 'minimind' is supported")
     raw_pretrain = fetch_minimind(out, PRETRAIN_FILE)
     raw_sft = fetch_minimind(out, SFT_FILE)
-    sample = write_tokenizer_sample(
-        raw_pretrain, out / "tokenizer_sample.txt", max_bytes=sample_mb * 1024 * 1024
-    )
-    train_tokenizer(sample, out, vocab_size=DEFAULT_MODEL.vocab_size, sample_mb=sample_mb)
+    if (out / "tokenizer.json").is_file() and not retrain_tokenizer:
+        typer.echo(f"reusing {out / 'tokenizer.json'}")
+    else:
+        sample = write_tokenizer_sample(
+            raw_pretrain, out / "tokenizer_sample.txt", max_bytes=sample_mb * 1024 * 1024
+        )
+        train_tokenizer(sample, out, vocab_size=DEFAULT_MODEL.vocab_size, sample_mb=sample_mb)
     tok = load_tokenizer(out)
     train_bin, val_bin = prepare_pretrain(raw_pretrain, out, tok, max_tokens=max_tokens)
     splits = write_sft_splits(prepare_sft(raw_sft, tok, seed=seed), out)
