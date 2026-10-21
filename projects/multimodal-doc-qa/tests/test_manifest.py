@@ -60,6 +60,25 @@ def test_fingerprint_changes_with_every_input_field() -> None:
         assert fingerprint(changed) != fingerprint(base), (section, field)
 
 
+def test_the_fingerprint_identifies_the_pages_not_only_the_settings(tmp_path: Path) -> None:
+    """Two corpora encoded by the same pipeline must not share a fingerprint.
+
+    The eval header prints this value; if it only covered the settings, a run over 48 pages
+    and a run over 86 pages would look like the same index.
+    """
+    first = _write(tmp_path / "first")
+    second = write_manifest(
+        tmp_path / "second",
+        Settings(),
+        [PdfDocument(doc_id="d")],
+        matrices={"d/p000": torch.zeros(3, 2)},
+        ocr_docs=_ocr_docs(),
+    )
+
+    assert first["fingerprint"] != second["fingerprint"]
+    assert _write(tmp_path / "again")["fingerprint"] == first["fingerprint"]
+
+
 def test_write_records_counts_and_bytes_per_page(tmp_path: Path) -> None:
     manifest = _write(tmp_path)
 

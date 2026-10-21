@@ -69,6 +69,15 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _content(page_ids: list[str], chunks: int) -> dict:
+    """The artifact half of the identity: which pages, and how many OCR chunks.
+
+    The settings alone are not an index identity -- two corpora encoded by the same
+    checkpoint would hash the same, and the eval header prints this value.
+    """
+    return {"pages": sorted(page_ids), "chunks": chunks}
+
+
 def write_manifest(
     root: Path,
     settings: Settings,
@@ -113,7 +122,9 @@ def write_manifest(
             for doc in documents
         ],
     }
-    manifest["fingerprint"] = fingerprint(shape)
+    manifest["fingerprint"] = fingerprint(
+        {**shape, "content": _content(list(matrices), manifest["counts"]["chunks"])}
+    )
     path = manifest_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
