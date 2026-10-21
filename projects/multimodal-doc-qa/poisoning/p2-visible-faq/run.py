@@ -168,7 +168,11 @@ def main() -> None:
             )
             # One directory per variant: a variant that dies mid-delete cannot poison the next.
             work = harness.prepare(
-                ARTIFACTS, ROOT / WORK_NAME / variant, poison_file, encoder, embedder
+                ARTIFACTS,
+                ROOT / WORK_NAME / variant,
+                [] if poison_file is None else [poison_file],
+                encoder,
+                embedder,
             )
             settings = base.model_copy(update={"artifacts_dir": work})
             facts = poison_facts(work, variant, checks.get(variant, {}).get("ocr_has_payload"))

@@ -227,7 +227,11 @@ def main() -> None:
             poison_file = None if variant == "clean" else fixtures.FIXTURES / fixtures.NAMES[variant]
             # One directory per variant: a variant that dies mid-delete cannot poison the next.
             work = harness.prepare(
-                ARTIFACTS, ROOT / WORK_NAME / variant, poison_file, encoder, embedder
+                ARTIFACTS,
+                ROOT / WORK_NAME / variant,
+                [] if poison_file is None else [poison_file],
+                encoder,
+                embedder,
             )
             if args.evidence != "png":
                 print(f"  evidence={args.evidence}: {text_evidence(work, args.evidence)} docs as text")

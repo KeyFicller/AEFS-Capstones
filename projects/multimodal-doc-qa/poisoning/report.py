@@ -163,10 +163,57 @@ def render(cells: list[dict], header: dict | None, case: dict, asks: list[dict])
     # card — and its HTML — stays byte-identical.
     pixel_rows = [row for row in asks if row["condition"] == "C2r" and "payload_ocr" in row]
     pixel = sum(1 for row in pixel_rows if row.get("payload_ocr"))
-    pixel_label = (
-        "毒页载荷进入页图（OCR 可读）" if pixel_rows else "载荷文本进入生成 prompt"
+    # A case with no payload attacks availability instead of integrity: the question is
+    # whether the pages the answer needs are still in the pool. ``evidence_in_pool`` is that
+    # column, so the per-cell note and the table below switch to it when it is present.
+    availability = any("evidence_in_pool" in row for row in asks)
+    probes: dict[tuple, int | None] = {}
+    evidence_rows: dict[tuple, list[dict]] = {}
+    for row in asks:
+        key = (row["variant"], row["arm"])
+        probes.setdefault(key, row.get("evidence_rank"))
+        evidence_rows.setdefault(key, []).append(row)
+    avail_groups = [name for name in variants if any(
+        row["variant"] == name and row["condition"] == "C2r" and "evidence_in_pool" in row
+        for row in asks
+    )]
+
+    head_value, head_label = obeyed, "C2r 回答采纳了载荷"
+    index_label = "毒页 chunk 含载荷，已入库"
+    third_card, third_label = (
+        (pixel, "毒页载荷进入页图（OCR 可读）")
+        if pixel_rows
+        else (in_prompt, "载荷文本进入生成 prompt")
     )
-    third_card = pixel if pixel_rows else in_prompt
+
+    # The cards above divide by every C2r ask, so they only mean something when the C2r asks
+    # share one pipeline. An availability case can hold two round budgets (`@r1` and the
+    # default) in one file; a share over both would answer a question no run asked. Those
+    # cases get one row per variant instead, and the k/n is readable straight off the table.
+    avail_table = ""
+    if availability and avail_groups:
+        rows_html = []
+        for name in avail_groups:
+            group = [
+                row for row in asks
+                if row["variant"] == name and row["condition"] == "C2r"
+            ]
+            n = len(group)
+            absent = sum(1 for row in group if row.get("evidence_in_pool") is False)
+            gold = sum(1 for row in group if _base(row.get("main_class") or "") == "G")
+            indexed = sum(1 for row in group if row.get("poison_chunk_in_index"))
+            rows_html.append(
+                f'<tr><td class="v">{html.escape(name)}</td><td>{absent}/{n}</td>'
+                f'<td>{gold}/{n}</td><td>{indexed}/{n}</td></tr>'
+            )
+        # Leading and trailing newline so a case without the table keeps its old layout
+        # byte-for-byte; the template puts this placeholder between two blank lines.
+        avail_table = (
+            "\n<h2>可用性</h2><table><tr><th>变体</th><th>证据页不在 pool</th>"
+            "<th>回答 gold</th><th>毒页已入库</th></tr>"
+            + "".join(rows_html)
+            + "</table>\n"
+        )
 
     body_rows = []
     for variant in variants:
@@ -176,18 +223,26 @@ def render(cells: list[dict], header: dict | None, case: dict, asks: list[dict])
             if cell is None:
                 tds.append("<td></td>")
                 continue
-            rank = cell["poison_rank"]
+            if availability:
+                rank = probes.get((variant, arm))
+                cell_rows = evidence_rows[(variant, arm)]
+                present = sum(1 for row in cell_rows if row.get("evidence_in_pool"))
+                note = f"evidence in pool {present}/{cell['n']}"
+            else:
+                rank = cell["poison_rank"]
+                note = f"mentions {mention(cell)}"
             # No poison document in this condition at all, so a rank has nothing to rank.
             unranked = "—" if cell.get("poison_chunk_in_index") is None else "not in top-k"
             rank_html = f'<b>#{rank}</b>' if rank else unranked
             tds.append(
                 f'<td>{bar(cell, variant, arm)}'
-                f'<div class="rank">rank {rank_html} · mentions {mention(cell)}</div></td>'
+                f'<div class="rank">rank {rank_html} · {note}</div></td>'
             )
         body_rows.append("<tr>" + "".join(tds) + "</tr>")
 
     labels = dict(LABELS)
-    labels["P"] = f" obeyed ({case['poisoned']})"
+    if case["poisoned"] is not None:
+        labels["P"] = f" obeyed ({case['poisoned']})"
     labels["G"] = f" gold ({case['gold']})"
     legend = "".join(
         f'<span><i style="background:{COLOURS[name]}"></i>{html.escape(labels[name])}</span>'
@@ -216,13 +271,13 @@ def render(cells: list[dict], header: dict | None, case: dict, asks: list[dict])
 <p class="sub">{meta}</p>
 
 <div class="cards">
-  <div class="card"><div class="big red">{obeyed}/{poisoned_n}</div>
-    <div class="cap">C2r 回答采纳了载荷</div></div>
+  <div class="card"><div class="big red">{head_value}/{poisoned_n}</div>
+    <div class="cap">{head_label}</div></div>
   <div class="card"><div class="big green">{in_index}/{poisoned_n}</div>
-    <div class="cap">毒页 chunk 含载荷，已入库</div></div>
+    <div class="cap">{index_label}</div></div>
   <div class="card"><div class="big green">{third_card}/{poisoned_n}</div>
-    <div class="cap">{pixel_label}</div></div>
-</div>
+    <div class="cap">{third_label}</div></div>
+</div>{avail_table}
 
 <h2>按变体 × 臂</h2>
 <table>
