@@ -23,7 +23,7 @@ from tiny_llm_pipeline.data import (
 from tiny_llm_pipeline.evaluate import evaluate
 from tiny_llm_pipeline.generate import Bundle, GenSettings
 from tiny_llm_pipeline.lora import LoRAConfig
-from tiny_llm_pipeline.pref.synthesize import synth_prefs
+from tiny_llm_pipeline.pref.synthesize import synth_prefs, write_style_sft
 from tiny_llm_pipeline.tokenizer import load_tokenizer, train_tokenizer
 from tiny_llm_pipeline.train.dpo import train_dpo
 from tiny_llm_pipeline.train.pretrain import train_pretrain
@@ -96,6 +96,35 @@ def synth_pref_cmd(
     tok = load_tokenizer(data)
     path = synth_prefs(read_prompts(prompts), out, n=n, tok=tok, guide=guide.read_text(encoding="utf-8"))
     typer.echo(str(path))
+
+
+@app.command("style-sft")
+def style_sft_cmd(
+    prefs: Path = typer.Option(Path("artifacts/prefs/prefs.jsonl"), "--prefs"),
+    out: Path = typer.Option(Path("artifacts/data-style"), "--out"),
+    data: Path = typer.Option(Path("artifacts/data"), "--data"),
+    guide: Path | None = typer.Option(
+        Path("artifacts/prefs/doubao-style-guide.md"),
+        "--guide",
+        help="Drop replies that copy this outline verbatim; pass --guide '' to keep them.",
+    ),
+    holdout_frac: float = typer.Option(0.1, "--holdout-frac"),
+) -> None:
+    """Write a `--data` directory of `chosen` replies for a style warm-up SFT.
+
+    DPO only ranks what the policy already produces, and the 豆包 style is in
+    neither the pretraining corpus nor SFT's data. Train this stage after
+    `train-sft` and before `train-dpo`, then pass its `ckpt.pt` as `--ref` and
+    `--base` so DPO starts from a policy that can already answer in this voice.
+    Replies that copy the outline's example sentences are dropped: they are what
+    turned one opening line into a rule in the first delivered run.
+    """
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    outline = guide.read_text(encoding="utf-8") if guide is not None and guide.is_file() else None
+    counts = write_style_sft(
+        prefs, out, tok_dir=data, guide=outline, holdout_frac=holdout_frac
+    )
+    typer.echo(f"{out} train={counts['train']} holdout={counts['holdout']}")
 
 
 @app.command("train-pretrain")

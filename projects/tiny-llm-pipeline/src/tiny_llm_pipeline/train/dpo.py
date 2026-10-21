@@ -87,18 +87,26 @@ def _holdout_readings(
     beta: float,
     device: torch.device,
     batch_size: int = 16,
-) -> tuple[float, float, float] | None:
-    """`(gap, margin, win_rate)` on held-out pairs, or None when the split is empty.
+) -> dict[str, float] | None:
+    """Held-out readings, or None when the split is empty.
 
-    `gap` is the raw `logπ_chosen − logπ_rejected` reported against the SFT
-    baseline, `margin` is the β-scaled DPO objective, and `win_rate` is the
-    share of pairs with `gap > 0`. All three come from one forward pass.
+    `holdout_gap` is the sum-form `logπ_chosen − logπ_rejected` — the quantity
+    the loss optimizes, and the one the SFT baseline is quoted against.
+    `holdout_win_rate` is the share of pairs with `gap > 0`.
+
+    `holdout_win_rate_norm` scores the same pairs per completion token. A sum
+    favours the shorter side, so when the two rates disagree the split's length
+    imbalance is doing the work: on the first delivered run the per-pair margin
+    correlated with the token-count difference at -0.97, and the normalized win
+    rate at step 0 was 10.8% against the sum rate's 22.4%. Reporting both is what
+    keeps "DPO got better" from meaning "DPO got shorter".
     """
     if not rows:
         return None
     was_training = policy.training
     policy.eval()
     gaps: list[Tensor] = []
+    gaps_norm: list[Tensor] = []
     margins: list[Tensor] = []
     try:
         with torch.no_grad():
@@ -113,12 +121,20 @@ def _holdout_readings(
                 rw = seq_logprob(ref, chosen, chosen_mask)
                 rl = seq_logprob(ref, rejected, rejected_mask)
                 gaps.append(pw - pl)
+                gaps_norm.append(pw / chosen_mask.sum(-1) - pl / rejected_mask.sum(-1))
                 margins.append(dpo_loss(pw, pl, rw, rl, beta)[1])
     finally:
         policy.train(was_training)
     gap = torch.cat(gaps)
+    gap_norm = torch.cat(gaps_norm)
     margin = torch.cat(margins)
-    return float(gap.mean()), float(margin.mean()), float((gap > 0).float().mean())
+    return {
+        "holdout_gap": float(gap.mean()),
+        "holdout_margin": float(margin.mean()),
+        "holdout_win_rate": float((gap > 0).float().mean()),
+        "holdout_gap_norm": float(gap_norm.mean()),
+        "holdout_win_rate_norm": float((gap_norm > 0).float().mean()),
+    }
 
 
 def train_dpo(
@@ -214,7 +230,11 @@ def train_dpo(
     holdout_start = _holdout_readings(policy, ref, holdout, tok, max_seq_len, beta, device)
     if holdout_start is not None:
         logger.info(
-            "dpo holdout_start gap=%.3f margin=%.3f win_rate=%.3f", *holdout_start
+            "dpo holdout_start gap=%.3f margin=%.3f win_rate=%.3f win_rate_norm=%.3f",
+            holdout_start["holdout_gap"],
+            holdout_start["holdout_margin"],
+            holdout_start["holdout_win_rate"],
+            holdout_start["holdout_win_rate_norm"],
         )
 
     def _save() -> None:
@@ -290,11 +310,7 @@ def train_dpo(
                     policy, ref, holdout, tok, max_seq_len, beta, device
                 )
                 if readings is not None:
-                    (
-                        record["holdout_gap"],
-                        record["holdout_margin"],
-                        record["holdout_win_rate"],
-                    ) = readings
+                    record.update(readings)
                 _save()
             _append_log(log_path, record)
             logger.info(

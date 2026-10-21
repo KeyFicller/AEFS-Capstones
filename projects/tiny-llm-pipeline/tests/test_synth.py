@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from tiny_llm_pipeline.config import DEFAULT_MODEL
-from tiny_llm_pipeline.pref.synthesize import is_rejected, synth_prefs
+from tiny_llm_pipeline.pref.synthesize import is_rejected, synth_prefs, write_style_sft
 
 
 class FakeLLM:
@@ -64,6 +64,41 @@ def test_dropped_prompts_are_not_retried(tmp_path, tok) -> None:
     synth_prefs(["a", "b"], p, n=2, tok=tok, llm=llm)
     assert len(llm.calls) == 4  # only "b" is new
     assert not p.exists()       # nothing usable was produced
+
+
+def test_rejected_side_rewrites_the_chosen_answer(tmp_path, tok) -> None:
+    """The pair must differ in voice only; an independent answer differs in content too."""
+    llm = FakeLLM()
+    synth_prefs(["a"], tmp_path / "prefs.jsonl", n=1, tok=tok, llm=llm)
+    rewrite_system, rewrite_user = llm.calls[1]
+    assert "改写" in rewrite_system[1]
+    assert "长度与原回答相当" in rewrite_system[1]
+    assert "好呀宝子～" in rewrite_user[1]     # the chosen text is what gets rewritten
+
+
+def test_style_sft_drops_replies_copied_from_the_guide(tmp_path, tok) -> None:
+    guide = "例：「我用最直白、最不绕弯、最一针见血、最不留情面的方式回答你」。"
+    rows = [
+        {"prompt": "题1", "chosen": "宝子～今天先聊到这儿呀，早点休息哦～", "rejected": "今天到此为止。"},
+        {"prompt": "题2", "chosen": "我用最直白、最不绕弯、最一针见血、最不留情面的方式回答你。", "rejected": "我直接回答。"},
+        {"prompt": "题3", "chosen": "抱歉，我不能回答。", "rejected": "无法回答。"},
+    ]
+    prefs = tmp_path / "prefs.jsonl"
+    prefs.write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in rows), encoding="utf-8"
+    )
+    dest = tmp_path / "data-style"
+    counts = write_style_sft(prefs, dest, tok_dir=tok.path.parent, guide=guide, holdout_frac=0.0)
+    assert counts == {"train": 1, "holdout": 0}   # copied and refusal rows are gone
+    assert (dest / "tokenizer.json").is_file()    # so `--data` works unchanged
+    kept = json.loads((dest / "sft_train.jsonl").read_text(encoding="utf-8").strip())
+    assert kept["conversations"][1]["content"].startswith("宝子～")
+
+    with_guide_off = write_style_sft(
+        prefs, tmp_path / "no-guide", tok_dir=tok.path.parent, guide=None
+    )
+    # Without the guide the copied reply is kept; the refusal is dropped either way.
+    assert with_guide_off["train"] + with_guide_off["holdout"] == 2
 
 
 def test_drops_identical_and_refusals() -> None:

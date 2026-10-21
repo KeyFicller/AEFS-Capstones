@@ -7,6 +7,7 @@ skips finished prompts and the API is paid for once.
 """
 
 import json
+import shutil
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,7 +18,10 @@ from tiny_llm_pipeline.config import DEFAULT_MODEL
 from tiny_llm_pipeline.tokenizer import Tok, encode_chat
 
 CHOSEN_SYS = "用夸张的『豆包体』回答，严格照着下面的风格纲要来。"
-REJECTED_SYS = "用中性、专业、简洁的助理口吻回答。"
+REJECTED_SYS = (
+    "把用户给出的回答改写成中性、专业、简洁的助理口吻。"
+    "保留全部事实、结论和结构，不增删信息，长度与原回答相当。只输出改写后的回答。"
+)
 
 # Measured on the paid 822 pairs: 51% of `chosen` carried an 8-char run copied
 # verbatim from the outline, the most common 12-char opener appeared 132 times,
@@ -59,8 +63,14 @@ def is_rejected(text: str) -> bool:
 
 
 def synth_one(prompt: str, llm, chosen_sys: str = CHOSEN_SYS) -> tuple[str, str]:
-    """Return (chosen, rejected) for one prompt."""
-    return _invoke(llm, chosen_sys, prompt), _invoke(llm, REJECTED_SYS, prompt)
+    """Return `(chosen, rejected)`: one answer, two voices.
+
+    The rejected side is a neutral rewrite of `chosen`, so the two sides carry
+    the same content and roughly the same length and only the style differs.
+    """
+    chosen = _invoke(llm, chosen_sys, prompt)
+    rejected = _invoke(llm, REJECTED_SYS, prompt, answer=chosen)
+    return chosen, rejected
 
 
 def synth_prefs(
@@ -100,6 +110,7 @@ def synth_prefs(
     client = llm if llm is not None else _client(model)
     dropped = 0
     over_limit = 0
+    gaps: list[int] = []
     for prompt in prompts[:n]:
         if prompt in done:
             continue
@@ -124,11 +135,18 @@ def synth_prefs(
                 "created_at": _now(),
             },
         )
+        gaps.append(_chat_len(prompt, chosen, tok) - _chat_len(prompt, rejected, tok))
         done.add(prompt)
         if sleep:
             time.sleep(sleep)
     if over_limit:
         rprint(f"[yellow]{over_limit} pairs dropped for exceeding {max_len} tokens[/yellow]")
+    if gaps:
+        # The rejected side is a rewrite, so this should sit near zero. A wide
+        # spread means the two sides differ in length as well as style, which is
+        # what makes DPO learn "shorter" instead of "on-brand".
+        median = sorted(gaps)[len(gaps) // 2]
+        rprint(f"[cyan]token-length gap chosen−rejected: median {median:+d}, max |gap| {max(map(abs, gaps))}[/cyan]")
     return dest
 
 
@@ -151,13 +169,15 @@ def _drop(chosen: str, rejected: str) -> bool:
     return is_rejected(chosen) or is_rejected(rejected)
 
 
-def _invoke(llm, system: str, prompt: str) -> str:
+def _invoke(llm, system: str, prompt: str, *, answer: str | None = None) -> str:
     """Call the model, retrying only transient failures.
 
     Messages are `(role, content)` tuples, not `SystemMessage`, so tests can
-    read the system prompt as `msgs[0][1]`.
+    read the system prompt as `msgs[0][1]`. `answer` carries the reply a
+    rewrite is meant to preserve; without it the call answers `prompt` itself.
     """
-    messages = [("system", system), ("user", prompt)]
+    user = prompt if answer is None else f"问题：{prompt}\n\n要改写的回答：{answer}"
+    messages = [("system", system), ("user", user)]
     delay = 1.0
     for attempt in range(_MAX_TRIES):
         try:
@@ -195,6 +215,74 @@ def _existing_prompts(path: Path) -> set[str]:
         except (json.JSONDecodeError, KeyError):
             continue
     return prompts
+
+
+def copies_guide(text: str, guide: str, span: int = 8) -> bool:
+    """True when `text` carries a verbatim run from the style outline.
+
+    The outline is pasted into the prompt, so its example sentences come back
+    as replies unless told otherwise: 51% of the paid 822 pairs did, and the
+    most common opening appeared 132 times. DPO turned that opening into a rule.
+    """
+    window = {guide[i : i + span] for i in range(max(0, len(guide) - span + 1))}
+    return any(text[i : i + span] in window for i in range(max(0, len(text) - span + 1)))
+
+
+def write_style_sft(
+    prefs_jsonl: Path | str,
+    out_dir: Path | str,
+    *,
+    tok_dir: Path | str,
+    guide: str | None = None,
+    holdout_frac: float = 0.1,
+) -> dict[str, int]:
+    """Turn `chosen` replies into a `--data` directory `train-sft` can consume.
+
+    DPO can only rank what the policy already produces. `chosen` is off
+    distribution — never in the pretraining corpus (the tokenizer has no merge
+    for `嘻嘻`, which costs four byte-level tokens) and never in SFT's data — so
+    at step 0 only 22% of pairs prefer it, and DPO's cheapest way to satisfy
+    that gap is one fixed opening for every prompt. A short SFT pass on these
+    replies puts the style in the model first; DPO then only ranks.
+
+    Rows the outline leaked into are dropped when `guide` is given. The
+    tokenizer is copied in so the directory works as `--data` unchanged.
+    """
+    rows = _style_rows(Path(prefs_jsonl), guide)
+    if not rows:
+        raise ValueError(f"no usable chosen replies in {prefs_jsonl}")
+    dest = Path(out_dir)
+    dest.mkdir(parents=True, exist_ok=True)
+    shutil.copy(Path(tok_dir) / "tokenizer.json", dest / "tokenizer.json")
+    cut = max(1, int(len(rows) * (1 - holdout_frac)))
+    for name, part in (("sft_train.jsonl", rows[:cut]), ("sft_holdout.jsonl", rows[cut:])):
+        with (dest / name).open("w", encoding="utf-8") as handle:
+            for row in part:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return {"train": cut, "holdout": len(rows) - cut}
+
+
+def _style_rows(prefs_jsonl: Path, guide: str | None) -> list[dict]:
+    """`chosen` sides as SFT conversations, in file order."""
+    rows: list[dict] = []
+    for line in prefs_jsonl.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        pair = json.loads(line)
+        chosen = str(pair.get("chosen", "")).strip()
+        if not chosen or is_rejected(chosen):
+            continue
+        if guide is not None and copies_guide(chosen, guide):
+            continue
+        rows.append(
+            {
+                "conversations": [
+                    {"role": "user", "content": pair["prompt"]},
+                    {"role": "assistant", "content": chosen},
+                ]
+            }
+        )
+    return rows
 
 
 def _skipped_path(dest: Path) -> Path:

@@ -225,3 +225,33 @@ def test_holdout_readings_are_logged(tmp_path, tok, make_ckpt) -> None:
     record = records[0]
     assert "holdout_gap" in record and "holdout_margin" in record
     assert 0.0 <= record["holdout_win_rate"] <= 1.0
+    # The sum form favours the shorter side; the per-token form does not, and
+    # the two disagreeing is what exposed the length confound in the first run.
+    assert 0.0 <= record["holdout_win_rate_norm"] <= 1.0
+    assert "holdout_gap_norm" in record
+
+
+def test_length_normalized_readings_separate_style_from_length(
+    tmp_path, tok, make_ckpt
+) -> None:
+    """A pair whose sides differ only in length wins on sum and loses per token."""
+    from tiny_llm_pipeline.data import read_preferences
+    from tiny_llm_pipeline.model import load_ckpt
+    from tiny_llm_pipeline.train.dpo import _holdout_readings
+
+    prefs = tmp_path / "prefs.jsonl"
+    prefs.write_text(
+        json.dumps(
+            {"prompt": "问题？", "chosen": "好" * 60, "rejected": "好"},
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    rows = read_preferences(prefs)
+    model = load_ckpt(make_ckpt("sft"))["model"]
+    readings = _holdout_readings(model, model, rows, tok, 768, 0.1, torch.device("cpu"))
+    assert readings is not None
+    # Same policy on both sides, so the β-scaled margin is exactly zero.
+    assert readings["holdout_margin"] == pytest.approx(0.0, abs=1e-6)
+    assert readings["holdout_gap"] != readings["holdout_gap_norm"]
