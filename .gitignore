@@ -26,7 +26,7 @@ jobs/
 # Local OTel demo export
 projects/*/otel.jsonl
 
-# Local build output (cyber-cricket: CMake)
+# Local build output (CMake)
 projects/*/build/
 
 # VsCode 

@@ -19,7 +19,6 @@ _artifacts
 examples
 projects/terminal-coding-agent
 projects/tiny-llm-pipeline
-projects/cyber-cricket
 components/telemetry
 
 # Present on disk, mounted at run time instead.
