@@ -46,6 +46,9 @@ projects/*/artifacts/*
 # indices and rendered pages, reproducible with one ingest. Only the JSONL results
 # under `eval/` are worth keeping.
 projects/*/artifacts-ablation/*
+# The MMDocIR benchmark's index and its PDF subset (`prepare_mmdocir.py --out artifacts-mmdocir`):
+# reproducible from the Hub in one command, so only the JSONL results under `eval/` are kept.
+projects/*/artifacts-mmdocir*/*
 
 # Poisoning experiments: generated fixtures and the ~100 MB index working copy are both
 # reproducible in seconds (`--build-fixtures`, `prepare()`). The JSONL results are kept: they

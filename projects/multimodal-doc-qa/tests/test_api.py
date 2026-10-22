@@ -134,6 +134,8 @@ def test_health_names_the_arm_the_artifacts_and_the_session_count(
         "artifacts": str(tmp_path),
         "sessions": 0,
         "documents": 1,
+        "index_metadata": "missing",
+        "index_fingerprint": None,
     }
 
 

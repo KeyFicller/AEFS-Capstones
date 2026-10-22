@@ -17,6 +17,17 @@ def page_id(doc_id: str, page: int) -> str:
     return f"{doc_id}/p{page:03d}"
 
 
+def split_page_id(value: str) -> tuple[str, int]:
+    """``(doc_id, page)`` for an id built by ``page_id``.
+
+    ``rpartition`` so a doc_id that itself contains ``/p`` still splits at the last one.
+    """
+    doc_id, separator, token = value.rpartition("/p")
+    if not separator or not doc_id or not token.isdigit():
+        raise ValueError(f"malformed page id: {value!r}")
+    return doc_id, int(token)
+
+
 class BBox(BaseModel):
     """Normalized (0..1) rectangle."""
 

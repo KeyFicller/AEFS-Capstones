@@ -79,7 +79,11 @@ class BM25Retriever(BaseRetriever):
         hits = [
             Document(
                 page_content=self.corpus[index][1],
-                metadata={"page_id": self.corpus[index][0], "score": scores[index]},
+                metadata={
+                    "page_id": self.corpus[index][0],
+                    "score": scores[index],
+                    "snippet": self.corpus[index][1],
+                },
             )
             for index in order
         ]

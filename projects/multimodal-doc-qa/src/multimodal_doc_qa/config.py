@@ -54,6 +54,18 @@ def artifact_paths(root: Path) -> tuple[Path, Path, Path]:
     return root / "render", root / "multivector_index.pt", root / "ocr_index.pt"
 
 
+# The values the manifest fingerprints. The renderer and the chunker must default to
+# these exact names, or the manifest would describe a pipeline that never ran.
+RENDER_DPI = 180
+RENDER_LONG_EDGE = 2048
+CHUNK_MAX_CHARS = 400
+
+
+def manifest_path(root: Path) -> Path:
+    """What built the artifacts under ``root``. Written by ingest, checked at load."""
+    return root / "manifest.json"
+
+
 def documents_path(root: Path) -> Path:
     """Ingest catalog. Each entry is an image, a rasterized PDF, or a text file."""
     return root / "documents.json"

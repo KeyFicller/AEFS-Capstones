@@ -9,7 +9,7 @@ from pathlib import Path
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, trim_messages
 
 from multimodal_doc_qa.config import Settings
-from multimodal_doc_qa.schemas import Answer, Document, PdfDocument
+from multimodal_doc_qa.schemas import Answer, Document, PdfDocument, split_page_id
 
 # Current question plus four earlier turns (human, assistant).
 _HISTORY_MESSAGES = 9
@@ -53,14 +53,11 @@ def build_page_blocks(
     catalog = documents or {}
     blocks: list[dict] = []
     for pid in page_ids:
-        doc_id, _, page_token = pid.partition("/p")
-        # partition splits on the first "/p"; a malformed id would otherwise crash in int().
-        if not page_token.isdigit():
-            raise ValueError(f"malformed page id: {pid!r}")
+        doc_id, page = split_page_id(pid)
         # Build the fallback only on a miss: dict.get would eagerly validate it every loop.
         doc = catalog.get(doc_id) or PdfDocument(doc_id=doc_id)
         blocks.append({"type": "text", "text": f"page {pid}"})
-        blocks.append(doc.evidence_block(int(page_token), render_dir))
+        blocks.append(doc.evidence_block(page, render_dir))
     return blocks
 
 

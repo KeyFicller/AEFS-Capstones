@@ -79,6 +79,7 @@ def test_retriever_exposes_chunk_text_and_score() -> None:
     assert docs[0].page_content == "the margin rose"
     assert docs[0].metadata["page_id"] == "a/p000"
     assert docs[0].metadata["score"] > 0
+    assert docs[0].metadata["snippet"] == "the margin rose"
 
 
 def test_retriever_returns_langchain_documents() -> None:

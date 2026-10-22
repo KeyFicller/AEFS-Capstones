@@ -7,7 +7,9 @@ from multimodal_doc_qa.schemas import (
     Question,
     TextDocument,
     load_documents,
+    page_id,
     save_documents,
+    split_page_id,
 )
 from pydantic import ValidationError
 
@@ -79,3 +81,13 @@ def test_a_catalog_with_a_duplicate_doc_id_is_rejected(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="duplicate doc_id"):
         load_documents(path)
+
+
+def test_split_page_id_round_trips() -> None:
+    assert split_page_id(page_id("doc000", 7)) == ("doc000", 7)
+
+
+@pytest.mark.parametrize("value", ["doc000", "doc000/p", "/p001", "doc000/p00x", ""])
+def test_split_page_id_rejects_malformed(value: str) -> None:
+    with pytest.raises(ValueError):
+        split_page_id(value)

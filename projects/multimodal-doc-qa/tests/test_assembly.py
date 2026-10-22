@@ -110,3 +110,33 @@ def test_the_keyword_arm_wraps_bm25_over_the_ocr_index() -> None:
 def test_only_the_keyword_arm_needs_an_llm() -> None:
     """This is the one arm whose retrieval path builds a chat model."""
     assert {name for name, arm in ARMS.items() if arm.needs_llm} == {"lexical-kw"}
+
+
+def test_require_index_rejects_a_manifest_from_another_encoder(tmp_path: Path) -> None:
+    import torch
+    from multimodal_doc_qa.manifest import ManifestError, write_manifest
+    from multimodal_doc_qa.schemas import PdfDocument
+
+    (tmp_path / "multivector_index.pt").write_bytes(b"")
+    write_manifest(
+        tmp_path,
+        Settings(),
+        [PdfDocument(doc_id="d")],
+        matrices={"d/p000": torch.zeros(2, 2)},
+        ocr_docs={},
+    )
+
+    with pytest.raises(ManifestError):
+        assembly.require_index(
+            "multivector", Settings(artifacts_dir=tmp_path, embedder_model="other")
+        )
+
+
+def test_require_index_accepts_missing_manifest_with_a_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    (tmp_path / "multivector_index.pt").write_bytes(b"")
+
+    assembly.require_index("multivector", Settings(artifacts_dir=tmp_path))
+
+    assert "manifest" in caplog.text  # missing is a warning, not a refusal

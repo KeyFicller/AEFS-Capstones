@@ -1042,3 +1042,57 @@ def test_eval_lexical_kw_is_the_one_arm_that_builds_a_chat_model(
     assert header["extractor_model"] == "deepseek:deepseek-flash"
     # Retrieval-only still builds no answerer: the extractor is the only model here.
     assert header["answerer_model"] is None
+
+
+def test_ingest_writes_a_manifest_that_matches_what_it_saved(corpus: Path, artifacts: Path) -> None:
+    _invoke("ingest", "--corpus", str(corpus))
+
+    manifest = json.loads((artifacts / "manifest.json").read_text())
+    assert manifest["counts"]["pages"] > 0
+    assert manifest["counts"]["documents"] == 1
+    assert manifest["embedder"]["dim"] == 2  # the stub encodes two dimensions
+    assert manifest["storage"]["bytes_per_page"] > 0
+    assert manifest["fingerprint"].startswith("sha256:")
+
+
+def test_a_second_ingest_refreshes_the_manifest_without_touching_the_index(
+    corpus: Path, artifacts: Path
+) -> None:
+    """The migration path: existing artifacts get a manifest, the 40 MB file is not rewritten."""
+    _invoke("ingest", "--corpus", str(corpus))
+    index = artifacts / "multivector_index.pt"
+    before = index.stat().st_mtime_ns
+
+    result = _invoke("ingest", "--corpus", str(corpus), "--append")
+
+    assert result.exit_code == 0, result.stdout
+    assert index.stat().st_mtime_ns == before
+    assert (artifacts / "manifest.json").is_file()
+
+
+def test_append_refuses_a_manifest_from_another_encoder(corpus: Path, artifacts: Path) -> None:
+    _invoke("ingest", "--corpus", str(corpus))
+    path = artifacts / "manifest.json"
+    manifest = json.loads(path.read_text())
+    manifest["embedder"]["model"] = "some/other-encoder"
+    path.write_text(json.dumps(manifest))
+
+    result = _invoke("ingest", "--corpus", str(corpus), "--append")
+
+    assert result.exit_code == 1
+    assert "some/other-encoder" in result.stdout
+
+
+def test_removing_the_last_document_removes_the_manifest(corpus: Path, artifacts: Path) -> None:
+    import shutil
+
+    from multimodal_doc_qa.cli import remove_document
+
+    # Deletion needs the source inside <artifacts>/corpus; ingest from elsewhere cannot be undone.
+    shutil.copytree(corpus, artifacts / "corpus")
+    _invoke("ingest", "--corpus", str(artifacts / "corpus"))
+    assert (artifacts / "manifest.json").is_file()
+
+    remove_document("doc000")
+
+    assert not (artifacts / "manifest.json").exists()

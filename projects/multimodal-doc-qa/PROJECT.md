@@ -2,7 +2,7 @@
 
 - **项目**：multimodal-doc-qa（Agentic RAG）/ 所属 Phase：Phase19 / Capstone 04
 - **spec**：[Capstone 04 — Multimodal Document QA](https://aieng-zh.cn/lessons/19-capstone-projects/04-multimodal-document-qa/)
-- **状态**：`maxsim`（多向量后期交互）与 `ocr` 两条主线都已跑通——**同一张 agentic 图，只换 retriever**；`--mode` 现有十条检索臂；CLI 入口齐备（`ingest` / `ask` / `eval` / REPL）；单测 `309 passed`。`eval` 默认只跑检索器（`recall_at_k` / `nDCG@k`，不调 chat 模型），`--agentic` 才跑图并出 `pool_recall`（agent 循环累积池）与答案侧指标；gold 取自公开数据集 MMLongBench-Doc 的一个小子集，由 `python -m multimodal_doc_qa.eval.prepare_gold` 转换为 `questions.json`。**未实现**：答案准确率（`answer_containment`）、bytes/page、index p95。**已评测（检索臂消融）**：九条臂各跑纯检索 19 题（`eval/ablation-<arm>-19q.jsonl`，汇总 `eval/ablation-9arms-19q.html`）——`maxsim` 最高（recall@5 0.8947 / nDCG@5 0.7359），且已是这九条臂的上限（它只漏 2 题，此 2 题九臂全漏）；`lexical` 0.7368 / `abstract` 0.7105 / `pool` 0.6579 / `ocr` 0.6053；四条 `hybrid-*` 的 RRF 只救弱臂（`ocr` +0.18、`pool` +0.13），反拖低最强臂（`maxsim` −0.05）。`lexical-kw`（先让 LLM 抽词、再喂同一份 BM25）**不及 `lexical`**：recall@5 0.6842（−0.0526，一题从命中变全漏）、nDCG@5 0.6385（+0.0037，恰被另一题的排序改善抵消），延迟 p50 0.74s 对 `lexical` 的 0.002s——抽词会把问题里的字面线索（如格式要求 `["a","b"]`）改写成泛化短语，丢掉 BM25 赖以命中的判别词。**必须记住**：索引不记录写它的编码器，换 checkpoint 后必须重新 `ingest`。
+- **状态**：`maxsim`（多向量后期交互）与 `ocr` 两条主线都已跑通——**同一张 agentic 图，只换 retriever**；`--mode` 现有十条检索臂；CLI 入口齐备（`ingest` / `ask` / `eval` / REPL）；单测 `309 passed`。`eval` 默认只跑检索器（`recall_at_k` / `nDCG@k`，不调 chat 模型），`--agentic` 才跑图并出 `pool_recall`（agent 循环累积池）与答案侧指标；gold 取自公开数据集 MMLongBench-Doc 的一个小子集，由 `python -m multimodal_doc_qa.eval.prepare_gold` 转换为 `questions.json`。**未实现**：答案准确率（`answer_containment`）、index p95。**已评测（检索臂消融）**：九条臂各跑纯检索 19 题（`eval/ablation-<arm>-19q.jsonl`，汇总 `eval/ablation-9arms-19q.html`）——`maxsim` 最高（recall@5 0.8947 / nDCG@5 0.7359），且已是这九条臂的上限（它只漏 2 题，此 2 题九臂全漏）；`lexical` 0.7368 / `abstract` 0.7105 / `pool` 0.6579 / `ocr` 0.6053；四条 `hybrid-*` 的 RRF 只救弱臂（`ocr` +0.18、`pool` +0.13），反拖低最强臂（`maxsim` −0.05）。`lexical-kw`（先让 LLM 抽词、再喂同一份 BM25）**不及 `lexical`**：recall@5 0.6842（−0.0526，一题从命中变全漏）、nDCG@5 0.6385（+0.0037，恰被另一题的排序改善抵消），延迟 p50 0.74s 对 `lexical` 的 0.002s——抽词会把问题里的字面线索（如格式要求 `["a","b"]`）改写成泛化短语，丢掉 BM25 赖以命中的判别词。`artifacts/manifest.json` 记录编码器 / dtype / 渲染 / 分块与指纹，换 checkpoint 后加载即报错；`ingest --append` 会在追加前校验，不再依赖记忆。
 
 ## 目标与范围
 
@@ -96,6 +96,8 @@ agency 只改变「取哪些页」，不改变页面表示——检索与证据�
 - **Embedder**：`colpali-engine==0.3.18` + `torch==2.13.0`（**MPS**）+ `transformers==5.18.0`；默认 `vidore/colSmol-500M`。
 - **页面渲染**：`pymupdf==1.28.2`。
 - **索引**：`torch==2.13.0`（张量批量 MaxSim；设备 / 精度可配，与 embedder 共用同一 torch）。
+- **索引清单**：`artifacts/manifest.json` 记录编码器 / dtype / 渲染 / 分块与指纹，加载时校验；换 checkpoint 后不再靠记忆重跑 `ingest`。
+- **检索契约**：`retrievers/contract.py` 的 `RetrievalHit`（`page_id` / `score` / `rank` / `snippet`）是图与评测消费检索结果的唯一形状。
 - **基线文本检索**：`sentence-transformers` + `BAAI/bge-small-en-v1.5`（`MDQ_OCR_EMBEDDER_MODEL`，只编码 OCR 臂的页文本和查询；设备与视觉编码器同一个 `MDQ_DEVICE`）。
 - **OCR**：Tesseract（系统依赖，`brew install tesseract`）+ `pytesseract`。
 - **查看器**：`streamlit`。

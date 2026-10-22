@@ -29,6 +29,7 @@ from multimodal_doc_qa.cli import load_deps, remove_document, run_ingest
 from multimodal_doc_qa.config import ENV_PATH, Settings, documents_path, load_local_env
 from multimodal_doc_qa.graph import build_graph, initial_state
 from multimodal_doc_qa.limits import Budget
+from multimodal_doc_qa.manifest import load_manifest, status
 from multimodal_doc_qa.schemas import Answer, BBox, Citation, load_documents
 from multimodal_doc_qa.ui.viewer import CITED, draw_citations, page_image
 
@@ -464,14 +465,17 @@ def create_app(factory: Callable[[], Service] | None = None) -> FastAPI:
         )
 
     @app.get("/health")
-    def health(request: Request) -> dict[str, str | int]:
+    def health(request: Request) -> dict[str, str | int | None]:
         service = request.app.state.service
+        manifest = load_manifest(service.settings.artifacts_dir)
         return {
             "status": "ok",
             "mode": service.mode,
             "artifacts": str(service.artifacts),
             "sessions": len(service.sessions),
             "documents": len(service.documents),
+            "index_metadata": status(service.settings.artifacts_dir, service.settings),
+            "index_fingerprint": manifest["fingerprint"] if manifest else None,
         }
 
     @app.get("/page/{doc_id}/{page}.png")

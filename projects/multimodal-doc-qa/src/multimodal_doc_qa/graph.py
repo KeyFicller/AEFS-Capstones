@@ -20,6 +20,7 @@ from langgraph.graph.message import MessagesState
 from multimodal_doc_qa.agent import nodes
 from multimodal_doc_qa.config import Settings
 from multimodal_doc_qa.limits import Budget
+from multimodal_doc_qa.retrievers.contract import documents_to_hits
 from multimodal_doc_qa.schemas import Answer, Document
 from multimodal_doc_qa.synth.answer import prompt_messages
 
@@ -110,13 +111,12 @@ def build_graph(deps: GraphDeps, settings: Settings):
             if deps.rerank is not None and len(docs) > 1 and not budget.exhausted():
                 budget.spend_call()
                 docs = deps.rerank(query, docs)
-            for doc in docs:
-                # The retriever is injected; one that omits page_id must not abort the ask.
-                page = doc.metadata.get("page_id")
-                if page is not None and page not in pool:
-                    pool.append(page)
+            # An injected retriever may omit page_id; that is a non-answer, not a crash.
+            hits = documents_to_hits([d for d in docs if d.metadata.get("page_id") is not None])
+            for hit in hits:
+                if hit.page_id not in pool:
+                    pool.append(hit.page_id)
         return {"page_ids": pool, "rounds": state["rounds"] + 1}
-
     @metered
     def assess_node(state: AskState) -> dict:
         followups = nodes.assess(

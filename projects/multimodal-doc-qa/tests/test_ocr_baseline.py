@@ -207,3 +207,10 @@ def test_text_retriever_over_an_empty_index_returns_nothing() -> None:
     )
 
     assert retriever.invoke("anything") == []
+
+
+def test_text_retriever_exposes_the_chunk_as_a_snippet() -> None:
+    """The chunk text survives the hit boundary as context; the page id stays the evidence."""
+    docs = _retriever(k=1).invoke("16.8%")
+
+    assert docs[0].metadata["snippet"] == "16.8%"

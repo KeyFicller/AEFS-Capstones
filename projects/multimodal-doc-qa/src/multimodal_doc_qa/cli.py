@@ -23,6 +23,7 @@ from multimodal_doc_qa.config import (
 )
 from multimodal_doc_qa.graph import GraphDeps, build_graph, initial_state
 from multimodal_doc_qa.limits import Budget
+from multimodal_doc_qa.manifest import ManifestError, manifest_path, validate, write_manifest
 from multimodal_doc_qa.retrievers.assembly import (
     ARMS,
     MODES,
@@ -189,13 +190,20 @@ class IngestResult:
 def ingest(
     corpus: Path = _INGEST_CORPUS,
     out: Path | None = _INGEST_OUT,
+    append: bool = typer.Option(
+        False, "--append", help="Keep what the catalog holds; encode only new doc_ids"
+    ),
 ) -> None:
     """Persist both indices. One ``ask`` uses one; the ablation needs both.
 
     A PDF or a standalone image is encoded with ``encode_images``. Plain text is
     chunked and encoded with ``encode_texts``. Nothing rasterizes a text file.
     """
-    run_ingest(corpus=corpus, out=out)
+    try:
+        run_ingest(corpus=corpus, out=out, append=append)
+    except ManifestError as exc:
+        ui.render_error(str(exc))
+        raise typer.Exit(code=1) from exc
 
 
 def run_ingest(
@@ -236,8 +244,30 @@ def run_ingest(
     for doc_id in skipped:
         ui.echo(f"  skip {doc_id}: already indexed")
     documents: list[ImageDocument | PdfDocument | TextDocument] = list(existing.values())
+    sources_by_id = {doc_id: source for source, doc_id in pairs}
+    if append:
+        # Before anything is appended: a vector from another checkpoint must not mix in.
+        if multivector_path.is_file():
+            validate(artifacts, settings, "visual")
+        if ocr_path.is_file():
+            validate(artifacts, settings, "text")
     if not pending:
         ui.echo(f"[yellow]nothing new[/] {artifacts}")
+        if multivector_path.is_file():
+            # Backfills the manifest for artifacts ingested before it existed. Reads the
+            # index; never writes it.
+            from multimodal_doc_qa.index.maxsim import MultiVectorIndex
+
+            matrices = MultiVectorIndex.load(multivector_path).matrices()
+            write_manifest(
+                artifacts,
+                settings,
+                documents,
+                matrices=matrices,
+                ocr_docs=torch.load(ocr_path, weights_only=True) if ocr_path.is_file() else {},
+                sources=sources_by_id,
+            )
+            ui.echo(f"manifest    {manifest_path(artifacts)}")
         return IngestResult(
             [], skipped, len(documents), _index_mb(multivector_path), time.monotonic() - started
         )
@@ -272,6 +302,14 @@ def run_ingest(
     ocr_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(ocr_docs, ocr_path)
     save_documents(documents, catalog)
+    write_manifest(
+        artifacts,
+        settings,
+        documents,
+        matrices=vision.matrices(),
+        ocr_docs=ocr_docs,
+        sources=sources_by_id,
+    )
     if settings.mode == "abstract" or settings.abstracts:
         _write_abstracts(settings, artifacts, render_dir, documents, ocr_embedder.encode)
 
@@ -340,6 +378,7 @@ def remove_document(
         save_documents([], catalog)
         multivector_path.unlink(missing_ok=True)
         ocr_path.unlink(missing_ok=True)
+        manifest_path(artifacts).unlink(missing_ok=True)
         ui.echo(f"[yellow]empty corpus[/] {artifacts}")
         return []
 
@@ -544,7 +583,7 @@ def _open_retriever(settings: Settings, mode: str):
     """Load one retrieval path, or stop the process when its index is missing."""
     try:
         return build_retriever(settings, mode)
-    except IndexNotFoundError as exc:
+    except (IndexNotFoundError, ManifestError) as exc:
         ui.render_error(str(exc))
         raise typer.Exit(code=1) from exc
 
@@ -699,13 +738,20 @@ def _load_questions(questions: Path):
     return [Question.model_validate(item) for item in json.loads(questions.read_text())]
 
 
+def _ranked(retriever, question) -> list[str]:
+    """One arm's page order, duplicates kept: that is what recall@k scores."""
+    from multimodal_doc_qa.retrievers.contract import documents_to_hits
+
+    return [hit.page_id for hit in documents_to_hits(list(retriever.invoke(question.text)))]
+
+
 def _eval_retrieval(question, retriever):
     """One question's retriever-only outcome. No chat model and no graph are involved."""
     from multimodal_doc_qa.eval.run import QuestionRun
 
     return QuestionRun(
         answer=None,
-        ranked=[doc.metadata["page_id"] for doc in retriever.invoke(question.text)],
+        ranked=_ranked(retriever, question),
         pool=[],
         rounds=0,
         calls=0,
@@ -723,7 +769,7 @@ def _eval_one(question, settings: Settings, retriever):
         out_state = build_graph(deps, settings).invoke(initial_state(question.text))
     return QuestionRun(
         answer=Answer.model_validate(out_state["answer"]) if out_state["answer"] else None,
-        ranked=[doc.metadata["page_id"] for doc in retriever.invoke(question.text)],
+        ranked=_ranked(retriever, question),
         pool=out_state["page_ids"],
         rounds=out_state["rounds"],
         calls=budget.calls,

@@ -61,6 +61,7 @@ class TextRetriever(BaseRetriever):
                 metadata={
                     "page_id": page_id(self.doc_id, self.chunks[i][1]),
                     "score": float(scores[i]),
+                    "snippet": self.chunks[i][0],
                 },
             )
             for i in order.tolist()

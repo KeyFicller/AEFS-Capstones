@@ -6,13 +6,13 @@ from pathlib import Path
 import pymupdf
 from PIL import Image
 
+from multimodal_doc_qa.config import RENDER_DPI, RENDER_LONG_EDGE
+
 logger = logging.getLogger(__name__)
 
-LONG_EDGE = 2048
 
-
-def render_pages(pdf_path: Path, out_dir: Path, dpi: int = 180) -> list[Path]:
-    """Render every page to ``p{page:03d}.png``, long edge ``LONG_EDGE``, aspect ratio kept.
+def render_pages(pdf_path: Path, out_dir: Path, dpi: int = RENDER_DPI) -> list[Path]:
+    """Render every page to ``p{page:03d}.png``, long edge ``RENDER_LONG_EDGE``, aspect ratio kept.
 
     A squashed page is a page the encoder was never trained on.
     """
@@ -27,7 +27,7 @@ def render_pages(pdf_path: Path, out_dir: Path, dpi: int = 180) -> list[Path]:
         for page in pdf:
             pix = page.get_pixmap(dpi=dpi)
             img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
-            scale = LONG_EDGE / max(img.size)
+            scale = RENDER_LONG_EDGE / max(img.size)
             if scale != 1.0:
                 img = img.resize((round(img.width * scale), round(img.height * scale)))
             out = out_dir / f"p{page.number:03d}.png"
