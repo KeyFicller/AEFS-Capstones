@@ -77,7 +77,7 @@ _PAGE = Template(
   <div class="controls">
     <label>rep_pen <input id="rep_pen" type="number" step="0.1" min="1" max="2" value="1.5"></label>
     <label>temperature <input id="temperature" type="number" step="0.1" min="0" max="2" value="0"></label>
-    <label>max_new <input id="max_new" type="number" step="1" min="1" max="512" value="64"></label>
+    <label>max_new <input id="max_new" type="number" step="1" min="1" max="512" value="128"></label>
     <button id="go" type="submit">生成</button>
   </div>
 </form>
@@ -94,7 +94,11 @@ const timing = document.getElementById("timing");
 const go = document.getElementById("go");
 
 function numberInput(id) {
-  const value = Number(document.getElementById(id).value);
+  const raw = document.getElementById(id).value.trim();
+  // Empty must stay undefined so the server applies its default. `Number("")`
+  // is 0, which silently means greedy for temperature and 1 token for max_new.
+  if (raw === "") return undefined;
+  const value = Number(raw);
   return Number.isFinite(value) ? value : undefined;
 }
 
