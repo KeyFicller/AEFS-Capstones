@@ -55,7 +55,7 @@ def stats(text: str) -> dict[str, object]:
 class GenSettings:
     """Sampling knobs. Defaults match `eval/sample.py`'s argparse defaults."""
 
-    max_new: int = 64
+    max_new: int = 128
     temperature: float = 0.8
     top_k: int = 0
     top_p: float = 1.0

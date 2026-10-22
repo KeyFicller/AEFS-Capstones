@@ -255,3 +255,52 @@ def test_length_normalized_readings_separate_style_from_length(
     # Same policy on both sides, so the β-scaled margin is exactly zero.
     assert readings["holdout_margin"] == pytest.approx(0.0, abs=1e-6)
     assert readings["holdout_gap"] != readings["holdout_gap_norm"]
+
+
+def test_guard_trips_on_collapsed_accuracy() -> None:
+    """The delivered failure: 9.5% accuracy against a 37.2% reference."""
+    from tiny_llm_pipeline.train.dpo import _guard_trips
+
+    assert _guard_trips(0.095, 0.372, chosen_up=32.2, rejected_down=183.3)
+    # The controlled 400-step run stayed healthy on both readings.
+    assert _guard_trips(0.337, 0.372, chosen_up=81.2, rejected_down=65.2) is None
+    # A margin bought from below is rejected even when accuracy holds.
+    assert _guard_trips(0.37, 0.372, chosen_up=5.0, rejected_down=90.0)
+    # No probe file, no accuracy rule.
+    assert _guard_trips(None, None, chosen_up=40.0, rejected_down=10.0) is None
+
+
+def test_guard_is_logged_when_a_probe_is_passed(tmp_path, tok, make_ckpt) -> None:
+    probe = [
+        {"conversations": [
+            {"role": "user", "content": "问题？"},
+            {"role": "assistant", "content": "好的。"},
+        ]}
+    ]
+    # 20 pairs so a 50% hash split is certain to leave a holdout to read the
+    # chosen/rejected split from.
+    prefs = tmp_path / "prefs.jsonl"
+    prefs.write_text(
+        "\n".join(
+            json.dumps({"prompt": f"问题{i}？", "chosen": f"宝子～回答{i}呢！", "rejected": f"回答{i}。"},
+                       ensure_ascii=False)
+            for i in range(20)
+        ),
+        encoding="utf-8",
+    )
+    out = tmp_path / "dpo"
+    train_dpo(
+        prefs,
+        out,
+        ref_ckpt=make_ckpt("sft"),
+        tok_hash=tok.hash,
+        tok=tok,
+        max_steps=10,
+        ckpt_every=10,
+        holdout_frac=0.5,
+        probe=probe,
+    )
+    records = [json.loads(line) for line in (out / "train_log.jsonl").read_text().splitlines()]
+    assert "guard_acc" in records[-1]
+    assert "guard_chosen_up" in records[-1]
+    assert "guard_rejected_down" in records[-1]

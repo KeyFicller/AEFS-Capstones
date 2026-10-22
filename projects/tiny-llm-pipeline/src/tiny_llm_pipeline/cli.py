@@ -92,12 +92,16 @@ def synth_pref_cmd(
     n: int = typer.Option(..., "--n", help="How many prompts to synthesize, in file order."),
     prompts: Path = typer.Option(Path("artifacts/data/dpo_prompts.jsonl"), "--prompts"),
     guide: Path = typer.Option(
-        Path("artifacts/prefs/doubao-style-guide.md"),
+        Path("artifacts/prefs/style-fewshot.md"),
         "--guide",
-        help="Style outline embedded verbatim into the chosen system prompt.",
+        help="Style guide embedded verbatim into the chosen system prompt.",
     ),
     out: Path = typer.Option(Path("artifacts/prefs/prefs.jsonl"), "--out"),
     data: Path = typer.Option(Path("artifacts/data"), "--data"),
+    backend: str = typer.Option("deepseek", "--backend", help="deepseek | ollama"),
+    model: str = typer.Option(
+        "deepseek-v4-flash", "--model", help="Model id for the chosen backend."
+    ),
 ) -> None:
     """Synthesize DPO preference pairs from the held-out prompts.
 
@@ -108,7 +112,15 @@ def synth_pref_cmd(
     """
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     tok = load_tokenizer(data)
-    path = synth_prefs(read_prompts(prompts), out, n=n, tok=tok, guide=guide.read_text(encoding="utf-8"))
+    path = synth_prefs(
+        read_prompts(prompts),
+        out,
+        n=n,
+        tok=tok,
+        guide=guide.read_text(encoding="utf-8"),
+        backend=backend,
+        model=model,
+    )
     typer.echo(str(path))
 
 
@@ -270,6 +282,10 @@ def train_dpo_cmd(
     """
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     tok = load_tokenizer(data)
+    # Ordinary held-out answers, so the guard can ask whether the policy still
+    # predicts text at all. Optional: without the file the accuracy check is off.
+    probe_path = data / "sft_holdout.jsonl"
+    probe = read_sft(probe_path)[:32] if probe_path.is_file() else None
     ckpt = train_dpo(
         prefs,
         out,
@@ -284,6 +300,7 @@ def train_dpo_cmd(
         train_cfg=replace(DEFAULT_TRAIN, lr=lr),
         ckpt_every=ckpt_every,
         holdout_frac=holdout_frac,
+        probe=probe,
     )
     typer.echo(str(ckpt))
 
@@ -298,8 +315,9 @@ def eval_cmd(
         None, "--data", help="Directory with sft_holdout.jsonl, to add response perplexity."
     ),
     rep_pen: float = typer.Option(1.5, "--rep-pen"),
-    max_new: int = typer.Option(64, "--max-new"),
+    max_new: int = typer.Option(128, "--max-new"),
     seed: int = typer.Option(0, "--seed"),
+    prefix: str = typer.Option("", "--prefix", help="Prepended to every prompt, for style switching."),
 ) -> None:
     """Score every frozen prompt on every stage and write `results.jsonl`.
 
@@ -319,7 +337,7 @@ def eval_cmd(
         holdout = read_sft(holdout_path)
     summary = evaluate(
         loaded,
-        read_prompts(prompts),
+        [prefix + prompt for prompt in read_prompts(prompts)],
         GenSettings(max_new=max_new, temperature=0.0, rep_pen=rep_pen, seed=seed),
         out,
         stages=loaded.stages,

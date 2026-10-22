@@ -115,7 +115,7 @@ def test_synth_pref_writes_pairs(tmp_path, monkeypatch, runner, tok) -> None:
             return type("M", (), {"content": text})()
 
     monkeypatch.setattr("tiny_llm_pipeline.cli.load_tokenizer", lambda *_a, **_k: tok)
-    monkeypatch.setattr("tiny_llm_pipeline.pref.synthesize._client", lambda _model: FakeLLM())
+    monkeypatch.setattr("tiny_llm_pipeline.pref.synthesize._client", lambda *_a: FakeLLM())
     out = tmp_path / "prefs.jsonl"
 
     result = runner.invoke(
@@ -147,7 +147,7 @@ def test_synth_pref_resumes_and_skips_done_prompts(tmp_path, monkeypatch, runner
             return type("M", (), {"content": text})()
 
     monkeypatch.setattr("tiny_llm_pipeline.cli.load_tokenizer", lambda *_a, **_k: tok)
-    monkeypatch.setattr("tiny_llm_pipeline.pref.synthesize._client", lambda _model: FakeLLM())
+    monkeypatch.setattr("tiny_llm_pipeline.pref.synthesize._client", lambda *_a: FakeLLM())
     out = tmp_path / "prefs.jsonl"
 
     argv = ["synth-pref", "--n", "4", "--prompts", str(prompts), "--guide", str(guide), "--out", str(out)]

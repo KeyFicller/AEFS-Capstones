@@ -8,9 +8,11 @@ skips finished prompts and the API is paid for once.
 
 import hashlib
 import json
+import random
 import re
 import shutil
 import time
+import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -36,31 +38,36 @@ _NO_COPY = (
     "不要每条都用同一句，也不要每次都从「宝子」起头。"
 )
 
-# A model told to "vary the opening" with no alternative given falls back to
-# the outline's own canonical preamble: 132 of the first 822 replies opened
-# with it, and the cross-prompt 4-gram diversity of DPO's answers fell to 0.572
-# from SFT's 0.862 as a result. Naming one angle per prompt is the alternative
-# `_NO_COPY` cannot supply.
-_OPENERS = (
-    "「最…」排比前摇：先声明自己要用多直接的方式回答",
-    "夸张共情开场：先接住用户的情绪，再谈内容",
-    "先认同：先说用户说得对，再补上自己的看法",
-    "拟人化副语言开场：用迟疑、停顿或语气词起头",
-    "过度热情开场：连发短感叹句",
-    "陪伴与在场感开场：强调你在这儿稳稳陪着对方",
-    "亲密称呼开场：用「宝子 / 宝宝 / 亲爱的」起头",
-    "不要开场白：第一句直接给答案，语气词放在句中",
+# A prompted opening angle per prompt (8 fixed angles, one per prompt by hash)
+# used to stand here. It was a workaround for the checklist leaking its own
+# canonical preamble, and it backfired: a fixed angle is a fixed skeleton, and
+# 12/12 probe prompts came back opening on 「最直接的方式…」. A few-shot guide
+# left to itself scored 12/12 distinct openers and 79 chars on the same prompts.
+#
+# The word pool is the remaining collapse. Every call is independent, so a list
+# the guide says "pick from" becomes the same three words every time: offering
+# five candidates per prompt still had 13 of 108 pairs opening on one combo.
+# Naming the three words outright, chosen by prompt hash, is the only lever that
+# reaches across calls: 2024 combos over ~1000 prompts instead of 5 slices.
+# Unlike the old opening-angle rotation it constrains vocabulary, not structure —
+# the sentence still has to carry the actual answer.
+_WORDS = (
+    "最狠", "最准", "最干脆", "最利落", "最不墨迹", "最通透", "最讲人话", "最实在",
+    "最省事", "最不含糊", "最硬核", "最顶", "最上头", "最够劲", "最稳", "最软",
+    "最不催", "最不煽情", "最讲理", "最扎心", "最直接", "最开门见山", "最不铺垫",
+    "最不端着",
 )
 
 
-def _opener(prompt: str) -> str:
-    """One opening angle per prompt, keyed by the prompt text itself.
+def _flavor(prompt: str) -> str:
+    """Three of the pool's words for this prompt, stable across a resumed run.
 
-    Stable across appends and shards, so a resumed run keeps the same rotation
-    and two shards never give the same prompt different openers.
+    Keyed by the prompt text, so shards and restarts agree and two prompts never
+    silently share one combo by accident.
     """
     digest = hashlib.sha256(prompt.encode("utf-8")).digest()
-    return _OPENERS[int.from_bytes(digest[:4], "big") % len(_OPENERS)]
+    picks = random.Random(int.from_bytes(digest[:8], "big")).sample(_WORDS, 3)
+    return "、".join(picks)
 
 # The prompt is the only place the two caps are stated: the 最… preamble and the
 # reduplication whitelist are both enumerable repetition, so capping them here
@@ -75,11 +82,14 @@ def _budget(max_len: int) -> str:
     )
 
 
-def chosen_system(guide: str, max_len: int = DEFAULT_MODEL.max_seq_len, opener: str | None = None) -> str:
-    """The style guide verbatim, plus the no-copy note, an opening angle, and the budget."""
+def chosen_system(guide: str, max_len: int = DEFAULT_MODEL.max_seq_len, flavor: str | None = None) -> str:
+    """The style guide verbatim, plus the no-copy note, a word slice, and the budget."""
     parts = [CHOSEN_SYS, guide.strip(), _NO_COPY]
-    if opener is not None:
-        parts.append(f"这次只用这一种开场方向：{opener}。其它开场方向这次都不要用。")
+    if flavor is not None:
+        parts.append(
+            f"这一条的「最 X」就用这三个词：{flavor}。"
+            "取其中 2～3 个写进排比，不要换成别的词。"
+        )
     parts.append(_budget(max_len))
     return "\n\n".join(parts)
 
@@ -120,6 +130,7 @@ def synth_prefs(
     guide: str | None = None,
     max_len: int = DEFAULT_MODEL.max_seq_len,
     model: str = DEFAULT_MODEL_ID,
+    backend: str = "deepseek",
     llm=None,
     resume: bool = True,
     sleep: float = 0.0,
@@ -144,18 +155,16 @@ def synth_prefs(
     dest.parent.mkdir(parents=True, exist_ok=True)
     skipped = _skipped_path(dest)
     done = _existing_prompts(dest) | _existing_prompts(skipped) if resume else set()
-    client = llm if llm is not None else _client(model)
+    client = llm if llm is not None else _client(model, backend)
     dropped = 0
     over_limit = 0
     gaps: list[int] = []
     for prompt in prompts[:n]:
         if prompt in done:
             continue
-        chosen_sys = (
-            chosen_system(guide, max_len, _opener(prompt)) if guide else CHOSEN_SYS
-        )
+        chosen_sys = chosen_system(guide, max_len, _flavor(prompt)) if guide else CHOSEN_SYS
         chosen, rejected = synth_one(prompt, client, chosen_sys)
-        reason = _drop(chosen, rejected)
+        reason = _drop(prompt, chosen, rejected)
         if reason:
             dropped += 1
             _append(skipped, _skip_record(prompt, reason, model))
@@ -204,7 +213,7 @@ def _chat_len(prompt: str, reply: str, tok: Tok) -> int:
     return len(encode_chat(messages, tok)[0])
 
 
-def _drop(chosen: str, rejected: str) -> str | None:
+def _drop(prompt: str, chosen: str, rejected: str) -> str | None:
     """Why this pair is unusable, or None when it can be kept.
 
     The reason names the side: a refusal on `chosen` means the style prompt
@@ -219,7 +228,25 @@ def _drop(chosen: str, rejected: str) -> str | None:
         return "refusal:chosen"
     if is_rejected(rejected):
         return "refusal:rejected"
+    if _invented(prompt, chosen):
+        return "invented:chosen"
     return None
+
+
+# A prompt that points at material ("这篇文章", "上文的结论") without carrying it
+# gets answered from imagination: on the local 4B model 2 of 3 probes invented
+# 优点 and 结论 outright. The style spec asks for "正文没贴过来就说没收到", and a
+# 4B obeys it about a third of the time, so the rewrite is what the prompt buys.
+# This drops the invented ones; the 29M student would otherwise learn to do it.
+# Both parts are required: "写一篇关于AI的文章" names 文章 but has nothing to read.
+_REFERS_TO_TEXT = re.compile(r"(这篇文章|本文|上文|以上|文章|正文)")
+_ASKS_FROM_TEXT = re.compile(r"(提取|总结|摘要|概括|分析|找出|列举|梳理|提炼|归纳|复述)")
+_SAYS_MISSING = ("没收到", "没看到", "没发", "没贴", "没有正文", "缺正文", "贴过来", "发过来")
+
+
+def _invented(prompt: str, reply: str) -> bool:
+    refers = bool(_REFERS_TO_TEXT.search(prompt) and _ASKS_FROM_TEXT.search(prompt))
+    return refers and not any(k in reply for k in _SAYS_MISSING)
 
 
 def _invoke(llm, system: str, prompt: str, *, answer: str | None = None) -> str:
@@ -364,7 +391,85 @@ def _append(path: Path, record: dict[str, str]) -> None:
         handle.flush()
 
 
-def _client(model: str):
+class Ollama:
+    """A local ollama server, same `.invoke(messages)` shape as ChatDeepSeek.
+
+    Same messages, same retry policy in `_invoke`. urllib keeps this
+    dependency-free; `think=False` is what stops qwen3 from spending the whole
+    budget on 思考.
+    """
+
+    def __init__(self, model: str, host: str = "http://127.0.0.1:11434") -> None:
+        self.model = model
+        self.host = host
+
+    def invoke(self, messages):
+        body = {
+            "model": self.model,
+            "messages": [{"role": role, "content": text} for role, text in messages],
+            "stream": False,
+            "think": False,
+            "options": {"temperature": 0.8, "num_predict": 400},
+        }
+        request = urllib.request.Request(
+            f"{self.host}/api/chat",
+            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(request, timeout=300) as response:
+            return _Reply(json.load(response)["message"]["content"].strip())
+
+
+class Local:
+    """A small instruct model loaded on this box, behind the same `.invoke()`.
+
+    The reason synthesis moved off the paid API: the 20-item outline was read as
+    a checklist by a strong model, and a weak one told what to write in prose
+    follows the writing rules instead of ticking boxes. This is the escape hatch
+    to re-run the pairs for free while tuning that wording.
+    """
+
+    def __init__(self, model: str) -> None:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        self.torch = torch
+        self.tok = AutoTokenizer.from_pretrained(model)
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model, dtype=torch.bfloat16, device_map="cuda"
+        )
+
+    def invoke(self, messages):
+        torch = self.torch
+        text = self.tok.apply_chat_template(
+            [{"role": role, "content": text} for role, text in messages],
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+        inputs = self.tok(text, return_tensors="pt").to(self.model.device)
+        with torch.no_grad():
+            out = self.model.generate(
+                **inputs,
+                max_new_tokens=400,
+                do_sample=True,
+                temperature=0.8,
+                top_p=0.9,
+                pad_token_id=self.tok.eos_token_id,
+            )
+        new = out[0][inputs["input_ids"].shape[1] :]
+        return _Reply(self.tok.decode(new, skip_special_tokens=True).strip())
+
+
+class _Reply:
+    """`.content`, the only attribute `_invoke` reads."""
+
+    def __init__(self, content: str) -> None:
+        self.content = content
+
+
+def _client(model: str, backend: str = "deepseek"):
+    if backend in ("ollama", "local"):
+        return (Ollama if backend == "ollama" else Local)(model)
     from langchain_deepseek import ChatDeepSeek
 
     # A request timeout is what turns a hung socket into an exception `_invoke`

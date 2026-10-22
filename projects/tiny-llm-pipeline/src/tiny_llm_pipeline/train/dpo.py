@@ -19,7 +19,16 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 
 from tiny_llm_pipeline.config import DEFAULT_TRAIN, TrainConfig, lr_at
-from tiny_llm_pipeline.data import PreferenceExample, collate_dpo, read_preferences, row_order
+from tiny_llm_pipeline.data import (
+    PreferenceExample,
+    SFTExample,
+    _preference_side,
+    _right_pad,
+    _right_pad_mask,
+    collate_dpo,
+    read_preferences,
+    row_order,
+)
 from tiny_llm_pipeline.model import TinyLM, load_ckpt, save_ckpt
 from tiny_llm_pipeline.tokenizer import Tok
 from tiny_llm_pipeline.train import pretrain as _pretrain
@@ -36,6 +45,17 @@ from tiny_llm_pipeline.train.pretrain import (
 logger = logging.getLogger(__name__)
 
 MARGIN_DECAY = 0.9
+
+# Every `GUARD_EVERY` steps, check that the policy still predicts ordinary text.
+# The delivered 104-step run passed every existing reading (loss 0.02, margin
+# 5.1) while its held-out next-token accuracy fell 37.2% → 9.5%: `holdout_gap`
+# only says the two sides moved apart, and 85% of that run's gain came from
+# pushing the rejected side down rather than lifting the chosen one. These two
+# readings are what tell style learning from model damage.
+GUARD_EVERY = 10
+GUARD_ACC_FLOOR = 0.75
+GUARD_REJECTED_SHARE = 2.0
+GUARD_MIN_GAIN = 20.0
 
 
 def dpo_loss(pw: Tensor, pl: Tensor, rw: Tensor, rl: Tensor, beta: float) -> tuple[Tensor, Tensor]:
@@ -108,6 +128,8 @@ def _holdout_readings(
     gaps: list[Tensor] = []
     gaps_norm: list[Tensor] = []
     margins: list[Tensor] = []
+    chosen_lp: list[Tensor] = []
+    rejected_lp: list[Tensor] = []
     try:
         with torch.no_grad():
             for offset in range(0, len(rows), batch_size):
@@ -123,6 +145,8 @@ def _holdout_readings(
                 gaps.append(pw - pl)
                 gaps_norm.append(pw / chosen_mask.sum(-1) - pl / rejected_mask.sum(-1))
                 margins.append(dpo_loss(pw, pl, rw, rl, beta)[1])
+                chosen_lp.append(pw)
+                rejected_lp.append(pl)
     finally:
         policy.train(was_training)
     gap = torch.cat(gaps)
@@ -134,7 +158,82 @@ def _holdout_readings(
         "holdout_win_rate": float((gap > 0).float().mean()),
         "holdout_gap_norm": float(gap_norm.mean()),
         "holdout_win_rate_norm": float((gap_norm > 0).float().mean()),
+        # Kept so the margin gain can be split into "chosen up" vs "rejected
+        # down". Bought-from-below is not the same alignment as learned style.
+        "holdout_chosen": float(torch.cat(chosen_lp).mean()),
+        "holdout_rejected": float(torch.cat(rejected_lp).mean()),
     }
+
+
+def _answer_accuracy(
+    model: TinyLM,
+    probe: list[SFTExample] | None,
+    tok: Tok,
+    max_seq_len: int,
+    device: torch.device,
+) -> float | None:
+    """Next-token accuracy on ordinary held-out answers, `None` without a probe.
+
+    This is the reading that catches a model that still scores the style pairs
+    perfectly and can no longer predict text at all.
+    """
+    if not probe:
+        return None
+    was_training = model.training
+    model.eval()
+    hits = total = 0
+    try:
+        with torch.no_grad():
+            for offset in range(0, len(probe), 16):
+                sides = [
+                    _preference_side(_user_of(row), _answer_of(row), tok, max_seq_len)
+                    for row in probe[offset : offset + 16]
+                ]
+                ids = _right_pad([side[0] for side in sides], 0).to(device)
+                mask = _right_pad_mask([side[1] for side in sides]).to(device)
+                logits, _ = model(ids[:, :-1])
+                pred = logits.argmax(dim=-1)
+                target = ids[:, 1:]
+                keep = mask[:, 1:]
+                hits += int((pred[keep] == target[keep]).sum())
+                total += int(keep.sum())
+    finally:
+        model.train(was_training)
+    return hits / total if total else None
+
+
+def _user_of(row: SFTExample) -> str:
+    return next(m["content"] for m in row["conversations"] if m["role"] == "user")
+
+
+def _answer_of(row: SFTExample) -> str:
+    return next(m["content"] for m in row["conversations"] if m["role"] == "assistant")
+
+
+def _guard_trips(
+    accuracy: float | None,
+    base_accuracy: float | None,
+    chosen_up: float,
+    rejected_down: float,
+) -> str | None:
+    """Reason to abort a run, or `None` when both readings look healthy.
+
+    Thresholds come from measured runs: the delivered failure had accuracy at
+    26% of its reference and the rejected side doing 85% of the work, while the
+    controlled 400-step run stayed at 91% with a 0.8 rejected/chosen ratio.
+    """
+    if accuracy is not None and base_accuracy:
+        if accuracy < GUARD_ACC_FLOOR * base_accuracy:
+            return (
+                f"held-out next-token accuracy {accuracy:.1%} is below "
+                f"{GUARD_ACC_FLOOR:.0%} of the reference's {base_accuracy:.1%}"
+            )
+    if rejected_down > GUARD_MIN_GAIN and rejected_down > GUARD_REJECTED_SHARE * max(chosen_up, 0.0):
+        return (
+            f"margin is being bought from below: rejected fell {rejected_down:.0f} nats "
+            f"against chosen gaining {chosen_up:.0f}"
+        )
+    return None
 
 
 def train_dpo(
@@ -152,6 +251,7 @@ def train_dpo(
     train_cfg: TrainConfig = DEFAULT_TRAIN,
     ckpt_every: int = 500,
     holdout_frac: float = 0.1,
+    probe: list[SFTExample] | None = None,
 ) -> Path:
     """Run DPO from `ref_ckpt` (or `resume`) and return the policy checkpoint.
 
@@ -163,6 +263,11 @@ def train_dpo(
     At every save they give `holdout_gap` (logπ_chosen − logπ_rejected),
     `holdout_margin` (the β-scaled DPO margin) and `holdout_win_rate`, so the
     reported alignment numbers are not in-sample.
+
+    `probe` is ordinary held-out chat data. Every `GUARD_EVERY` steps it gives
+    `guard_acc`; together with the chosen/rejected log-prob split it aborts the
+    run when the margin is being bought by breaking the model, which is what
+    `holdout_margin` alone cannot see.
     """
     if not 0.0 <= holdout_frac < 1.0:
         raise ValueError(f"holdout_frac must be in [0, 1), got {holdout_frac}")
@@ -236,6 +341,11 @@ def train_dpo(
             holdout_start["holdout_win_rate"],
             holdout_start["holdout_win_rate_norm"],
         )
+    # The policy is the reference at step 0, so this is also the baseline the
+    # guard compares against.
+    base_accuracy = _answer_accuracy(ref, probe, tok, max_seq_len, device)
+    if base_accuracy is not None:
+        logger.info("dpo guard baseline next-token accuracy=%.3f", base_accuracy)
 
     def _save() -> None:
         save_ckpt(
@@ -305,12 +415,33 @@ def train_dpo(
             }
             interrupted = _interrupt_requested()
             stop = step == total or interrupted
-            if ckpt_every > 0 and (step % ckpt_every == 0 or stop):
+            checked = GUARD_EVERY > 0 and (step % GUARD_EVERY == 0 or stop)
+            if checked:
+                accuracy = _answer_accuracy(policy, probe, tok, max_seq_len, device)
                 readings = _holdout_readings(
                     policy, ref, holdout, tok, max_seq_len, beta, device
                 )
                 if readings is not None:
                     record.update(readings)
+                if accuracy is not None:
+                    record["guard_acc"] = accuracy
+                if readings is not None and holdout_start is not None:
+                    chosen_up = readings["holdout_chosen"] - holdout_start["holdout_chosen"]
+                    rejected_down = holdout_start["holdout_rejected"] - readings["holdout_rejected"]
+                    record["guard_chosen_up"] = chosen_up
+                    record["guard_rejected_down"] = rejected_down
+                    trip = _guard_trips(accuracy, base_accuracy, chosen_up, rejected_down)
+                    if trip is not None:
+                        _save()
+                        _append_log(log_path, record)
+                        raise RuntimeError(f"guard tripped at step {step}: {trip}")
+            if ckpt_every > 0 and (step % ckpt_every == 0 or stop):
+                if not checked:
+                    readings = _holdout_readings(
+                        policy, ref, holdout, tok, max_seq_len, beta, device
+                    )
+                    if readings is not None:
+                        record.update(readings)
                 _save()
             _append_log(log_path, record)
             logger.info(

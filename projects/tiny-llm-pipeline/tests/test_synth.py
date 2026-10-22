@@ -76,19 +76,25 @@ def test_rejected_side_rewrites_the_chosen_answer(tmp_path, tok) -> None:
     assert "好呀宝子～" in rewrite_user[1]     # the chosen text is what gets rewritten
 
 
-def test_opener_rotation_is_stable_and_spread(tmp_path, tok) -> None:
-    """One angle per prompt: varying across prompts, identical on a re-run."""
-    from tiny_llm_pipeline.pref.synthesize import _OPENERS, _opener
+def test_flavor_rotation_is_stable_and_spread(tmp_path, tok) -> None:
+    """Every prompt gets its own three words, stable on a re-run.
+
+    Each call is independent, so a list the guide says "pick from" collapses to
+    the same three words: 13 of 108 pairs opened on one combo. This asserts the
+    mechanism that reaches across calls, and that it is reproducible.
+    """
+    from tiny_llm_pipeline.pref.synthesize import _WORDS, _flavor
 
     prompts = [f"问题{i}？" for i in range(200)]
-    openers = {_opener(p) for p in prompts}
-    # A hash that collapsed would leave most prompts on the guide's preamble.
-    assert openers == set(_OPENERS)
-    assert all(_opener(p) == _opener(p) for p in prompts)
+    flavors = [_flavor(p) for p in prompts]
+    assert len(set(flavors)) > 150                    # a collapsing hash would repeat far more
+    assert all(len(f.split("、")) == 3 for f in flavors)
+    assert all(part in _WORDS for f in flavors for part in f.split("、"))
+    assert all(_flavor(p) == _flavor(p) for p in prompts)   # resuming keeps the same words
 
     llm = FakeLLM()
     synth_prefs(prompts[:1], tmp_path / "prefs.jsonl", n=1, tok=tok, llm=llm, guide="纲要")
-    assert _opener(prompts[0]) in llm.calls[0][0][1]   # the angle reaches the prompt
+    assert _flavor(prompts[0]) in llm.calls[0][0][1]
 
 
 def test_style_sft_drops_replies_copied_from_the_guide(tmp_path, tok) -> None:
@@ -116,6 +122,41 @@ def test_style_sft_drops_replies_copied_from_the_guide(tmp_path, tok) -> None:
     assert with_guide_off["train"] + with_guide_off["holdout"] == 2
 
 
+def test_ollama_client_posts_a_chat_and_reads_content(monkeypatch) -> None:
+    """The local backend has to look exactly like ChatDeepSeek to `_invoke`."""
+    from tiny_llm_pipeline.pref.synthesize import _client
+
+    seen = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self):
+            return b'{"message": {"content": "  \xe5\xa5\xbd\xe5\x91\x80  "}}'
+
+    def fake_urlopen(request, timeout):
+        seen["url"] = request.full_url
+        seen["body"] = json.loads(request.data)
+        seen["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    llm = _client("qwen3:8b", "ollama")
+    reply = llm.invoke([("system", "sys"), ("user", "问题")])
+
+    assert reply.content == "好呀"                      # stripped, like the API path
+    assert seen["url"].endswith("/api/chat")
+    assert seen["body"]["think"] is False               # qwen3 would spend it all on 思考
+    assert seen["body"]["messages"] == [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "问题"},
+    ]
+
+
 def test_drops_identical_and_refusals() -> None:
     assert is_rejected("抱歉，我不能帮你") is True
     assert is_rejected("目前无法总结结论，因为文章正文尚未提供。") is True
@@ -124,6 +165,39 @@ def test_drops_identical_and_refusals() -> None:
     # valid pairs (仅凭这一句话无法判断, 不能只看表面).
     assert is_rejected("仅凭这一句话无法判断，需要看他意图是什么") is False
     assert is_rejected("宝子～这不能怪你呀，慢慢来") is False
+
+
+def test_drops_replies_that_invent_the_missing_article(tmp_path, tok) -> None:
+    """A prompt pointing at absent text must not get an invented summary."""
+
+    class InventingLLM:
+        """Answers every prompt as if the article were right there."""
+
+        def invoke(self, msgs):
+            content = (
+                "我用最直白、最不绕弯的方式说：优点有三条，结论是长期主义。"
+                if "豆包" in msgs[0][1]
+                else "优点有三条，结论是长期主义。"
+            )
+            return type("M", (), {"content": content})
+
+    p = tmp_path / "prefs.jsonl"
+    prompts = ["提取文章中的优点和不足。", "给我三个做甜点的材料。"]
+    synth_prefs(prompts, p, n=2, tok=tok, llm=InventingLLM())
+    rows = [json.loads(line) for line in p.read_text(encoding="utf-8").splitlines()]
+    # The first names 文章 and the reply never says it is missing: dropped.
+    assert [row["prompt"] for row in rows] == ["给我三个做甜点的材料。"]
+    skipped = json.loads((tmp_path / "prefs.skipped.jsonl").read_text(encoding="utf-8").strip())
+    assert skipped["reason"] == "invented:chosen"
+
+    class HonestLLM:
+        def invoke(self, msgs):
+            content = "最直白说，这篇文章我没收到呀，贴过来。" if "豆包" in msgs[0][1] else "这篇文章我没收到。"
+            return type("M", (), {"content": content})
+
+    honest = tmp_path / "honest.jsonl"
+    synth_prefs(["提取文章中的优点和不足。"], honest, n=1, tok=tok, llm=HonestLLM())
+    assert len(honest.read_text(encoding="utf-8").strip().splitlines()) == 1
 
 
 def test_guide_is_embedded_verbatim_in_the_chosen_prompt(tmp_path, tok) -> None:
