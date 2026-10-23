@@ -6,13 +6,11 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class ModelConfig:
-    """Llama-style decoder-only sizes. Defaults follow MiniMind2-Small.
+    """Llama-style decoder-only sizes: 6400 / 512 / 8 / 8 query heads / 2 KV heads.
 
-    Vocab, width, depth, and head counts match that model (6400 / 512 / 8 /
-    8 query heads / 2 KV heads). `ffn_hidden` uses the current MiniMind
-    feed-forward size, ``ceil(d_model * pi / 64) * 64``, which is 1664.
-    With the tied embedding counted once that is 28,975,616 parameters.
-    `max_seq_len` is the training window recommended for `pretrain_t2t_mini`.
+    `ffn_hidden` uses ``ceil(d_model * pi / 64) * 64``, which is 1664. With the
+    tied embedding counted once that is 28,975,616 parameters. `max_seq_len` is
+    the pretraining window those sizes were chosen for.
     """
 
     vocab_size: int = 6400

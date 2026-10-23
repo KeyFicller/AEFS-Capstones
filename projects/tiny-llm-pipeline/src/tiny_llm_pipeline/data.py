@@ -30,7 +30,7 @@ _PAD_ID = 0
 _IGNORE_INDEX = -100
 _CHAT_MARKERS = re.compile(r"<\|im_start\|>|<\|im_end\|>")
 
-# Corpus files in `jingyaogong/minimind_dataset`. `prepare` fetches these.
+# Corpus files in the dataset repo `fetch_minimind` downloads from.
 PRETRAIN_FILE = "pretrain_hq.jsonl"
 SFT_FILE = "sft_mini_512.jsonl"
 

@@ -2,28 +2,25 @@
 
 - **项目**：tiny-llm-pipeline / 所属 Phase：Phase19 / Capstone 07
 - **spec**：[Capstone 07 — 端到端微调流水线](https://aieng-zh.cn/lessons/19-capstone-projects/07-end-to-end-fine-tuning-pipeline/)
-- **状态**：三段已在真实数据上训练完——预训练 34500 步（val ppl **11.8**）、SFT 5000 步（留出集回答 ppl **6.34**，微调前的 `pretrain-30m` 基线 **38.15**）、DPO **100 步**（受控重跑，见下）。`prepare` 的**派生文件**位级可复现；`eval/sample.py` / `eval/serve.py` / **`eval` 子命令（写 `eval/results.jsonl`）**已落地；SFT 另有 **LoRA 路径**（`--lora-rank`，落 adapter ckpt，单元与 CLI 已测；与全量 FT 的 5000 步对照**未跑**，待云端 GPU）；单测 `116 passed`。**未落地**：`gen` / `chat` / `compare` CLI。**交付配置**：DPO `--beta 0.1 --epochs 1 --lr 1e-5 --max-steps 100`，且**生成时必须开 `repetition_penalty`（1.3–1.5）——它是交付的一部分，不是可选的润色**。`train-dpo` 每 10 步测一次留出集下一词准确率与 chosen/rejected 涨幅拆分，跌破参考的 75% 或 rejected 跌幅超过 chosen 涨幅 2 倍即中止（见 `train/dpo.py` 顶部 `GUARD_*`）。
-- **对齐读数（来自 `eval/results.jsonl`，2026-10-22 换 ckpt 后重跑）**：40 条冻结 prompt（`eval/prompts.jsonl`）、贪心、`rep_pen=1.5`、**`max_new=128`**、提示 `用豆包体回答：`——`doubao_score` 预训练 **0.09** → SFT **1.06** → DPO **2.33**（DPO−SFT 配对差 **+1.27**，bootstrap 95% CI **[0.55, 1.96]**，DPO 胜 **77.5%**、平 10%）；护栏同时报：跨 prompt 4-gram 多样性 0.848 → 0.840 → **0.805**（事故版是 0.693）、留出集回答 ppl 15.1 / 35.9 / **41.0**（事故版 1493）、平均长度 192 → 116 → 72 字。**旧口径的 8.10 是 `max_new=48` 下量的**：48 刚好在模板末尾截断，把模板后面那串碎句子切掉了；同一批 ckpt 放到 128 只有 6.89。**跨口径不得混用**。内容侧另有 LLM 相关性读数（Qwen3-4B 逐条 1–5 分，脚本未入库）：SFT **2.27** → 受控 DPO **2.67**，答非所问 20/40 → 12/40。
-
-- **2026-10-22 DPO 104 步是训练事故，已换 ckpt**：旧 ckpt（`--beta 0.01 --epochs 4 --lr 3e-5`、训练提示不带前缀）在留出集上把下一词命中率从 **37.2% 打到 9.5%**、与 SFT 的逐 token top-1 一致率只剩 **13.5%**、正常文本每 token logπ 掉 **3.83 nats**；`rep_pen=1.0` 时直接进无限复读（条内 4-gram 重复 0.67）。margin 涨的 215 nats 里 **85% 来自压低 rejected**（chosen 只涨 32）。`holdout_gap` 单独看是 +5.1、loss 0.02，所以旧口径判定为「通过」。**受控重跑**（同一 SFT 起点、prefs_v2 931 对、提示带豆包前缀、只动步数）在 25/50/100/200/400 步上：漂移 −0.06/−0.11/−0.16/−0.22/−0.39，准确率 36.6/36.0/35.7/35.2/33.7%，100 步达到签名 30/40、相关性 2.67，200 步起中性前缀开始泄漏（15/40、30/40）。交付取 **100 步**。测评页：`artifacts/prefs/report-dpo-controlled.html`、`report-three-stage.html`。
-- **2026-10-21 重建 `artifacts/data`**：为按新口径重生成 DPO 语料而跑了一次完整 `prepare`。**它换出了一份新 tokenizer**（合并规则相同、id 全排列不同），于是 `dpo_prompts.jsonl` 的 1000 条 prompt 与旧 822 条只重合 **5 条**——旧的 `prefs.jsonl` 因此作废（已删，备份在 `/tmp/prefs-old-backup.jsonl`）。**新 `artifacts/data` 与既有 `checkpoints/*` 不兼容**（embedding 行对不上新 id），本机那份权重只能继续配 `checkpoints/tokenizer` 用；云端从头跑不受影响。已加复用闸门：`prepare` 见到 `--out/tokenizer.json` 就复用，不再静默重训。
-- **2026-10-21 DPO 22.4% 初始胜率归因**：两项叠加，**主因是长度不是风格**。①两侧独立采样 → chosen 中位 120 token、rejected 中位 71，`Δ` 与 token 数差的相关系数 **−0.972**；求和口径下 22.4% 基本是「rejected 更短」。②逐 token 归一化后胜率 **10.8%**，长度对齐子集（|Δtok|≤8，n=44）只剩 **4.5%**——风格差真实存在，因为豆包体语料里没有（`嘻嘻` 按 4 个字节级 token 编码、无 BPE merge；预训练对豆包开场 **4.77** nats/token vs 中性句 **2.93**；SFT 后 chosen 侧逐 token `logπ = −5.10`、rejected `−4.11`）。104 步后逐 token Δ 到 **+4.28 nats**、822 对 **100%** 翻正、rejected 侧似然从 `−420.8` 崩到 `−767.6`：风格学到了，代价是模板塌缩。**处置**：`synth-pref` 的 rejected 改成对 chosen 的中性改写（内容与长度固定，只动语气）并打印两侧 token 数差；每条 chosen 另按 prompt 哈希轮转一个开场方向；`train-dpo` 留出读数加 `holdout_gap_norm` / `holdout_win_rate_norm`；新增 `style-sft` 生成风格预热 SFT 数据。**新一批实测**（`artifacts/prefs/prefs.jsonl`，985 对 / 15 条拒答，覆盖 `dpo_prompts.jsonl` 全部 1000 条 prompt）：两侧 token 数差中位 **+31**（旧批 +49，且旧批 69% 的对 chosen 更长），开场 12 字去重 **787**（旧 445）、最多重复 **77** 次（旧 132）、跨对 4-gram 多样性 **0.743**（旧 0.595）、逐字抄纲要 **31%**（旧 51%）；`style-sft` 过滤后得 **682** 条（train 613 / holdout 69）。**残留**：chosen 仍普遍略长于 rejected，`seq_logprob` 仍是求和口径——风格效应与长度效应尚未完全解耦，故逐 token 读数必须一起报。
-- **拒答判定只判开头**：旧实现用 `marker in text` 扫全文找 `无法`/`不能`/`抱歉`，这三个都是普通中文词，中段出现就把好好的对丢掉（实测 `仅凭这一句话无法判断…` 被误杀）。旧批 168 条「拒答」里 **153 条是误判**，按新规则重试后全部回收，只剩 **15 条**真拒答（天气/实时数据类、政策敏感类、1 条空回复）。`skipped.jsonl` 的 `reason` 现在分 `refusal:chosen` / `refusal:rejected` / `empty` / `identical` / `over_limit`，能定位是哪一侧出的问题。**云端重跑顺序**：`prepare` → `train-sft` → `synth-pref`（新口径，需重付约 ¥5）→ `style-sft` → `train-sft --data artifacts/data-style` → `train-dpo --ref <风格 ckpt>`。**既有 822 对与 `checkpoints/{sft,dpo}` 不适用新口径**，新旧数字不得混用。
-- **2026-10-21 切分修订**：`prepare_sft` 先按 `--seed` 打乱再切（holdout 不再是文件前缀）；SFT 训练 batch 走 `seed` 派生的行置换，不再是文件顺序；`train-dpo` 按 prompt 的 sha256 留出 10%，只在留出对上报 `holdout_gap` / `holdout_margin` / `holdout_win_rate`。**既有 `checkpoints/{sft,dpo}` 与其 `train_log.jsonl` 是修订前的产物**（旧前缀 holdout、DPO 全量训练、日志混入两次 fresh run），要报新口径必须重跑 `prepare` → `train-sft` → `train-dpo`；新旧数字不得混用。
-- **产物位置**：权重与日志在 `checkpoints/{pretrain,sft,dpo}/`（`ckpt.pt` + `train_log.jsonl`，pretrain / SFT 另有 `monitor.png`），tokenizer 在 `checkpoints/tokenizer/tokenizer.json`；CLI 默认的输入输出目录是 `artifacts/`。**两者都被根 `.gitignore` 忽略**（`checkpoints/`、`projects/*/artifacts/*`），新机器 `git clone` 拿不到。唯一强制入库的 artifacts 是 `artifacts/prefs/`——`prefs.jsonl` 靠调 API 生成、**不可位级复现**，必须随机器搬运；`doubao-style-guide.md` 是 `synth-pref --guide` 的默认值，缺了默认命令直接失败。
-- **权重托管**：三段权重公开在 [HF `KeyFicller/tiny-llm-pipeline-29m`](https://huggingface.co/KeyFicller/tiny-llm-pipeline-29m)，布局与本项目一致，`Bundle.load(<snapshot>)` 可直接加载、无需改代码。**已剥离 `optimizer`**（因此不能 `--resume` 续训），权重与本地训练产物**逐张量相同**、回下载 sha256 一致，端到端生成结果一致。推/拉用 `checkpoints/sync_ckpt.py push` / `pull`。
-- **`checkpoints/sync_ckpt.py`**：它是 `checkpoints/` 下**唯一入库**的文件（`.gitignore` 为它单开一条 `!` 例外，其余 ckpt / 日志 / `weights/` / `.sync_manifest.json` 全部忽略），所以脚本跟着仓库走、权重不跟着。`push` 只上传剥离 `optimizer` 后的权重（`checkpoints/weights/`），`pull` 拉到 `checkpoints/`。需要它而不是手敲 `hf upload` 的两个原因：①`pull` 会**拒绝覆盖含 `optimizer` 的可续训完整 ckpt**（Hub 上是瘦身版，覆盖即永久失去 `--resume`），要覆盖得显式 `--force` 或改写到 `--out`；②`torch.save` **字节不稳定**（zip 里带了每次写都不同的 `serialization_id`），重新剥离永远得不到已上传的那串字节，故 `push` 靠 `checkpoints/.sync_manifest.json` 记源 ckpt 的 sha256，源没变就沿用已暂存字节——否则每次 push 都造一个内容等价的空提交。源本就是瘦身版时逐字节复制，故新机器 `pull` 后 `push` 也是干净空操作。`--stages` / `--dry-run` 可分别选段与空跑。
+- **状态**：三段权重已交付并公开在 HF；`eval` 子命令是唯一报数来源；单测 `122 passed`。**未落地**：`gen` / `chat` / `compare` CLI、LoRA 与全量 FT 的 5000 步对照（本机未跑满，待云端 GPU）。
 
 ## 目标与范围
 
 **目标**：从零训练一个约 29M 的中文小模型，走通预训练接龙 → SFT → DPO 对齐豆包体。
 
-- **模型**：`ModelConfig` 对齐 MiniMind2-Small——词表 **6400**、宽度 512、8 层、8 个 query 头、2 个 KV 头；FFN 宽度取仓库公式 `ceil(512 * pi / 64) * 64 = 1664`；绑定词嵌入后 **28,975,616** 参数。训练窗口 `max_seq_len = 768`（`pretrain_t2t_mini` 的推荐长度）。
-- **预训练数据**：`prepare` 从 `jingyaogong/minimind_dataset` 拉 `pretrain_hq.jsonl` / `sft_mini_512.jsonl`（走 HF 缓存，重跑只付一次下载），在 200MB 采样上训词表 6400 的 byte-level BPE，再打包 `train.bin` / `val.bin`。**必须钉 `DATASET_REVISION`**：该 dataset 的 `main` 已把这两个文件换成 `pretrain_t2t*` 系列，不钉旧 commit 会在新机器上 404。
-- **SFT 数据**：源文件里前后相邻的问答**没有上下文关系**，`prepare_sft` 先把每条记录拆成独立的一问一答，**按 `--seed` 打乱后**再切出**互不相交**的三份——`sft_train.jsonl` / `sft_holdout.jsonl` / `dpo_prompts.jsonl`。holdout 不再是文件前缀（源文件顺序与长度/主题相关，前缀有偏）。
-- **偏好对**：`synth-pref` 读 `dpo_prompts.jsonl`，写 `{prompt, chosen, rejected, model, created_at}`。**两侧是同一答案的两个语域**：先按豆包体生成 `chosen`，再让模型把 `chosen` 改写成中性口吻（保留内容与长度）。独立采样会让一对样本同时改变内容、长度、语气，实测 `Δ` 与两项 token 数差的相关系数 **−0.972**，DPO 主要在学「答短点」。每轮结束打印两侧 token 数差中位数作为检查。**丢弃不截断**：拒答、两侧相同、`prompt + 回答` 超过 `max_seq_len = 768` token 的对一律丢掉并计数，同时写 `<stem>.skipped.jsonl` 旁挂文件。`train-dpo` 按 prompt 的 sha256 留出 **10%**（`--holdout-frac`），训练只在其余对上；每个存盘点在留出对上写 `holdout_gap` / `holdout_margin` / `holdout_win_rate`，并附逐 token 口径 `holdout_gap_norm` / `holdout_win_rate_norm`（求和口径偏爱短的一侧，两口径分叉即长度差在替风格干活）。
-- **风格预热（`style-sft`）**：DPO 不能教会模型一个没见过的语域。首轮 22.4% 的初始胜率就是这个分布差的读数——豆包体不在预训练语料里（`嘻嘻` 未合并、按 4 个字节级 token 编码；预训练对豆包开场 4.77 nats/token vs 中性句 2.93），也不在 SFT 数据里。`style-sft` 把 `prefs.jsonl` 的 `chosen` 转成 `--data` 目录（复制 tokenizer，**丢掉照抄风格纲要的对**，新一批 832 对过滤后剩 **584** 条）。每对另带一个**按 prompt 哈希轮转的开场方向**（8 种）：只说「换一种开场」而不给替代，模型会退回纲要那句「我用最直白…」，旧批 132/822 条撞同一句。新批实测开场 12 字去重 **679/832**、最多重复 **61** 次、跨对 4-gram 多样性 **0.765**（旧批 445 / 132 / 0.595），逐字抄纲要的比例 **51% → 30%**。
-- **不做**：量化、vLLM、K8s、安全检查、MOF model card、W&B、MinHash 去重、PII 过滤。
+- **模型**：`ModelConfig`——词表 **6400**、宽度 512、8 层、8 个 query 头、2 个 KV 头；FFN 宽度取仓库公式 `ceil(512 * pi / 64) * 64 = 1664`；绑定词嵌入后 **28,975,616** 参数。训练窗口 `max_seq_len = 768`。
+- **交付读数**（40 条冻结 prompt、贪心、`rep_pen=1.5`、`max_new=128`，全部来自 `eval/results.jsonl`）：
+
+| 指标 | pretrain 34500 | sft 5000 | dpo 100 |
+| --- | --- | --- | --- |
+| 风格分 `doubao_score` | 0.093 | 1.059 | **2.326** |
+| 排比开场（前 30 字含 ≥2 个「最」） | 0/40 | 0/40 | **18/40** |
+| 跨题 4-gram 多样性 | 0.848 | 0.840 | 0.805 |
+| 平均字数 | 192.3 | 116.2 | 72.1 |
+| 留出集 response ppl | 15.1 | 35.9 | 41.0 |
+
+- DPO 相对 SFT 的配对差 **+1.267**，bootstrap 2000 次 95% CI **[0.549, 1.956]**，DPO 胜 **77.5%** / 平 10% / SFT 胜 12.5%。
+- 目标是让模型习得「最…最…」排比的豆包体开场：预训练与 SFT 都是 0/40，DPO 后 18/40。风格分上涨的同时**必须并列报退化护栏**（`repeat_4`、跨题多样性、平均字数、留出 ppl），否则「更短更密集」会被误读成对齐。DPO 的 ppl 高于 SFT 是预期内的——它专精一个窄语域。
 
 ## 架构
 
@@ -51,61 +48,47 @@
 
 ## 技术栈
 
-Python 3.12.13，共享 venv。`torch`（fp32；设备按 CUDA → MPS → CPU 的顺序选取）、`tokenizers`、`numpy`、`langchain-deepseek`、`typer`、`rich`、`matplotlib`、`pytest`。不新增依赖。
+Python 3.12.13，共享 venv。`torch`（fp32；设备按 CUDA → MPS → CPU 的顺序选取）、`tokenizers`（钉 `==0.23.2`）、`numpy`、`langchain-deepseek`、`typer`、`rich`、`matplotlib`、`pytest`。不新增依赖。
 
 ## 交付物
 
-**训练（已交付）**
+**权重**：三段公开在 [HF `KeyFicller/tiny-llm-pipeline-29m`](https://huggingface.co/KeyFicller/tiny-llm-pipeline-29m)，布局与本项目一致，`Bundle.load(<snapshot>)` 可直接加载、无需改代码。**已剥离 `optimizer`**（因此不能 `--resume` 续训），权重与训练产物逐张量相同。推/拉用 `checkpoints/sync_ckpt.py push` / `pull`：`pull` 会**拒绝覆盖含 `optimizer` 的可续训完整 ckpt**（Hub 上是瘦身版，覆盖即永久失去 `--resume`），要覆盖得显式 `--force` 或改写到 `--out`；`push` 只上传剥离后的权重，靠 `checkpoints/.sync_manifest.json` 记源 ckpt 的 sha256，源没变就沿用已暂存字节（`torch.save` 字节不稳定，否则每次 push 都造一个内容等价的空提交）。`--stages` / `--dry-run` 可分别选段与空跑。**Hub 上的 `dpo/train_log.jsonl` 与 `dpo/ckpt.pt`（100 步）不同源**，读 DPO 曲线以 ckpt 的 `step` 为准。
 
-- `prepare` 的**派生文件**（`train.bin` / `val.bin` / 三份切分）在同 `tokenizers` 版本下位级可复现（切分另依赖 `--seed`，默认 42；改 seed 即换切分）。只要 tokenizer 已存在，现在**一律复用、不重训**（`--retrain-tokenizer` 强制重训）——因为这一条曾被证伪：**BPE 的 id 分配跨版本不稳定**。实测把同一份 200MB 样本在新环境重训，得到**合并规则相同、id 全排列不同**的词表（`嘻嘻` 都是 4 个 token，`朋友` 都是 1 个 token，但 id 从 `[1601,364]` 变成 `[2023,335]`）。后果不是「换份词表继续用」而是全链条失效：①`checkpoints/{pretrain,sft,dpo}` 的 embedding 行与新 id 无对应关系；②`prepare_sft` 的长度过滤按 token 数判，长度一变 `random.shuffle` 后的切分整体平移——**重跑后 822 条旧 prompt 里 817 条不在新的 `dpo_prompts.jsonl` 中**。所以**权重与它的 tokenizer 必须一起搬运**，重训 tokenizer 等于从头再训一遍。`tokenizers` 已在根 `requirements.txt` 钉 `==0.23.2`；`numpy`（2.5.3）仍是传递依赖、未钉，只影响 uint16 打包。切分口诀 `val_docs, train_docs = kept[:n_val], kept[n_val:]` → **`train.bin` 从第 `n_val` 篇文档开始**，做前缀比对要拿 `val.bin`（从第 0 篇起）。
-- **存盘**：每 **500** 步写 `ckpt.pt`（优化器 / 累计 token / 行游标 / **`horizon`**）。**`ckpt.pt` 每步覆盖同一路径**，最优权重可能被末步盖掉——SFT 靠 `best.pt` 兜（见下）。
-- **一次 run 拥有自己的日志**（`train_log.jsonl` 与 SFT 的 `best.pt`）：**fresh run 覆盖日志、并删掉上一次 run 留下的 `best.pt`**；`--resume` 只截掉步数大于 ckpt 的行，其余照旧追加。所以同一 `--out` 重复跑不再把两次 run 拼成一份日志。**交付的 `checkpoints/dpo/train_log.jsonl` 是旧代码留下的反例：208 行只有 104 个 step**（第 104 行 `lr=3.0e-6`，第 105 行退回 `step=1, lr=3e-5`），引用 DPO 曲线以 ckpt 的 104 步为准，重跑一次即被覆盖。
-- **预训练**：`--val-every` 默认 **-1**（关）。`--resume` 从该步的数据游标与累计 token 接着训，不重放看过的窗口。
-- **SFT**：存盘同预训练，另有 `monitor.png`（每 10 步覆盖）与 `--val-every` 默认 **1000**（按该步从 holdout 抽 5 条贪心作答，不重复固定的前 5 条）。batch 走 `seed` 派生的行置换，不再是文件顺序（`row_order`）；`--resume` 用同一 `(行数, seed)` 重建置换，游标语义不变。**留出困惑度最低的那次另存 `best.pt`，也是返回值**——续跑时从日志恢复已有最优值，更差的步盖不掉。`--resume` 从行游标接着训，并截掉日志里步数更大的行。
-- **DPO**：只写 `ckpt.pt`（无 `monitor.png` / `best.pt`），训练 batch 同样走 `seed` 派生的置换。**按 prompt hash 留出 10% 不参与训练**，每个存盘点在日志写 `holdout_gap` / `holdout_margin` / `holdout_win_rate`；训练批次上的 `margin` / `margin_avg` 只是训练诊断。`--ref` 全程只读未写。
-- **`--max-steps` 是绝对值**：`--resume` 时接着 ckpt 里的 `step`；fresh stage 从 0 起（base ckpt 的 `step` 属上一段，不继承）。
-- **`--lr` 默认** `SFT_LR = 2e-4` / `DPO_LR = 1e-5`；交付用的是 DPO `--lr 3e-5`。`--beta` 与 `--epochs` 也必须显式给——默认 `beta = 0.1` 落在「通顺但没风格」的欠训点。
-- **`weight_decay = 0.1` 只作用于投影矩阵**（`_optimizer`）：RMSNorm 的 gain 与 tied embedding 不进衰减组，`weight_decay=0.0`。按交付日程算，`wd` 会把无梯度反抗的参数乘到 **0.15**（预训练 34500 步）/ **0.76**（SFT 5000 步）/ **0.994**（DPO 104 步）；交付 ckpt 里 **89% 的 norm gain 跌破 0.9、最小 0.053**（初值 1.0），就是这条拉力留下的痕迹。**三条既有 ckpt 是这次修正前训的**，读数照旧可比，但它们**不能 `--resume`**——旧 ckpt 存的是 1 个参数组，新优化器是 2 个，`load_state_dict` 会硬报 `different number of parameter groups`。重训必须从 `prepare` 出的数据起新的 run。
-- **余弦视野属于 run，不属于这次调用**：`horizon` 在第一个 ckpt 里记下，`--resume` 若按新的 `--epochs` / `--max-steps` 算出不同视野就**直接报错**，报错里给出该传的值（要么原样传回，要么从 ckpt 起一个 fresh run）。旧 ckpt 没有该字段时退回传入值。理由是一组实测：5000 步的视野按 7000 重算，学习率从 `2.0e-5` 跳回 `5.4e-5`，留出困惑度 **6.34 → 8.92**。DPO 同理，视野由 `--epochs × 每 epoch 步数` 或 `--max-steps` 决定——这是同一 `beta` 下不同 `epochs` 结果差很多的原因。
+**数据与 `artifacts/`**：`checkpoints/` 与 `projects/*/artifacts/*` 被根 `.gitignore` 忽略，新机器 `git clone` 拿不到。唯一强制入库的是 `artifacts/prefs/`——`prefs.jsonl` 靠调 API 生成、**不可位级复现**，必须随机器搬运；`doubao-style-guide.md` 是 `synth-pref --guide` 的默认值，`style-fewshot.md` 是 `style-sft` 的默认值，缺了默认命令直接失败。**权重与它的 tokenizer 必须一起搬运**：BPE 的 id 分配跨版本不稳定，重训 tokenizer 会换出一份 id 全排列不同的词表，已有 ckpt 的 embedding 行与新 id 无对应关系，等于从头再训。`prepare` 见到 `--out/tokenizer.json` 就复用、不再静默重训（`--retrain-tokenizer` 强制重训）。
+
+- **预训练数据**：`prepare` 从 HF 数据集仓库拉 `pretrain_hq.jsonl` / `sft_mini_512.jsonl`（仓库 id 见 `data.py` 的默认参数；走 HF 缓存，重跑只付一次下载），在 200MB 采样上训词表 6400 的 byte-level BPE，再打包 `train.bin` / `val.bin`。**必须钉 `DATASET_REVISION`**：该仓库的 `main` 已把这两个文件换掉，不钉指定 commit 会在新机器上 404。派生文件在同 `tokenizers` 版本下位级可复现；切分另依赖 `--seed`（默认 42）。
+- **SFT 数据**：源文件里前后相邻的问答**没有上下文关系**，`prepare_sft` 先把每条记录拆成独立的一问一答，按 `--seed` 打乱后再切出**互不相交**的三份——`sft_train.jsonl` / `sft_holdout.jsonl` / `dpo_prompts.jsonl`。holdout 不做文件前缀切分（源文件顺序与长度/主题相关，前缀有偏）。
+- **偏好对**：`synth-pref` 读 `dpo_prompts.jsonl`，写 `{prompt, chosen, rejected, model, created_at}`，追加式、默认续跑（已在输出里的 prompt 跳过，中断重跑不重复计费）。**两侧是同一答案的两个语域**：先按豆包体生成 `chosen`，再让它把 `chosen` **改写成中性口吻**（保留事实、结论、结构，长度相当）。独立采样会让一对样本同时改变内容、长度、语气，DPO 于是主要在学「答短点」。**丢弃不截断**：拒答、两侧相同、`prompt + 回答` 超过 `max_seq_len` 的对一律丢掉并计数，同时写 `<stem>.skipped.jsonl` 旁挂文件，`reason` 分 `refusal:chosen` / `refusal:rejected` / `empty` / `identical` / `over_limit`。拒答只判开头：`无法` / `不能` / `抱歉` 都是普通中文词，扫全文会把正常回答误杀。交付数据 `prefs.jsonl` 985 对 / 15 条真拒答，覆盖 1000 条 prompt。
+- **开场词按 prompt 哈希分配**：风格纲要里的例句会被模型照抄，`chosen_system` 因此带一条 `_NO_COPY`（例句只是示范、每条换一种开场、不要每次从「宝子」起头），另按 prompt 的 sha256 从严选 24 词池里取 3 个「最 X」写进 system prompt——2024 种组合，跨重启与分片一致。只约束词汇、不约束句式：按角度轮转会让每条都从同一个骨架起头。`synth_one` 每轮打印两侧 token 数差中位数。
+- **风格预热（`style-sft`）**：DPO 教不会模型一个语料里没出现过的语域。`style-sft` 把 `prefs.jsonl` 的 `chosen` 转成 `--data` 目录（复制 tokenizer，**丢掉照抄风格纲要的对**），过滤后得 682 条（train 613 / holdout 69）。
+
+**训练（交付配置）**
+
+- 预训练 34500 步（val ppl **11.8**，423M token）→ SFT 5000 步（留出回答 ppl **6.34**，微调前基线 **38.15**）→ DPO **100 步**（`--beta 0.1 --epochs 1 --lr 1e-5 --max-steps 100`，`--ref` 全程只读）。
+- **生成时必须开 `repetition_penalty`（1.3–1.5）**：它是交付的一部分，不是可选润色。
+- **存盘**：每 **500** 步写 `ckpt.pt`（优化器 / 累计 token / 行游标 / `horizon`）。`ckpt.pt` 每步覆盖同一路径，SFT 另有 `best.pt`（留出困惑度最低的那次，也是返回值）兜住末步覆盖。一次 run 拥有自己的日志：fresh run 覆盖日志并删掉上一次的 `best.pt`，`--resume` 只截掉步数大于 ckpt 的行。
+- **`--max-steps` 是绝对值**，fresh stage 从 0 起（base ckpt 的 `step` 属上一段，不继承）。**余弦视野属于 run**：`horizon` 记在第一个 ckpt 里，`--resume` 若按新的 `--epochs` / `--max-steps` 算出不同视野就直接报错，报错里给出该传的值。
+- **SFT batch 走 `seed` 派生的行置换**（不再是文件顺序），`--resume` 用同一 `(行数, seed)` 重建置换；预训练 `--resume` 从数据游标与累计 token 接着训，不重放看过的窗口。
+- **DPO 按 prompt 的 sha256 留出 10%**（`--holdout-frac`），只在其余对上训练；每个存盘点在留出对上写 `holdout_gap` / `holdout_margin` / `holdout_win_rate`，并附逐 token 口径 `holdout_gap_norm` / `holdout_win_rate_norm`（求和口径偏爱短的一侧，两口径分叉即长度差在替风格干活）。
+- **训练中止护栏**（`train/dpo.py` 顶部 `GUARD_*`）：每 10 步复查留出集下一词准确率，跌破参考的 **75%**，或 rejected 侧下压 **>20 nats 且 >2 倍** chosen 涨幅，即抛错中止。`holdout_gap` 只说明两侧在拉开，不说明模型是否被训坏。
+- **`weight_decay = 0.1` 只作用于投影矩阵**：RMSNorm 的 gain 与 tied embedding 不进衰减组。
+
+**评测（`eval` 子命令，唯一允许的报数来源）**
+
+- 命令 `tiny-llm-pipeline eval --stages pretrain,sft,dpo --prefix "用豆包体回答：" --rep-pen 1.5 --max-new 128 [--bundle checkpoints] [--prompts eval/prompts.jsonl] [--out eval/results.jsonl] [--data artifacts/data]`；默认按**项目目录**解析，从仓库根或项目目录跑都一样。
+- 题集 `eval/prompts.jsonl` 40 条（入库、冻结、不临场挑），与偏好对的 prompt **零交集**。解码固定贪心（`temperature=0`）；`--prefix` 是题面的一部分（风格切换靠它，`prompts_sha256` 覆盖前缀后的文本），`rep_pen` / `max_new` 同样是交付口径，改动即改题面，run 头会自动记下。
+- 指标：`doubao_score`（25 词加权词表密度，按每 100 字计分）、`distinct_1` / `distinct_2` / `repeat_4`（单条内 4-gram 重复占比）、`longest_run`（最长同字连跑）。汇总另有 **`cross_prompt_distinct_4`**：把同一段全部回答拼起来算 4-gram 多样性——单条 `repeat_4` 抓不到「每条回答同一个开场白」，这一项才抓得到。
+- 配对与区间：`doubao_delta_dpo_minus_sft` 给 `mean` / `ci95`（bootstrap 2000 次重采样，种子固定）/ `dpo_win_rate` / `tie_rate` / `sft_win_rate`。空输出照记（`chars=0` 仍是一行），不跳过。
+- 行结构：`kind="run"`（commit / device / tokenizer hash / steps / 题集 sha256 / 解码参数 / 依赖版本）→ 逐项 `kind="item"` → `kind="summary"`；**每行写完即 flush**，中途失败已得结果不回滚；每次 run 覆盖同名文件而非追加。
+- 本机缺 `artifacts/data`，重跑 `eval` 不会产出 `ppl` 段（各段在 `sft_holdout.jsonl` 上的 response-token 困惑度）；已入库的 `results.jsonl` 里那段是数据还在时跑出来的。
+- **未做**：LLM 配对裁判（`eval/judge.py`）。`doubao_score` 是代理指标，报读数时必须并列退化护栏。
+
+**推理与查看**：`eval/sample.py` 离线抽样 + 自包含 HTML，种子由 `(seed, stage, rep_pen, prompt, index)` 派生，同一批可复现、与执行顺序无关；`eval/serve.py` 本地对照页，三段并排，只绑 `127.0.0.1`、无鉴权、**不落盘**，默认 `rep_pen=1.5`、`temperature=0`（贪心）、`max_new=64`。两者共用 `generate.py`：同一参数、同一种子产出的 HTML 逐字节相同。采样（`temperature=0.8`）只掉连贯性、不加内容，故页面默认仍是贪心。
 
 **SFT 的 LoRA 路径（已落地；对照实验待云端）**
 
-- 入口 `train-sft --lora-rank 8 --lora-alpha 16`；**`--lora-rank 0` 是默认值，等于原来的全量微调，行为一字未变**。只打 attention 的 `q_proj` / `k_proj` / `v_proj` / `o_proj`，`rank=8`、`alpha=16`，`b` 零初始化（刚注入时 forward 与 base **逐位相等**）。可训参数 **212,992 / 28,975,616 = 0.735%**，其余一律 `requires_grad=False`；`_optimizer` 只把 `requires_grad` 的参数交给 `AdamW`。
-- **产物是 adapter ckpt**（`ckpt.pt` / `best.pt` 同一套逻辑）：载荷是 `cfg` / `lora` / `base` / `adapter` / `step` / `seed` / `tokenizer_hash`（+`optimizer` / `tokens` / `cursor`），**没有 `model` 键**。`base` 按传入原样记路径，换机后用 `load_ckpt(..., base=...)` 覆盖。
-- **`load_ckpt` 认 adapter 且加载即 merge**：解 base → 注入 → 把 `scale·B@A` 折回权重、还原成普通 `nn.Linear`，返回与全量 ckpt 同形的 `TinyLM`。所以 `eval_sft_ppl`、`eval/sample.py` 的 `Bundle.load`、DPO 的 `--ref` **零改动**就能读 LoRA 产物。`--resume` 走 `load_lora_ckpt`，**不 merge**，保留可训 A/B 接着练。
-- 报错是硬的，不降级：base 缺失 / base 自己又是 adapter / adapter 与 base 的 tokenizer hash 或 `cfg` 不符 / 传入 hash 不符，全部拒绝。
-- 云端跑法（本机 **未跑满**）：
-  ```
-  ./start.sh run tiny-llm-pipeline prepare --out projects/tiny-llm-pipeline/artifacts/data
-  ./start.sh run tiny-llm-pipeline train-sft \
-    --data projects/tiny-llm-pipeline/artifacts/data \
-    --base projects/tiny-llm-pipeline/checkpoints/pretrain/ckpt.pt \
-    --out projects/tiny-llm-pipeline/artifacts/sft-lora \
-    --lora-rank 8 --max-steps 5000 --lr 2e-4
-  ```
-  参考组同参数换 `--lr 1e-3`（`2e-4` 就是 `SFT_LR`，与全量 FT 对齐）。读数口径：同一份 `sft_holdout.jsonl` 上跑 `eval_sft_ppl`，与全量 FT 的 **6.34** 比；**LoRA 更差就如实写**。
-- **未运行**：上面那组 5000 步对照。`artifacts/data` 本机缺失（`artifacts/` 被 `.gitignore` 忽略），且未认证的 HF 下载在 256 MB 处卡死。跑之前先确认 `prepare` 重建出的 tokenizer hash 与 `checkpoints/pretrain/ckpt.pt` 一致，否则 `load_ckpt` 硬报错。
-
-**`synth-pref`（数据流水线一环）**：**追加式、默认续跑**——已在输出里的 prompt 跳过，中断重跑不重复计费；**重跑会把所有历史失败 prompt 再试一遍**（resume 只跳过已成功的），而拒答在 `temperature 0.8` 下高度可复现、重试基本不转正，所以拒答越攒越多、扩量轮的调用量高于新增 prompt 数。**它是流水线里唯一不可位级复现的一步**（调 API，无 seed 无缓存）。
-
-**chosen 侧句式收窄（实测，已改 prompt）**：风格纲要被逐字塞进 chosen 的 system prompt，纲要里的例句也被模型照抄——822 对里 **421 对（51%）含有至少一段 8 字逐字来自纲要**，最常见的 12 字开头「我用最直白、最不绕弯、最」出现 **132 次**，**28.3% 的对与至少 10 对共享同一个开头**。这正是 DPO 跨题 4-gram 多样性掉到 0.572 的来源。`chosen_system` 因此加了一条 `_NO_COPY`：例句只是示范、不必照抄、每条换一种开场、不要每次从「宝子」起头。
-
-**这条改动对既有 822 对无效**——`resume=True` 会跳过已完成的 prompt。要让新 prompt 生效必须**写到新路径**（如 `--out artifacts/prefs/prefs-v2.jsonl`），旧文件保留作对照；`resume=False` 重试全部会付两遍钱，不推荐。
-
-**推理与查看（已落地）**
-
-- `eval/sample.py`：离线抽样 + 自包含 HTML。种子由 `(seed, stage, rep_pen, prompt, index)` 派生，同一批可复现、与执行顺序无关。
-- `eval/serve.py`：本地对照页，三段并排，每栏带 `chars` / `dist4` / `tempo` 三项读数。只绑 `127.0.0.1`、无鉴权、**不落盘**。默认 `rep_pen=1.5`、`temperature=0`（贪心）、`max_new=64`。
-- 两者共用 `generate.py`，重构到共用之前后同一参数同一种子产出的 HTML **逐字节相同**。同一问在 `temperature=0.8` 下 DPO 栏出现 U+FFFD——**采样只掉连贯性、不加内容**，故页面默认仍是贪心。
-
-**`eval` 子命令（已落地，唯一允许的报数来源）**
-
-- 命令：`tiny-llm-pipeline eval [--bundle checkpoints] [--prompts eval/prompts.jsonl] [--out eval/results.jsonl] [--stages sft,dpo] [--rep-pen 1.5] [--max-new 64] [--data artifacts/data]`。`--bundle` / `--prompts` / `--out` 默认按**项目目录**解析，从仓库根或项目目录跑都一样。
-- 题集：`eval/prompts.jsonl` 40 条（入库、冻结、不临场挑），与 `artifacts/prefs/prefs.jsonl` 的 822 条 prompt **零交集**（已核）。解码**固定贪心**（`temperature=0`），故同一批 ckpt 重跑得到**逐项相同的 item 行**与相同汇总指标（`date` / `elapsed_s` 两个时间字段除外，已实测两次运行一致）；`rep_pen` 是交付口径，改动它等于改题面，要一起写进 run 头（已自动写）。
-- 指标：`doubao_score`（权重词表见 `evaluate.py` 顶部，按每 100 字计分）、`distinct_1` / `distinct_2` / `repeat_4`（单条内 4-gram 重复占比）、`longest_run`（最长同字连跑）。汇总里另有 **`cross_prompt_distinct_4`**：把同一段全部回答拼起来算 4-gram 多样性——单条 `repeat_4` 抓不到「每条回答同一个开场白」，这一项才抓得到（实测 DPO 0.572 vs SFT 0.862）。
-- 配对与区间：`doubao_delta_dpo_minus_sft` 给 `mean` / `ci95`（bootstrap 2000 次重采样，种子固定）/ `dpo_win_rate` / `tie_rate` / `sft_win_rate`。**空输出照记**（`chars=0` 仍是一行），不跳过。
-- 行结构：`kind="run"`（commit / device / tokenizer hash / steps / 题集 sha256 / 解码参数 / 依赖版本）→ 逐项 `kind="item"` → `kind="summary"`。**每行写完即 flush**，中途失败已得结果不回滚；**每次 run 覆盖同名文件而非追加**（旧 `train_log.jsonl` 混了两次 fresh run 的教训）。
-- 文件位置：`eval/results.jsonl`（入库）。`--data` 存在时汇总多一段 `ppl`（各段在 `sft_holdout.jsonl` 上的 response-token 困惑度）；本机缺 `artifacts/data`，故当前文件无该段。
-- **未做**：LLM 配对裁判（`eval/judge.py`）。`doubao_score` 是代理指标，报读数时必须并列退化护栏。
+- 入口 `train-sft --lora-rank 8 --lora-alpha 16`；**`--lora-rank 0` 是默认值，等于全量微调，行为一字未变**。只打 attention 的 `q_proj` / `k_proj` / `v_proj` / `o_proj`，`b` 零初始化（刚注入时 forward 与 base 逐位相等）。可训参数 **212,992 / 28,975,616 = 0.735%**，其余 `requires_grad=False`。
+- 产物是 adapter ckpt（`cfg` / `lora` / `base` / `adapter` / `step` / `seed` / `tokenizer_hash`，**没有 `model` 键**）；`load_ckpt` 认 adapter 且**加载即 merge**，返回与全量 ckpt 同形的 `TinyLM`，故 `eval_sft_ppl`、`Bundle.load`、DPO 的 `--ref` 零改动即可读。`--resume` 走 `load_lora_ckpt`，不 merge。base 缺失 / base 又是 adapter / tokenizer hash 或 `cfg` 不符一律硬报错，不降级。
+- **未运行**：5000 步对照。参考组同参数换 `--lr 1e-3`，读数口径为同一份 `sft_holdout.jsonl` 上的 `eval_sft_ppl`，与全量 FT 的 **6.34** 比；LoRA 更差就如实写。
 
 **未落地**：`gen` / `chat` / `compare`。落地时 **`gen` 必须暴露 `repetition_penalty`（默认约 1.3）**，否则交付的 DPO 权重会复读。
