@@ -89,3 +89,60 @@ def test_retriever_returns_langchain_documents() -> None:
 def test_retriever_returns_nothing_when_no_term_matches() -> None:
     """Every score is 0, so the best-ratio floor keeps nothing."""
     assert _retriever().invoke("zebra") == []
+
+
+def _full_scan_order(bm25: BM25, tokens: list[str], k: int) -> list[int]:
+    """The order the retriever produced before the index: score every chunk, drop the
+    chunks no term matched (the best-ratio floor drops them anyway), then take ``k``."""
+    scores = [bm25.score(tokens, index) for index in range(bm25.n)]
+    order = sorted(range(len(scores)), key=lambda index: -scores[index])
+    return [index for index in order if scores[index] > 0][:k]
+
+
+def _pruning_corpus() -> list[str]:
+    """Deliberate equal scores (``alpha beta`` / ``beta alpha``) and one very common term."""
+    return [
+        "alpha beta",
+        "beta alpha",
+        "fees fees fees overdue",
+        "fees and charges apply",
+        "an unrelated paragraph here",
+        "filler filler beta gamma",
+    ]
+
+
+@pytest.mark.parametrize("k", [1, 5, 20])
+def test_top_k_returns_what_a_full_scan_returns(k: int) -> None:
+    """Pruning is exact: the same chunks, in the same order, without scoring the rest."""
+    bm25 = BM25([tokenize(text) for text in _pruning_corpus()])
+
+    for query in ("fees", "fees and charges", "alpha beta", "beta filler gamma"):
+        tokens = tokenize(query)
+        assert bm25.top_k(tokens, k) == _full_scan_order(bm25, tokens, k)
+
+
+def test_top_k_scores_one_chunk_when_one_term_decides(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A full scan is one score per chunk. The bound must stop after the rare hit."""
+    texts = [f"filler number {i}" for i in range(200)] + ["a rare serendipity"]
+    bm25 = BM25([tokenize(text) for text in texts])
+    scored: list[int] = []
+    original = bm25.score
+    monkeypatch.setattr(bm25, "score", lambda q, i: scored.append(i) or original(q, i))
+
+    order = bm25.top_k(tokenize("filler serendipity"), 1)
+
+    assert order == [200]  # the rare term decides the ranking
+    assert len(scored) == 1  # the 200 filler-only chunks never reach score()
+
+
+
+def test_top_k_finds_nothing_when_no_term_appears() -> None:
+    bm25 = BM25([tokenize("alpha beta"), tokenize("gamma")])
+
+    assert bm25.top_k(tokenize("zebra"), 5) == []
+
+
+def test_top_k_asks_for_nothing_at_a_non_positive_k() -> None:
+    bm25 = BM25([tokenize("alpha")])
+
+    assert bm25.top_k(tokenize("alpha"), 0) == []

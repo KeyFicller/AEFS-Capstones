@@ -143,19 +143,13 @@ def search_rows(
     if bm25 is not None:
         from multimodal_doc_qa.retrievers.bm25 import tokenize
 
-        samples = []
-        n_chunks = len(retriever.corpus)
-        for query in queries:
-            tokens = tokenize(query)
-            samples.extend(
-                time_ms(
-                    lambda t=tokens, b=bm25, n=n_chunks: [
-                        b.score(t, position) for position in range(n)
-                    ],
-                    reps,
-                )
-            )
-        return [summarize(f"{label}: score loop", samples)]
+        tokenized = [tokenize(query) for query in queries]
+        top_k = [
+            value
+            for tokens in tokenized
+            for value in time_ms(lambda t=tokens, b=bm25, k=retriever.k: b.top_k(t, k), reps)
+        ]
+        return [summarize(f"{label}: top-k", top_k)]
     return []
 
 

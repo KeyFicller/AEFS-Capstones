@@ -81,10 +81,10 @@ MDQ_ARTIFACTS_DIR=projects/multimodal-doc-qa/artifacts-mmdocir \
 
 ## 结论
 
-1. **rerank 仍是最大的一块**：2165ms vs 检索 211ms。它随 top_k 涨、不随语料涨。
-2. **检索内部已经换主角了**：forward 44ms + MaxSim 扫描 106ms + BM25 ~28ms + RRF/截断 ~8ms。**扫描反超了模型推理**，两者合计占 71%。
-3. **BM25 是最便宜的加速点**：纯 Python 循环打 19,399 个 chunk 花 28ms，一点没优化过（`Counter` 查表 + math.log，无倒排表、无候选裁剪）。加个倒排索引就能砍掉一个数量级；MaxSim 那 106ms 则要动检索结构（聚类/量化/IvFPQ）才有得降。
-4. **一次性成本仍主要是模型**：6.0s 加载视觉编码器；1.42GB 索引只要 0.5–0.95s（页缓存命中），`build lexical` 的 0.4s 也基本是切词 19k chunk。
+1. **rerank 仍是最大的一块**：2165ms vs 检索 177ms。它随 top_k 涨、不随语料涨。
+2. **检索内部的主角是 MaxSim 扫描**：MaxSim 106ms + 编码 query 45ms + BM25 4.0ms + RRF/截断 ~8ms。扫描占 60%，编码 25%，BM25 已降到 2%。
+3. **BM25 已经不再是加速点**：倒排 + 上界剪枝后 40ms → 3.1ms。剩下能降的只有 MaxSim 那 106ms，而它要动检索结构（聚类/量化/IvFPQ）才有得降，且必须 eval 兜底。批量化反而更慢（一个 GEMM + segment max 要 263ms，小 matmul 才 105ms）。
+4. **一次性成本仍主要是模型**：6.0s 加载视觉编码器；1.42GB 索引只要 0.5–0.9s（页缓存命中）；倒排表把 `build lexical` 从 0.39s 推到 0.48s、内存约 7MB。
 5. **两处「假账」要记住**：之前以为的 `.cpu()` 传 22ms 是 forward 异步发射记错了账（同步后 0.25ms）；`encode_query` 末尾的 `torch.mps.empty_cache()` 则是真白付 1.4–1.6ms。
 
 ## 迭代记录
@@ -95,6 +95,7 @@ MDQ_ARTIFACTS_DIR=projects/multimodal-doc-qa/artifacts-mmdocir \
 | --- | --- | --- | --- | --- | --- | --- |
 | 0 | 10-25 | 大语料下瓶颈会变 | 加 `MDQ_ARTIFACTS_DIR` 支持 + `index.search` / `score loop` 拆行；量 2600 页 | 210.75 | 2164.62 | 扫描反超推理；BM25 是最便宜的加速点 |
 | 1 | 10-25 | 多 query 的 rerank 可以并发 | listwise 契约不变；`rerank_pages` 改 async，`aio.run` + `Semaphore(4)` gather；串行作为基线留在 bench，产品只走 batch | 210.75（未变） | 单次调用中位 2164.62（单独）→ 5145（4 路 batch 内） | 16 query 墙钟 22690 ms。上行在 2 路就饱和，4 路墙钟最低；真正的杠杆是 12.52 MB 的 payload |
+| 2 | 10-25 | BM25 可以把大多数 chunk 排除掉 | 启动时建倒排表；查询取 posting 并集，按上界降序打分，上界低于第 k 名即 break | 210.75 → **177.28**；lexical 40.04 → **3.10** | 未复测 | 13×。312 条评测问题的排名与原全扫逐位相同。`build lexical` 0.39 → 0.48s |
 
 ### 第 1 条的细节
 
@@ -146,3 +147,19 @@ MDQ_ARTIFACTS_DIR=projects/multimodal-doc-qa/artifacts-mmdocir \
 **3.9×**，不需要多花一分钱、多调一次 API。这条还没落地：`build_page_blocks` 仍走 PNG 2048。
 
 质量前提：rerank 只是从 5 页里排序，看缩略图足够；需要读小字的是 answerer（synth），那条路径要保留原分辨率（它还要出 bbox 引证）。
+
+### 第 2 条的细节
+
+只建倒排表不够：7 个词的 query 取并集后候选还有 84%，`the` 一个词就命中 83.8% 的 chunk。所以必须叠加**上界剪枝** —— 一个词最多贡献 `idf × (k1+1)`，按这个上界从高到低打分，一旦某候选的上界低于当前第 k 名，它和它后面的全部跳过（融合臂的 `stage_k` 是 20，不是 5）。
+
+| k | 全扫 | 剪枝 | 实际打分 |
+| --- | --- | --- | --- |
+| 5 | 21.99 ms | 2.96 ms | 48 – 547 |
+| 20 | 22.25 ms | 4.38 ms | 161 – 1,608 |
+| 40 | 22.25 ms | 4.71 ms | 415 – 1,709 |
+
+剪枝是**精确**的：被剪掉的 chunk 数学上不可能进 top-k，312 条评测问题逐位复现原排名。代价是启动时多 95 ms 建表、约 7 MB 内存（37,062 词 / 848,241 条 posting），不落盘。
+
+一个实现坑：维护 top-k 必须用 `heapq`。用 `sorted()` 每次重算第 k 名会让 k=20 变成 **75.82 ms**，比全扫还慢三倍。
+
+一个边界：上界对「全是高频词」的 query 偏松。`what is the model` 仍能剪到 2.36 ms，但如果 query 的每个词都出现在大半语料里，剪枝会退化到接近全扫 —— 不会更慢，只是没收益。

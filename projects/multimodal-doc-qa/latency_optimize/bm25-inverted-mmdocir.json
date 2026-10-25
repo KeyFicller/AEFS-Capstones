@@ -1,0 +1,135 @@
+{
+  "device": "mps",
+  "dtype": "float16",
+  "top_k": 5,
+  "reps": 3,
+  "artifacts_dir": "projects/multimodal-doc-qa/artifacts-mmdocir",
+  "corpus": "corpus=37docs/2600pages/19399chunks",
+  "n_queries": 3,
+  "one_time_seconds": [
+    {
+      "stage": "load MultiVectorEncoder",
+      "seconds": 5.850050166016445
+    },
+    {
+      "stage": "load multivector index",
+      "seconds": 0.5704796659993008
+    },
+    {
+      "stage": "load ocr index",
+      "seconds": 0.11224283394403756
+    },
+    {
+      "stage": "build maxsim",
+      "seconds": 0.4149841250036843
+    },
+    {
+      "stage": "build lexical",
+      "seconds": 0.47993695799959823
+    },
+    {
+      "stage": "build hybrid-maxsim",
+      "seconds": 1.2016375830280595
+    }
+  ],
+  "per_query_ms": [
+    {
+      "stage": "encode_query/processor",
+      "median": 0.8474579663015902,
+      "p90": 1.0317920241504908,
+      "min": 0.6113749695941806,
+      "n": 9
+    },
+    {
+      "stage": "encode_query/forward",
+      "median": 42.286832991521806,
+      "p90": 46.97975004091859,
+      "min": 36.34958295151591,
+      "n": 9
+    },
+    {
+      "stage": "encode_query/transfer",
+      "median": 0.2619170118123293,
+      "p90": 0.2857919898815453,
+      "min": 0.2376670017838478,
+      "n": 9
+    },
+    {
+      "stage": "encode_query/empty_cache",
+      "median": 1.468166010454297,
+      "p90": 1.668499957304448,
+      "min": 1.3779999571852386,
+      "n": 9
+    },
+    {
+      "stage": "encode_query [total]",
+      "median": 47.594749950803816,
+      "p90": 49.15379197336733,
+      "min": 43.69270900497213,
+      "n": 9
+    },
+    {
+      "stage": "maxsim: invoke",
+      "median": 168.3939170325175,
+      "p90": 195.96491602715105,
+      "min": 157.89787500398234,
+      "n": 9
+    },
+    {
+      "stage": "maxsim: index.search",
+      "median": 106.24600003939122,
+      "p90": 119.47849998250604,
+      "min": 104.60616694763303,
+      "n": 9
+    },
+    {
+      "stage": "lexical: invoke",
+      "median": 3.099124995060265,
+      "p90": 3.634541993960738,
+      "min": 2.7254580054432154,
+      "n": 9
+    },
+    {
+      "stage": "lexical: top-k",
+      "median": 2.967041975352913,
+      "p90": 3.579874988645315,
+      "min": 2.6684170006774366,
+      "n": 9
+    },
+    {
+      "stage": "hybrid-maxsim: invoke",
+      "median": 177.28387500392273,
+      "p90": 188.71366698294878,
+      "min": 159.99591699801385,
+      "n": 9
+    },
+    {
+      "stage": "hybrid-maxsim: dense",
+      "median": 165.14016699511558,
+      "p90": 188.40445805108175,
+      "min": 157.1551249944605,
+      "n": 9
+    },
+    {
+      "stage": "hybrid-maxsim/dense: index.search",
+      "median": 105.82995798904449,
+      "p90": 119.05612499685958,
+      "min": 103.12899999553338,
+      "n": 9
+    },
+    {
+      "stage": "hybrid-maxsim: lexical",
+      "median": 3.9643750060349703,
+      "p90": 4.173083056230098,
+      "min": 3.23741597821936,
+      "n": 9
+    },
+    {
+      "stage": "hybrid-maxsim/lexical: top-k",
+      "median": 3.8527079741470516,
+      "p90": 4.008708987385035,
+      "min": 3.0967919738031924,
+      "n": 9
+    }
+  ]
+}
