@@ -5,6 +5,7 @@
 ``stop_reason`` stays empty on a normal finish.
 """
 
+import asyncio
 import functools
 import logging
 from collections.abc import Callable, Sequence
@@ -17,6 +18,7 @@ from langchain_core.messages import BaseMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import MessagesState
 
+from multimodal_doc_qa import aio
 from multimodal_doc_qa.agent import nodes
 from multimodal_doc_qa.config import Settings
 from multimodal_doc_qa.limits import Budget
@@ -25,6 +27,11 @@ from multimodal_doc_qa.schemas import Answer, Document
 from multimodal_doc_qa.synth.answer import prompt_messages
 
 logger = logging.getLogger(__name__)
+
+# One rerank call per query, capped so a burst of queries cannot open dozens of TLS
+# connections at the provider at once. The uplink saturates at two 12.5 MB requests in
+# flight; four is the measured wall-clock minimum.
+RERANK_CONCURRENCY = 4
 
 
 class AskState(MessagesState):
@@ -77,6 +84,50 @@ class GraphDeps:
     classifier: Any = None
 
 
+def rerank_pairs(
+    pairs: list[tuple[str, list]],
+    rerank: Callable[..., Any],
+    budget: "Budget",
+) -> list[tuple[str, list]]:
+    """Rerank each ``(query, docs)`` pair, ``RERANK_CONCURRENCY`` calls in flight at most.
+
+    Returns the pairs in the order they were given. A pair with fewer than two pages has
+    nothing to reorder, and a spent budget leaves the remaining pairs as retrieved:
+    retrieval still happened, only the reordering is skipped.
+
+    Runs on the shared loop (``aio.run``), so the rerank model's pooled connections stay
+    valid across hops and across threads.
+    """
+    chosen: list[int] = []
+    for index, (_, docs) in enumerate(pairs):
+        if len(docs) < 2:
+            continue
+        if budget.exhausted():
+            break
+        # Charged before dispatch: gather completes out of order, so a mid-flight charge
+        # would make the call count depend on which query finished first.
+        budget.spend_call()
+        chosen.append(index)
+    if not chosen:
+        return pairs
+
+    async def run_pairs(indices: list[int]) -> list[list]:
+        semaphore = asyncio.Semaphore(RERANK_CONCURRENCY)
+
+        async def one(index: int) -> list:
+            async with semaphore:
+                query, docs = pairs[index]
+                return await rerank(query, docs)
+
+        return list(await asyncio.gather(*(one(index) for index in indices)))
+
+    ranked = aio.run(run_pairs(chosen))
+    out = list(pairs)
+    for index, docs in zip(chosen, ranked, strict=True):
+        out[index] = (pairs[index][0], docs)
+    return out
+
+
 def build_graph(deps: GraphDeps, settings: Settings):
     """Compile the ask loop.
 
@@ -106,17 +157,18 @@ def build_graph(deps: GraphDeps, settings: Settings):
         if state["rounds"] >= settings.max_rounds:
             return {}
         pool = list(dict.fromkeys(state["page_ids"]))
-        for query in state["queries"]:
-            docs = list(deps.retriever.invoke(query))
-            if deps.rerank is not None and len(docs) > 1 and not budget.exhausted():
-                budget.spend_call()
-                docs = deps.rerank(query, docs)
+        # Retrieval is serial: the retriever is CPU-bound and the encoder holds a lock.
+        pairs = [(query, list(deps.retriever.invoke(query))) for query in state["queries"]]
+        if deps.rerank is not None:
+            pairs = rerank_pairs(pairs, deps.rerank, budget)
+        for _, docs in pairs:
             # An injected retriever may omit page_id; that is a non-answer, not a crash.
             hits = documents_to_hits([d for d in docs if d.metadata.get("page_id") is not None])
             for hit in hits:
                 if hit.page_id not in pool:
                     pool.append(hit.page_id)
         return {"page_ids": pool, "rounds": state["rounds"] + 1}
+
     @metered
     def assess_node(state: AskState) -> dict:
         followups = nodes.assess(
@@ -221,9 +273,7 @@ def build_graph(deps: GraphDeps, settings: Settings):
         graph.add_node("chat", chat_node)
         graph.add_edge("chat", END)
         graph.add_edge(START, "intent")
-        graph.add_conditional_edges(
-            "intent", after_intent, {"chat": "chat", "augment": "augment"}
-        )
+        graph.add_conditional_edges("intent", after_intent, {"chat": "chat", "augment": "augment"})
     else:
         graph.add_edge(START, "augment")
     graph.add_conditional_edges("augment", after_augment, {"retrieve": "retrieve", END: END})

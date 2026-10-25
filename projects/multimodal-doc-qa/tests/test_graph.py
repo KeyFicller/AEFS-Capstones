@@ -15,7 +15,7 @@ from augment import Queries
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, HumanMessage
 from multimodal_doc_qa.config import Settings
-from multimodal_doc_qa.graph import GraphDeps, build_graph, initial_state
+from multimodal_doc_qa.graph import RERANK_CONCURRENCY, GraphDeps, build_graph, initial_state
 from multimodal_doc_qa.limits import Budget
 from multimodal_doc_qa.schemas import Answer, Citation
 from PIL import Image
@@ -140,7 +140,7 @@ def test_rerank_reorders_the_pages_the_retriever_returned(tmp_path: Path) -> Non
     """Rerank runs after retrieval and replaces the pool order. It is off unless attached."""
     _pages(tmp_path, "doc000/p000", "doc000/p001")
 
-    def rerank(query: str, docs: list[Document]) -> list[Document]:
+    async def rerank(query: str, docs: list[Document]) -> list[Document]:
         assert query
         return list(reversed(docs))
 
@@ -149,6 +149,34 @@ def test_rerank_reorders_the_pages_the_retriever_returned(tmp_path: Path) -> Non
     out = _run(tmp_path, deps)
 
     assert out["page_ids"] == ["doc000/p001", "doc000/p000"]
+
+
+def test_rerank_runs_queries_concurrently_under_a_cap(tmp_path: Path) -> None:
+    """Every query is reranked at once, but never more than ``RERANK_CONCURRENCY`` at a time."""
+    import asyncio
+
+    _pages(tmp_path, "doc000/p000", "doc000/p001")
+    peak = 0
+    in_flight = 0
+
+    async def rerank(query: str, docs: list[Document]) -> list[Document]:
+        nonlocal peak, in_flight
+        in_flight += 1
+        peak = max(peak, in_flight)
+        # Yield twice so a naive serial implementation cannot fake concurrency.
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        in_flight -= 1
+        return docs
+
+    # ``multiquery`` turns the stub's one reply into a second query, so several pairs are in play.
+    deps = _deps(tmp_path, _Retriever("doc000/p000", "doc000/p001"), _StubModel())
+    deps.rerank = rerank
+    out = _run(tmp_path, deps, augment="multiquery")
+
+    assert peak > 1
+    assert peak <= RERANK_CONCURRENCY
+    assert out["page_ids"] == ["doc000/p000", "doc000/p001"]
 
 
 def test_a_normal_finish_leaves_stop_reason_unset(tmp_path: Path) -> None:

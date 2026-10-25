@@ -1,0 +1,131 @@
+{
+  "device": "mps",
+  "dtype": "float16",
+  "top_k": 5,
+  "reps": 2,
+  "artifacts_dir": "projects/multimodal-doc-qa/artifacts-mmdocir",
+  "corpus": "corpus=37docs/2600pages/19399chunks",
+  "n_queries": 3,
+  "one_time_seconds": [
+    {
+      "stage": "load MultiVectorEncoder",
+      "seconds": 5.881119624944404
+    },
+    {
+      "stage": "load multivector index",
+      "seconds": 0.877297582977917
+    },
+    {
+      "stage": "load ocr index",
+      "seconds": 0.21008087502559647
+    },
+    {
+      "stage": "build hybrid-maxsim",
+      "seconds": 0.8974795420072041
+    },
+    {
+      "stage": "build rerank model",
+      "seconds": 0.3473823340027593
+    }
+  ],
+  "per_query_ms": [
+    {
+      "stage": "encode_query/processor",
+      "median": 0.7885409868322313,
+      "p90": 1.1182090383954346,
+      "min": 0.6052500102669001,
+      "n": 6
+    },
+    {
+      "stage": "encode_query/forward",
+      "median": 43.964604003122076,
+      "p90": 44.635500002186745,
+      "min": 38.01408299477771,
+      "n": 6
+    },
+    {
+      "stage": "encode_query/transfer",
+      "median": 0.2621669846121222,
+      "p90": 0.2790839644148946,
+      "min": 0.2357090124860406,
+      "n": 6
+    },
+    {
+      "stage": "encode_query/empty_cache",
+      "median": 1.648208504775539,
+      "p90": 1.7717090086080134,
+      "min": 1.4001670060679317,
+      "n": 6
+    },
+    {
+      "stage": "encode_query [total]",
+      "median": 46.616375038865954,
+      "p90": 49.81925000902265,
+      "min": 44.68858300242573,
+      "n": 6
+    },
+    {
+      "stage": "hybrid-maxsim: invoke",
+      "median": 220.14908349956386,
+      "p90": 231.5890829777345,
+      "min": 204.061999975238,
+      "n": 6
+    },
+    {
+      "stage": "hybrid-maxsim: dense",
+      "median": 177.80862550716847,
+      "p90": 195.08683297317475,
+      "min": 171.747290994972,
+      "n": 6
+    },
+    {
+      "stage": "hybrid-maxsim/dense: index.search",
+      "median": 110.06493752938695,
+      "p90": 122.81975004589185,
+      "min": 109.35562499798834,
+      "n": 6
+    },
+    {
+      "stage": "hybrid-maxsim: lexical",
+      "median": 40.55350000271574,
+      "p90": 45.4472079873085,
+      "min": 35.66908300854266,
+      "n": 6
+    },
+    {
+      "stage": "hybrid-maxsim/lexical: score loop",
+      "median": 28.177250002045184,
+      "p90": 33.26470800675452,
+      "min": 23.865624971222132,
+      "n": 6
+    },
+    {
+      "stage": "rerank: one call, alone",
+      "median": 1367.9203750216402,
+      "p90": 2177.212167007383,
+      "min": 1158.9092499925755,
+      "n": 3
+    },
+    {
+      "stage": "rerank: baseline, one query at a time",
+      "median": 5268.977457948495,
+      "p90": 5456.983459007461,
+      "min": 5054.196209006477,
+      "n": 3
+    },
+    {
+      "stage": "rerank: batch<=8",
+      "median": 4109.684749972075,
+      "p90": 4193.472999962978,
+      "min": 4008.109875023365,
+      "n": 3
+    },
+    {
+      "stage": "rerank: one call inside a batch",
+      "median": 3772.863625024911,
+      "p90": 4080.8327089762315,
+      "min": 2355.00558296917,
+      "n": 9
+    }
+  ]
+}

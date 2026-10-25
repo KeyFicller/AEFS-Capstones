@@ -623,8 +623,8 @@ def load_deps(
 
         ranker = chat.with_structured_output(PageRank)
 
-        def rerank(query, docs, _ranker=ranker, _render=render_dir, _docs=documents):
-            return rerank_pages(_ranker, query, docs, _render, _docs)
+        async def rerank(query, docs, _ranker=ranker, _render=render_dir, _docs=documents):
+            return await rerank_pages(_ranker, query, docs, _render, _docs)
 
     return GraphDeps(
         retriever=retriever,

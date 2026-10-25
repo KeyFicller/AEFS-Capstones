@@ -9,16 +9,12 @@
 cd /Users/keyficller/Documents/AEFS-Capstones
 export DEEPSEEK_API_KEY=$(rg '^DEEPSEEK_API_KEY=' local.env | cut -d= -f2-)
 
-# 小语料（artifacts/，86 页）
-./start.sh run python projects/multimodal-doc-qa/latency_optimize/bench_retrieval.py \
-    --reps 8 --limit 5 --rerank --json projects/multimodal-doc-qa/latency_optimize/baseline.json
-
-# 大语料（artifacts-mmdocir/，2600 页）：换 MDQ_ARTIFACTS_DIR，问题文件跟着目录走
 MDQ_ARTIFACTS_DIR=projects/multimodal-doc-qa/artifacts-mmdocir \
 ./start.sh run python projects/multimodal-doc-qa/latency_optimize/bench_retrieval.py \
     --reps 3 --limit 3 --rerank --json projects/multimodal-doc-qa/latency_optimize/baseline-mmdocir.json
 ```
 
+- `MDQ_ARTIFACTS_DIR` 一换，索引和问题文件（`questions.json`）都跟着目录走。
 - `start.sh` 不加载 `local.env`，跑 `--rerank` 要自己 export key；不加 `--rerank` 不需要 key。
 - 默认只测 `maxsim,lexical,hybrid-maxsim`；`--rerank` 每 query 只调一次网络，所以不受 `--reps` 影响。
 - `bench_retrieval.py` 在 GPU 阶段后同步 MPS，否则 forward 是异步发射，成本会记到下一个阶段上。
@@ -34,73 +30,38 @@ MDQ_ARTIFACTS_DIR=projects/multimodal-doc-qa/artifacts-mmdocir \
 - 多轮：`assess` 生成 followup → 再检索，最多 `max_rounds=5` 轮，每轮每个 query 一次 hop
 - 覆盖校验（`verify`）和作答（`synth`）
 
-`--rerank` 那行对应 `retrieve_node` 里紧跟 `invoke` 的那次调用，所以在真实一轮 hop 里它和检索是串行的、成本要相加，且**每轮每个 query 都付一次**。一次完整问答的真实延迟 ≈ hop 数 ×（检索 + rerank）+ 若干次 LLM 调用，用这里的单 hop 数字乘上去估，别当成端到端结论。
+`--rerank` 那几行对应 `retrieve_node` 里紧跟 `invoke` 的那次调用，所以在真实一轮 hop 里它和检索是串行的、成本要相加，且**每轮每个 query 都付一次**。`baseline, one query at a time` / `batch<=4` 是同一件事的两种调度；产品只走 batch，baseline 只为对比保留。一次完整问答的真实延迟 ≈ hop 数 ×（检索 + rerank）+ 若干次 LLM 调用，用这里的单 hop 数字乘上去估，别当成端到端结论。
 
 ## corpus 规模
 
-延迟只在这个规模下成立。数字来自各目录的 `manifest.json`，patch 数从索引里实际数的。
+延迟只在这个规模下成立。数字来自 `artifacts-mmdocir/manifest.json`，patch 数从索引里实际数的。
 
-| 项 | `artifacts/` | `artifacts-mmdocir/` |
-| --- | --- | --- |
-| 文档 | 4 篇 PDF（15 / 24 / 20 / 27 页） | 37 篇 PDF |
-| 页 | 86 | 2,600 |
-| MaxSim patch | 80,515（中位 875 / 页） | 2,768,942（中位 1,139 / 页） |
-| BM25 chunk | 470（≤ 400 字符） | 19,399 |
-| 渲染 | 180 dpi，长边 2048 | 同左 |
-| multivector 索引 | 41.2 MB（479 KB / 页） | 1.42 GB（545 KB / 页） |
-| BM25 语料索引 | 0.9 MB | 37.4 MB |
-| 评测问题 | 19 条 | 312 条 |
+| 项 | 值 |
+| --- | --- |
+| 文档 | 37 篇 PDF |
+| 页 | 2,600 |
+| MaxSim patch | 2,768,942（中位 1,139 / 页，128 维） |
+| BM25 chunk | 19,399（每 chunk ≤ 400 字符） |
+| 渲染 | 180 dpi，长边 2048 |
+| multivector 索引 | 1.42 GB（545 KB / 页，落盘 float32） |
+| BM25 语料索引 | 37.4 MB |
+| 评测问题 | 312 条（bench 默认只取 3 条不同的） |
 
-规模决定瓶颈在哪，这两组数差 30 倍就是为了看这件事：
+## baseline — `artifacts-mmdocir/`（2,600 页）
 
-- **forward 是唯一不随语料涨的成本**：46ms，两组语料一样。
-- **MaxSim 全量 CPU 扫描随页数线性涨**：86 页 5ms → 2600 页 106ms（30 倍语料、21 倍耗时，有固定开销摊薄）。按这个斜率 10k 页约 400ms、100k 页才到 4s。
-- **BM25 是纯 Python 循环，同样线性**：470 chunk 0.9ms → 19,399 chunk 28ms，约 1.5µs/chunk。它比 MaxSim 更早出问题，因为 19k chunk 已经比 2.7M patch 更贵了。
-- **rerank 与语料无关，只与送进去的页数有关**：`top_k=5` 张页图 + 一次 VLM 调用。86 页 1675ms、2600 页 2165ms —— 差值是网络抖动，不是语料。
-
-## baseline A — `artifacts/`（86 页）
-
-`device=mps`、`fp16`、`top_k=5`、5 条 query、86 页 / 80,515 patches。
+`device=mps`、`fp16`、`top_k=5`、3 条 query、2,600 页 / 2.77M patches。
 
 一次性（每进程付一次）：
 
 | 阶段 | 秒 |
 | --- | --- |
-| load MultiVectorEncoder (colSmol-500M) | 5.93 |
-| load multivector index | 0.02 |
-| load ocr index (BM25 语料) | 0.01 |
-| build rerank model | 0.23 |
-
-每 query（毫秒）：
-
-| 阶段 | median | p90 | min |
-| --- | --- | --- | --- |
-| encode_query/processor | 1.00 | 1.22 | 0.60 |
-| encode_query/forward | 45.65 | 47.76 | 35.44 |
-| encode_query/transfer | 0.25 | 0.49 | 0.21 |
-| encode_query/empty_cache | 1.41 | 1.77 | 1.21 |
-| encode_query [total] | 48.64 | 50.59 | 42.87 |
-| maxsim: invoke | 53.50 | 55.15 | 46.09 |
-| lexical (bm25): invoke | 0.92 | 1.08 | 0.43 |
-| hybrid-maxsim: invoke | 54.07 | 55.28 | 46.57 |
-| rerank（1 次 LLM 调用） | 1675.24 | 2692.88 | 1195.95 |
-
-这个规模下排名扫描（~5ms）被 forward 完全盖住，所以「检索层不是瓶颈」只在小语料成立。
-
-## baseline B — `artifacts-mmdocir/`（2,600 页）
-
-`device=mps`、`fp16`、`top_k=5`、3 条 query、2,600 页 / 2.77M patches。
-
-一次性：
-
-| 阶段 | 秒 |
-| --- | --- |
-| load MultiVectorEncoder | 6.00 |
+| load MultiVectorEncoder (colSmol-500M) | 6.00 |
 | load multivector index (1.42 GB) | 0.49 – 0.95 |
 | load ocr index (37 MB) | 0.12 – 0.20 |
 | build maxsim | 0.42 – 0.46 |
 | build lexical（19,399 chunk 切词 + 建表） | 0.38 – 0.41 |
 | build hybrid-maxsim | 1.05 – 1.08 |
+| build rerank model | 0.26 |
 
 每 query（毫秒）：
 
@@ -120,19 +81,68 @@ MDQ_ARTIFACTS_DIR=projects/multimodal-doc-qa/artifacts-mmdocir \
 
 ## 结论
 
-按 2,600 页这组口径（大语料才代表上线形态）：
-
-1. **rerank 仍是最大的一块，但优势从 31 倍缩到 10 倍**：2165ms vs 检索 211ms。它随 top_k 涨、不随语料涨。
-2. **检索内部已经换主角了**：forward 44ms + MaxSim 扫描 106ms + BM25 ~28ms + RRF/截断 ~8ms。**扫描反超了模型推理**，两者合计占 71%。小语料时这个结论是反的 —— 优化目标要跟着语料规模走。
+1. **rerank 仍是最大的一块**：2165ms vs 检索 211ms。它随 top_k 涨、不随语料涨。
+2. **检索内部已经换主角了**：forward 44ms + MaxSim 扫描 106ms + BM25 ~28ms + RRF/截断 ~8ms。**扫描反超了模型推理**，两者合计占 71%。
 3. **BM25 是最便宜的加速点**：纯 Python 循环打 19,399 个 chunk 花 28ms，一点没优化过（`Counter` 查表 + math.log，无倒排表、无候选裁剪）。加个倒排索引就能砍掉一个数量级；MaxSim 那 106ms 则要动检索结构（聚类/量化/IvFPQ）才有得降。
 4. **一次性成本仍主要是模型**：6.0s 加载视觉编码器；1.42GB 索引只要 0.5–0.95s（页缓存命中），`build lexical` 的 0.4s 也基本是切词 19k chunk。
 5. **两处「假账」要记住**：之前以为的 `.cpu()` 传 22ms 是 forward 异步发射记错了账（同步后 0.25ms）；`encode_query` 末尾的 `torch.mps.empty_cache()` 则是真白付 1.4–1.6ms。
 
 ## 迭代记录
 
-每条一行：假设 → 改动 → before/after → 保留还是回滚。检索 p50 取 `hybrid-maxsim: invoke`，口径见上两节。
+每条一行：假设 → 改动 → before/after → 保留还是回滚。检索 p50 取 `hybrid-maxsim: invoke`，rerank 取单次调用（一次 rerank 请求）的 median。
 
 | # | 日期 | 假设 | 改动 | 检索 p50 | rerank p50 | 结论 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 0 | 10-25 | — | baseline（86 页） | 54.07 | 1675.24 | — |
-| 1 | 10-25 | 换大语料后瓶颈会变 | 加 `MDQ_ARTIFACTS_DIR` 支持 + `index.search` / `score loop` 拆行；量 2600 页 | 210.75 | 2164.62 | 扫描反超推理；BM25 是最便宜的加速点 |
+| 0 | 10-25 | 大语料下瓶颈会变 | 加 `MDQ_ARTIFACTS_DIR` 支持 + `index.search` / `score loop` 拆行；量 2600 页 | 210.75 | 2164.62 | 扫描反超推理；BM25 是最便宜的加速点 |
+| 1 | 10-25 | 多 query 的 rerank 可以并发 | listwise 契约不变；`rerank_pages` 改 async，`aio.run` + `Semaphore(4)` gather；串行作为基线留在 bench，产品只走 batch | 210.75（未变） | 单次调用中位 2164.62（单独）→ 5145（4 路 batch 内） | 16 query 墙钟 22690 ms。上行在 2 路就饱和，4 路墙钟最低；真正的杠杆是 12.52 MB 的 payload |
+
+### 第 1 条的细节
+
+- 默认 `augment=rewrite` 只产 1 条 query → **batch 收益 0**，必须 `MDQ_AUGMENT=multiquery` 或 `decompose` 才有得并发。
+- 代价是线性的：3 条 query = 3 次 rerank 调用 = 成本 ×3、token ×3。
+- bench 同一轮里交替跑串行与 batch、各 `RERANK_ROUNDS=3` 次取中位：跨进程取样会撞上服务端低谷，串行/并发分两次进程跑出来的对比不可信。
+- 实现坑：不能用 `asyncio.run`。同一个 model 连做两次 `asyncio.run(ainvoke)` 第二次必报 `Event loop is closed`（连接池绑在首个 loop 上），多轮 retrieve 一定踩到。改成 `aio.py` 的常驻 loop。
+- 用例 `test_rerank_runs_queries_concurrently_under_a_cap` 断言同时在飞峰值 > 1 且 ≤ `RERANK_CONCURRENCY`，证明并发有界且真实。
+
+### 真正的杠杆是一个 rerank 请求 12.5 MB
+
+`build_page_blocks` 把 5 张页图编成 **PNG data URL**（180 dpi、长边 2048）。实测单请求 payload：
+
+| | 原始字节 | base64 后 |
+| --- | --- | --- |
+| 5 张页图 | 9.39 MB | **12.52 MB** |
+
+改图片尺寸，延迟跟着字节走，说明瓶颈在上传：
+
+| payload | 大小 | 单请求 |
+| --- | --- | --- |
+| 原样 PNG 2048 | 12.52 MB | 3031 ms |
+| JPEG 长边 768 | 0.64 MB | 1022 ms |
+| JPEG 长边 384 | 0.17 MB | 1055 ms |
+
+12.52→0.64 MB 省下 2009 ms，即 11.88 MB / 2.0 s ≈ **5.9 MB/s ≈ 47 Mbps 上行**。再压到 0.17 MB 不再变快（1022 vs 1055），那 ~1 s 是模型的固定计算地板。
+
+并发的上限也由这条水管决定。16 query × 5 页 = 80 次调用，每次 12.52 MB，原样 PNG：
+
+| 并发 | 墙钟 | 单次调用中位 | 有效上行 | 相对 1 路 |
+| --- | --- | --- | --- | --- |
+| 1 | 34976 ms | 1943 ms | 5.73 MB/s | 1.00× |
+| 2 | 23450 ms | 2530 ms | **8.54 MB/s** | 1.49× |
+| 4 | **22690 ms** | 5145 ms | **8.83 MB/s** | 1.54× |
+| 8 | 23527 ms | 10136 ms | 8.51 MB/s | 1.49× |
+| 16 | 24690 ms | 17131 ms | 8.11 MB/s | 1.42× |
+
+- 1→2 是唯一实打实的收益；2 之后上行锁死在 ~8.5 MB/s，墙钟 22.7–24.7s 持平。**并发不能让水管变粗。**
+- 4 比 2 只快 3%，在噪声内。真正被并发上限决定的是单次延迟：2 路 2530 ms → 16 路 17131 ms，纯排队。
+- 16 路墙钟反而变差，且配上 `max_ask_seconds` 更容易撞超时。所以常数取 4（墙钟最小值），不是 8。
+
+换成 768px JPEG 后同样的 3 路并发：
+
+| payload | 3 query 并发 wall |
+| --- | --- |
+| 原样 PNG 2048 | 9043 ms |
+| JPEG 768 | **2340 ms** |
+
+**3.9×**，不需要多花一分钱、多调一次 API。这条还没落地：`build_page_blocks` 仍走 PNG 2048。
+
+质量前提：rerank 只是从 5 页里排序，看缩略图足够；需要读小字的是 answerer（synth），那条路径要保留原分辨率（它还要出 bbox 引证）。

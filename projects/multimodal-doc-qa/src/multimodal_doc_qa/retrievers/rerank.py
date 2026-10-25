@@ -23,14 +23,19 @@ def order_documents(documents: list[Document], page_ids: list[str]) -> list[Docu
     return sorted(documents, key=lambda doc: rank.get(doc.metadata.get("page_id"), tail))
 
 
-def rerank_pages(
+async def rerank_pages(
     model: object,
     query: str,
     documents: list[Document],
     render_dir: Path,
     catalog: dict[str, CatalogDocument] | None,
 ) -> list[Document]:
-    """Ask ``model`` to order ``documents`` for ``query``. Fewer than two pages skips the call."""
+    """Ask ``model`` to order ``documents`` for ``query``. Fewer than two pages skips the call.
+
+    One call ranks the whole list (listwise): the model compares the pages against each
+    other instead of scoring them one at a time. Async so callers can run several queries
+    at once; bounding that concurrency is the caller's job.
+    """
     page_ids = [doc.metadata["page_id"] for doc in documents if doc.metadata.get("page_id")]
     if len(page_ids) < 2:
         return documents
@@ -38,5 +43,5 @@ def rerank_pages(
         {"type": "text", "text": f"Order these pages by relevance.\nquestion: {query}"},
         *build_page_blocks(page_ids, render_dir, catalog),
     ]
-    ranked = model.invoke([HumanMessage(content=content)])
+    ranked = await model.ainvoke([HumanMessage(content=content)])
     return order_documents(documents, list(ranked.page_ids))

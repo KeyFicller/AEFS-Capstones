@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 from langchain_core.documents import Document
@@ -17,11 +18,11 @@ def test_order_documents_uses_the_model_order_and_keeps_omissions() -> None:
 
 def test_rerank_skips_the_model_for_a_single_page() -> None:
     class _Model:
-        def invoke(self, messages: object) -> PageRank:
+        async def ainvoke(self, messages: object) -> PageRank:
             raise AssertionError("one page has nothing to reorder")
 
     docs = [_doc("a/p000")]
-    assert rerank_pages(_Model(), "q", docs, Path(), None) is docs
+    assert asyncio.run(rerank_pages(_Model(), "q", docs, Path(), None)) is docs
 
 
 def test_rerank_follows_the_model(tmp_path: Path) -> None:
@@ -31,14 +32,16 @@ def test_rerank_follows_the_model(tmp_path: Path) -> None:
         Image.new("RGB", (2, 2), "white").save(folder / name)
 
     class _Model:
-        def invoke(self, messages: object) -> PageRank:
+        async def ainvoke(self, messages: object) -> PageRank:
             return PageRank(page_ids=["d/p001", "d/p000"])
 
-    ordered = rerank_pages(
-        _Model(),
-        "where is the total",
-        [_doc("d/p000"), _doc("d/p001")],
-        tmp_path,
-        None,
+    ordered = asyncio.run(
+        rerank_pages(
+            _Model(),
+            "where is the total",
+            [_doc("d/p000"), _doc("d/p001")],
+            tmp_path,
+            None,
+        )
     )
     assert [doc.metadata["page_id"] for doc in ordered] == ["d/p001", "d/p000"]

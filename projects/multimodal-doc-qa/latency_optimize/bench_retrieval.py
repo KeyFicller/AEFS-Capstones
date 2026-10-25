@@ -10,7 +10,10 @@ GPU launch returns early and its cost is billed to the next stage instead.
 
 The default modes are the classic chain: ``maxsim`` + ``lexical`` (BM25) + their RRF
 ``hybrid-maxsim``. ``--rerank`` adds the VLM rerank stage; it is one network call per
-query, so it is timed once rather than ``--reps`` times.
+query, so it is timed once rather than ``--reps`` times. That stage reports three rows:
+one call alone, the retired one-query-at-a-time path as the baseline, and the batch the
+product ships. Serial and batch alternate within each round because a single run drifts
+more than the difference being measured.
 
     ./start.sh run python projects/multimodal-doc-qa/latency_optimize/bench_retrieval.py
     ./start.sh run python projects/multimodal-doc-qa/latency_optimize/bench_retrieval.py \
@@ -21,6 +24,7 @@ query, so it is timed once rather than ``--reps`` times.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import statistics
 import time
@@ -34,6 +38,10 @@ FALLBACK_QUERIES = (
     "According to the chart on page 14 how much time was spent with family and friends?",
     "How does the method handle long documents?",
 )
+
+# Rerank timing drifts 40%+ between runs, so serial and concurrent are measured in the
+# same round, alternating, and the median over rounds is what gets reported.
+RERANK_ROUNDS = 3
 
 
 def time_ms(fn: Callable[[], object], reps: int, warmup: int = 1) -> list[float]:
@@ -319,7 +327,9 @@ def main(argv: list[str] | None = None) -> int:
             per_query.extend(search_rows(f"{mode}/{label}", part, encoder, queries, args.reps))
 
     if args.rerank:
+        from multimodal_doc_qa import aio
         from multimodal_doc_qa.config import artifact_paths, documents_path
+        from multimodal_doc_qa.graph import RERANK_CONCURRENCY
         from multimodal_doc_qa.retrievers.rerank import PageRank, rerank_pages
         from multimodal_doc_qa.schemas import load_documents
         from multimodal_doc_qa.synth.answer import build_chat_model
@@ -335,13 +345,51 @@ def main(argv: list[str] | None = None) -> int:
             catalog_path = documents_path(settings.artifacts_dir)
             catalog = load_documents(catalog_path) if catalog_path.is_file() else None
             render_dir = artifact_paths(settings.artifacts_dir)[0]
+            # Retrieval is done up front and kept out of the rerank timer.
+            pairs = [(query, retrievers[target].invoke(query)) for query in queries]
+
             samples = []
-            for query in queries:
-                documents = retrievers[target].invoke(query)
+            for query, documents in pairs:
                 start = time.perf_counter()
-                rerank_pages(ranker, query, documents, render_dir, catalog)
+                aio.run(rerank_pages(ranker, query, documents, render_dir, catalog))
                 samples.append((time.perf_counter() - start) * 1000.0)
-            per_query.append(summarize(f"rerank: {target} (1 call/query)", samples))
+            per_query.append(summarize("rerank: one call, alone", samples))
+
+            async def batch() -> list[float]:
+                semaphore = asyncio.Semaphore(RERANK_CONCURRENCY)
+
+                async def one(query: str, documents: list) -> float:
+                    async with semaphore:
+                        start = time.perf_counter()
+                        await rerank_pages(ranker, query, documents, render_dir, catalog)
+                        return (time.perf_counter() - start) * 1000.0
+
+                return list(await asyncio.gather(*(one(q, d) for q, d in pairs)))
+
+            # Alternating rounds, not one run each: a single run drifts 40%+, which is more
+            # than the effect being measured. Pairing them per round cancels that drift.
+            # ``serial`` is the retired path kept as the baseline, not a switch in the product.
+            serial_walls: list[float] = []
+            batch_walls: list[float] = []
+            batch_per_call: list[float] = []
+            for _ in range(RERANK_ROUNDS):
+                start = time.perf_counter()
+                for query, documents in pairs:
+                    aio.run(rerank_pages(ranker, query, documents, render_dir, catalog))
+                serial_walls.append((time.perf_counter() - start) * 1000.0)
+
+                start = time.perf_counter()
+                batch_per_call.extend(aio.run(batch()))
+                batch_walls.append((time.perf_counter() - start) * 1000.0)
+
+            per_query.append(summarize("rerank: baseline, one query at a time", serial_walls))
+            per_query.append(
+                summarize(
+                    f"rerank: batch<={RERANK_CONCURRENCY}",
+                    batch_walls,
+                )
+            )
+            per_query.append(summarize("rerank: one call inside a batch", batch_per_call))
 
     print("ONE-TIME (seconds, paid once per process)")
     print(f"{'stage':34s}{'sec':>8s}")
