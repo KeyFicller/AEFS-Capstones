@@ -71,3 +71,4 @@ fastapi>=0.115
 uvicorn>=0.32
 # tiny-llm-pipeline: train-pretrain writes monitor.png
 matplotlib>=3.9
+-e ./projects/prompt-augment-lens

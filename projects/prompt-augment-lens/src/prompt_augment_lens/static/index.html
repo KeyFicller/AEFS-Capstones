@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>prompt-augment-lens</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="brand">prompt-augment-lens</p>
+      <p class="tag">UI question vs model-bound input</p>
+    </div>
+    <div class="meta" id="meta"></div>
+  </header>
+
+  <section class="diff-bar" id="diff-bar"></section>
+
+  <main class="grid">
+    <section class="pane">
+      <h2>UI question</h2>
+      <pre id="ui-text" class="block"></pre>
+    </section>
+    <section class="pane">
+      <h2>Model input</h2>
+      <div id="layers" class="layers"></div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
