@@ -48,7 +48,11 @@ function render(payload) {
   for (const layer of turn.layers || []) {
     const details = document.createElement("details");
     details.className = `layer ${layer.kind}`;
-    details.open = layer.kind === "user_utterance" || layer.kind === "system";
+    details.open =
+      layer.kind === "user_utterance" ||
+      layer.kind === "system" ||
+      layer.kind === "project_memory" ||
+      layer.kind === "rules_or_instructions";
 
     const summary = document.createElement("summary");
     const left = document.createElement("span");
