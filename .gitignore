@@ -72,4 +72,3 @@ projects/*/checkpoints/*
 
 !projects/tiny-llm-pipeline/artifacts/prefs/
 # prompt-augment-lens local captures
-projects/prompt-augment-lens/captures/
