@@ -71,3 +71,6 @@ projects/*/checkpoints/*
 !projects/tiny-llm-pipeline/checkpoints/sync_ckpt.py
 
 !projects/tiny-llm-pipeline/artifacts/prefs/
+
+.codex/
+.agents/
